@@ -2,8 +2,8 @@
 rem Simpan perubahan ke GitHub dengan satu klik (Windows).
 rem Contoh: simpan.bat
 rem          simpan.bat "Perbaiki filter judul"
-rem Skrip ini: git add -A -> commit -> tarik perubahan terbaru -> push.
-rem Aman dipakai berkali-kali: kalau tidak ada perubahan, hanya push saja.
+rem Skrip ini: bersihkan sisa rebase -> git add -A -> commit -> tarik -> push.
+rem Aman dipakai berkali-kali: kalau tidak ada perubahan, hanya mengirim saja.
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
 
@@ -15,46 +15,69 @@ if errorlevel 1 (
     exit /b 1
 )
 
+rem --- 0. Sisa rebase yang gagal sebelumnya bisa menghentikan git pull ---
+if exist "%~dp0.git\rebase-merge" (
+    echo [1/5] Membersihkan sisa rebase dari percobaan sebelumnya...
+    git rebase --abort >nul 2>&1
+    if exist "%~dp0.git\rebase-merge" rmdir /s /q "%~dp0.git\rebase-merge"
+)
+if exist "%~dp0.git\rebase-apply" (
+    echo [1/5] Membersihkan sisa rebase dari percobaan sebelumnya...
+    git rebase --abort >nul 2>&1
+    if exist "%~dp0.git\rebase-apply" rmdir /s /q "%~dp0.git\rebase-apply"
+)
+
 for /f "delims=" %%b in ('git rev-parse --abbrev-ref HEAD 2^>nul') do set "CABANG=%%b"
 if "%CABANG%"=="" set "CABANG=main"
-echo [1/4] Cabang: %CABANG%
+echo [2/5] Cabang: %CABANG%
 
-rem --- 1. Kumpulkan perubahan (file .env, *.db, dan debug/ otomatis diabaikan) ---
+rem --- 1. Kumpulkan perubahan (file .env, *.db, *.log, dan debug/ diabaikan) ---
 git add -A
+
+rem Berkas catatan pemantau tidak perlu ikut ke GitHub.
+git ls-files --error-unmatch pantau.log >nul 2>&1
+if not errorlevel 1 (
+    git rm --cached -q pantau.log
+    echo       pantau.log dikeluarkan dari daftar berkas Git.
+)
+
 git diff --cached --quiet
 if errorlevel 1 (
     if "%PESAN%"=="" (
         for /f "tokens=1-3 delims=/-. " %%d in ("%DATE%") do set "TGL=%%f-%%e-%%d"
         set "PESAN=Update otomatis !TGL! %TIME:~0,5%"
     )
-    echo [2/4] Commit: !PESAN!
+    echo [3/5] Commit: !PESAN!
     git commit -m "!PESAN!"
     if errorlevel 1 (
         echo [GAGAL] Commit ditolak. Periksa pesan di atas.
         exit /b 1
     )
 ) else (
-    echo [2/4] Tidak ada perubahan baru yang perlu di-commit.
+    echo [3/5] Tidak ada perubahan baru yang perlu di-commit.
 )
 
 rem --- 2. Tarik perubahan terbaru supaya tidak bentrok ---
 git ls-remote --exit-code --heads origin %CABANG% >nul 2>&1
 if errorlevel 1 (
-    echo [3/4] Cabang belum ada di GitHub, langsung dikirim.
+    echo [4/5] Cabang belum ada di GitHub, langsung dikirim.
 ) else (
-    echo [3/4] Menarik perubahan terbaru dari GitHub...
-    git pull --rebase --autostash origin %CABANG%
+    echo [4/5] Menarik perubahan terbaru dari GitHub...
+    rem Gabung, bukan rebase: riwayat berisi commit gabungan dari tarik.bat,
+    rem dan rebase pada commit gabungan sering gagal.
+    git pull --no-rebase --autostash origin %CABANG%
     if errorlevel 1 (
         echo.
-        echo [GAGAL] Gagal menarik perubahan ^(rebase bentrok^).
-        echo   1. Ketik:  git rebase --abort
-        echo   2. Simpan salinan folder ini, lalu jalankan lagi simpan.bat
+        echo [GAGAL] Penggabungan bentrok.
+        echo   1. Ketik:  git status   lalu periksa berkas yang bertanda konflik.
+        echo   2. Perbaiki, lalu:  git add -A ^&^& git commit
+        echo   3. Jalankan lagi:  simpan.bat
         exit /b 1
     )
 )
 
 rem --- 3. Kirim ke GitHub ---
-echo [4/4] Mengirim ke GitHub...
+echo [5/5] Mengirim ke GitHub...
 git push origin %CABANG%
 if errorlevel 1 (
     echo.

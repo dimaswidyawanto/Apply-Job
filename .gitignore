@@ -26,3 +26,7 @@ Thumbs.db
 
 # Berkas debug otomatis (HTML/screenshot halaman JobStreet)
 debug/
+
+# Catatan aktivitas pemantau (pantau.bat/pantau.sh)
+pantau.log
+*.log

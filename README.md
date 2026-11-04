@@ -225,10 +225,16 @@ simpan.bat "Pesan commit sendiri" # dengan pesan sendiri
 ./simpan.sh                       # macOS/Linux
 ```
 
-Skrip itu menjalankan `git add -A` → `commit` → `pull --rebase` → `push`. File
-`.env`, `jobstreet_auto.db`, dan `debug/` otomatis tidak ikut terkirim karena
-sudah ada di `.gitignore`. Kalau tidak ada perubahan, skrip hanya menarik lalu
-mengirim ulang tanpa membuat commit kosong.
+Skrip itu menjalankan: bersihkan sisa rebase → `git add -A` → `commit` →
+`pull --no-rebase` → `push`. File `.env`, `jobstreet_auto.db`, `debug/`, dan
+`pantau.log` otomatis tidak ikut terkirim. Kalau tidak ada perubahan, skrip
+hanya menarik lalu mengirim ulang tanpa membuat commit kosong.
+
+Penggabungan memakai *merge*, bukan *rebase*, karena riwayat memuat commit
+gabungan dari `tarik.bat` — rebase pada commit gabungan sering gagal dan
+meninggalkan folder `.git/rebase-merge` yang membuat semua `pull` berikutnya
+ditolak. `simpan.bat`/`simpan.sh` sekarang membersihkan sisa itu otomatis di
+awal, jadi kasus tersebut tidak lagi menghentikan pengiriman.
 
 Supaya tidak diminta password setiap kali: pada Windows, Git for Windows
 memakai *Git Credential Manager* — login sekali lewat jendela browser, setelah
@@ -710,6 +716,21 @@ Bila masih gagal, buka folder `debug/`. Sekarang ada dua berkas per lowongan:
 `*.txt` (URL, isi modal, banner galat server, dan label tombol yang terlihat) dan
 `*.html`/`*.png` untuk pemeriksaan lebih dalam. Kirimkan `*.txt`-nya — biasanya
 sudah cukup untuk tahu penyebabnya.
+
+**Muncul "It seems that there is already a rebase-merge directory".**
+Ada sisa rebase yang gagal di `.git/`. `simpan.bat`/`simpan.sh` versi baru
+membersihkannya sendiri; kalau masih muncul, jalankan sekali:
+
+```bash
+git rebase --abort
+```
+
+lalu `simpan.bat` lagi.
+
+**`pantau.log` ikut ter-commit.**
+Catatan aktivitas pemantau tidak perlu masuk repo; sejak `.gitignore` memuat
+`pantau.log` dan `*.log`, skrip simpan juga mengeluarkannya dari daftar berkas
+Git secara otomatis (berkas di disk tetap ada).
 
 **Program masih menunggu Enter saat lowongan dibuka.**
 Berarti mode manual aktif. Pastikan `AUTO_APPLY=true` di `.env` (atau jalankan
