@@ -727,5 +727,3 @@ tanpa konfirmasi dicatat sebagai `skipped` dan tidak dihitung di batas harian.
 
 Gunakan alat ini dengan wajar dan sesuai ketentuan layanan JobStreet. Program
 hanya membantu proses penelusuran; keputusan melamar tetap milik Anda.
-#   A p p l y - J o b  
- 
