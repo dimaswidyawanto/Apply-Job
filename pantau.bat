@@ -32,5 +32,6 @@ if defined ADA (
     echo.
 )
 
-timeout /t %JEDA% /nobreak >nul
+rem Jeda: ping dipakai karena 'timeout' gagal saat dijalankan tanpa jendela.
+ping -n %JEDA% 127.0.0.1 >nul 2>&1
 goto :pantau

@@ -262,13 +262,26 @@ Setiap kali ada file yang berubah, `pantau.bat` memanggil `simpan.bat`
 dengan `Ctrl+C`. File `.env`, `jobstreet_auto.db`, dan `debug/` tetap tidak
 pernah ikut terkirim karena ada di `.gitignore`.
 
-Supaya berjalan sendiri setiap menyalakan komputer:
+**Otomatis penuh — cukup dipasang sekali:**
 
-1. Tekan `Win+R`, ketik `shell:startup`, tekan Enter.
-2. Klik kanan di folder yang terbuka → **New** → **Shortcut**.
-3. Isi lokasi target dengan:
-   `"C:\Users\ASUS\dimastes\pantau.bat" 120`
-4. Beri nama, mis. *Pantau GitHub dimastes*.
+```bash
+pasang-otomatis.bat      # Windows: pasang agar berjalan tiap login
+matikan-otomatis.bat     # Windows: lepas lagi
+```
+
+Setelah dipasang, setiap Anda login pemantau berjalan **diam-diam tanpa
+jendela**:
+
+- perubahan file dikirim ke GitHub otomatis tiap 60 detik (cukup simpan file,
+  tidak perlu mengetik perintah git apa pun),
+- commit yang belum terkirim — mis. push gagal karena internet putus — ikut
+  dikirim ulang pada putaran berikutnya,
+- catatan aktivitasnya ada di `pantau.log`.
+
+Ingin aktif sekarang tanpa menunggu login: `wscript pantau-diam.vbs`.
+
+Cara manual (bila tidak ingin skrip): tekan `Win+R`, ketik `shell:startup`,
+lalu buat pintasan ke `pantau.bat`.
 
 **Identitas commit.** Supaya commit tercatat atas nama Anda:
 
@@ -595,6 +608,8 @@ python buka_pencarian.py --locations "Bandung,Jakarta,Bekasi" --max-tabs 12
 | `jalankan.bat` / `jalankan.sh` | Skrip bantu: siapkan `.venv`, pasang dependensi, jalankan CLI |
 | `simpan.bat` / `simpan.sh` | Kirim perubahan ke GitHub sekali jalan |
 | `pantau.bat` / `pantau.sh` | Pemantau: kirim otomatis setiap ada perubahan |
+| `pasang-otomatis.bat` / `matikan-otomatis.bat` | Pasang/lepas pemantau saat login |
+| `pantau-diam.vbs` | Menjalankan pemantau tanpa jendela (log: `pantau.log`) |
 | `tarik.bat` / `tarik.sh` | Tarik pembaruan dari repo pengembangan |
 | `tests/` | Unit test untuk filter dan database |
 
