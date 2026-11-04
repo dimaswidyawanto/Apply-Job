@@ -26,6 +26,11 @@ echo.
 set "ADA="
 for /f "delims=" %%a in ('git status --porcelain 2^>nul') do set "ADA=1"
 
+rem Commit yang belum terkirim (mis. push gagal karena internet putus).
+set "BELUM=0"
+for /f "delims=" %%c in ('git rev-list --count "@{u}..HEAD" 2^>nul') do set "BELUM=%%c"
+if not "%BELUM%"=="0" set "ADA=1"
+
 if defined ADA (
     echo [%DATE% %TIME%] Perubahan terdeteksi, mengirim ke GitHub...
     call "%~dp0simpan.bat"

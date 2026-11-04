@@ -20,7 +20,14 @@ echo "Selang pemeriksaan: $JEDA detik. Tekan Ctrl+C untuk berhenti."
 echo
 
 while true; do
-    if [ -n "$(git status --porcelain)" ]; then
+    ADA=0
+    [ -n "$(git status --porcelain)" ] && ADA=1
+
+    # Commit yang belum terkirim (mis. push gagal karena internet putus).
+    BELUM="$(git rev-list --count '@{u}..HEAD' 2>/dev/null || echo 0)"
+    [ "${BELUM:-0}" != "0" ] && ADA=1
+
+    if [ "$ADA" = "1" ]; then
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] Perubahan terdeteksi, mengirim..."
         ./simpan.sh || echo "[peringatan] pengiriman gagal, dicoba lagi nanti"
         echo
