@@ -1,0 +1,22 @@
+Memantau perubahan di C:\Users\ASUS\dimastes
+Cabang: main
+Selang pemeriksaan: 60 detik. Tekan Ctrl+C untuk berhenti.
+
+[Wed 11/04/2026 20:36:54.51] Perubahan terdeteksi, mengirim ke GitHub...
+[1/4] Cabang: main
+[2/4] Commit: Update otomatis 04-11-Wed 20:36
+[main 76ac883] Update otomatis 04-11-Wed 20:36
+ 1 file changed, 0 insertions(+), 0 deletions(-)
+ create mode 100644 pantau.log
+[3/4] Menarik perubahan terbaru dari GitHub...
+From https://github.com/dimaswidyawanto/Apply-Job
+ * branch            main       -> FETCH_HEAD
+warning: in the working copy of 'pantau.log', LF will be replaced by CRLF the next time Git touches it
+error: unable to unlink old 'pantau.log': Invalid argument
+fatal: could not reset --hard
+Created autostash: 6fafd82
+
+[GAGAL] Gagal menarik perubahan (rebase bentrok).
+  1. Ketik:  git rebase --abort
+  2. Simpan salinan folder ini, lalu jalankan lagi simpan.bat
+
