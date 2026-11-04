@@ -49,3 +49,27 @@ warning: in the working copy of 'pantau.log', LF will be replaced by CRLF the ne
 [2/4] Commit: Update otomatis 04-11-Wed 20:38
 [main 7c590ed] Update otomatis 04-11-Wed 20:38
  1 file changed, 7 insertions(+)
+[3/4] Menarik perubahan terbaru dari GitHub...
+From https://github.com/dimaswidyawanto/Apply-Job
+ * branch            main       -> FETCH_HEAD
+fatal: It seems that there is already a rebase-merge directory, and
+I wonder if you are in the middle of another rebase.  If that is the
+case, please try
+	git rebase (--continue | --abort | --skip)
+If that is not the case, please
+	rm -fr ".git/rebase-merge"
+and run me again.  I am stopping in case you still have something
+valuable there.
+
+
+[GAGAL] Gagal menarik perubahan (rebase bentrok).
+  1. Ketik:  git rebase --abort
+  2. Simpan salinan folder ini, lalu jalankan lagi simpan.bat
+
+[Wed 11/04/2026 20:39:59.99] Perubahan terdeteksi, mengirim ke GitHub...
+[1/4] Cabang: main
+warning: in the working copy of 'pantau.log', LF will be replaced by CRLF the next time Git touches it
+[2/4] Commit: Update otomatis 04-11-Wed 20:40
+[main 0ea2696] Update otomatis 04-11-Wed 20:40
+ 1 file changed, 22 insertions(+)
+[3/4] Menarik perubahan terbaru dari GitHub...
