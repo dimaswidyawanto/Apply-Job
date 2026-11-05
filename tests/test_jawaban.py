@@ -225,3 +225,58 @@ def test_jawaban_tebakan_bot_tidak_ikut_diingat(monkeypatch):
     # Tidak ada perubahan setelah menunggu: tidak ada yang dicatat.
     assert applier._rekam_jawaban_pengguna(sebelum) == 0
     assert db.baris == {}
+
+
+def test_perubahan_jawaban_pengguna_menggantikan_ingatan_lama(monkeypatch):
+    """Bot pernah diisi "Dasar"; pengguna mengubahnya ke "Ahli" → diingat."""
+    db = _siapkan(monkeypatch)
+    jawaban.ingat("Microsoft Excel", "Dasar")
+
+    opsi = [
+        ElemenPalsu("Tidak Berpengalaman", "excel", "skill_excel"),
+        ElemenPalsu("Dasar", "excel", "skill_excel"),
+        ElemenPalsu("Menengah", "excel", "skill_excel"),
+        ElemenPalsu("Ahli", "excel", "skill_excel"),
+    ]
+    applier = _applier(monkeypatch, opsi)
+
+    # Lamaran pertama: bot mengisi dari ingatan → "Dasar".
+    sebelum = applier._potret_jawaban()
+    applier._jawab_radio()
+    assert [item.label for item in opsi if item.selected] == ["Dasar"]
+
+    # Pengguna tidak setuju dan memilih "Ahli" sendiri di Chrome.
+    for item in opsi:
+        item.selected = False
+    opsi[3].selected = True
+    assert applier._rekam_jawaban_pengguna(sebelum) == 1
+    assert db.baris["microsoft excel"]["jawaban"] == "Ahli"
+
+    # Lamaran berikutnya: langsung "Ahli", tanpa bantuan pengguna.
+    for item in opsi:
+        item.selected = False
+    assert applier._jawab_radio() == []
+    assert [item.label for item in opsi if item.selected] == ["Ahli"]
+
+
+def test_apply_merekam_jawaban_walau_hasil_gagal(monkeypatch):
+    """Perubahan jawaban tetap diingat walau lamaran berakhir manual/error."""
+    _siapkan(monkeypatch)
+    applier = auto_apply.AutoApplier(driver=None)
+
+    class DriverGagal:
+        def get(self, url):
+            raise RuntimeError("halaman tidak bisa dibuka")
+
+    applier.driver = DriverGagal()
+    dipanggil = {"n": 0}
+    monkeypatch.setattr(applier, "_potret_jawaban", lambda: {"kunci": ("Q", "A")})
+    monkeypatch.setattr(
+        applier, "_rekam_jawaban_pengguna",
+        lambda sebelum: dipanggil.__setitem__("n", dipanggil["n"] + 1),
+    )
+
+    hasil = applier.apply({"url": "https://glints.com/id/opportunities/jobs/x"})
+
+    assert hasil.status == "login_required" or not hasil.applied
+    assert dipanggil["n"] == 1

@@ -29,6 +29,97 @@ def versi_kode() -> str:
     return "-"
 
 
+def jalankan_indeed(max_pages: int = 0, keywords: str = "", batas: int = 0):
+    """Riset & lamar lowongan Indeed (aturan sama dengan JobStreet)."""
+    from indeed import jalankan_indeed as _jalankan
+
+    console.print(f"[cyan]Versi kode:[/] {versi_kode()}")
+    console.print("[cyan]Situs:[/] Indeed (id.indeed.com)")
+
+    daftar = [k.strip() for k in keywords.split(",") if k.strip()] or None
+    try:
+        laporan = _jalankan(
+            max_pages=max(0, max_pages), keywords=daftar, batas=max(0, batas)
+        )
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Dihentikan oleh pengguna.[/]")
+        return
+    except Exception as exc:
+        console.print(f"[bold red]Gagal menjalankan Indeed:[/] {exc}")
+        return
+
+    console.print()
+    console.print(
+        "[bold]Ringkasan Indeed:[/] "
+        f"{laporan['dibaca']} terbaca · {laporan['baru']} baru · "
+        f"{laporan['dilamar']} terkirim · {laporan['sudah']} sudah dilamar · "
+        f"{laporan['perlu_manual']} perlu manual · "
+        f"{laporan['dilewati']} dilewati · {laporan['gagal']} gagal"
+    )
+
+
+def cari_indeed(keywords: str = "", max_pages: int = 1, batas: int = 10,
+                semuanya: bool = False):
+    """Tampilkan lowongan Indeed yang layak dilamar beserta URL-nya."""
+    from rich.table import Table as _Table
+
+    from indeed import daftar_kandidat
+
+    kata_kunci = [k.strip() for k in keywords.split(",") if k.strip()] or None
+    console.print(f"[cyan]Versi kode:[/] {versi_kode()}")
+
+    try:
+        lowongan = daftar_kandidat(
+            keywords=kata_kunci,
+            max_pages=max(1, max_pages),
+            batas=max(1, batas),
+            semuanya=semuanya,
+        )
+    except Exception as exc:
+        console.print(f"[bold red]Gagal mencari lowongan Indeed:[/] {exc}")
+        return
+
+    if not lowongan:
+        console.print("[yellow]Tidak ada lowongan yang layak.[/]")
+        return
+
+    table = _Table(title=f"{len(lowongan)} lowongan Indeed layak dilamar")
+    table.add_column("#", justify="right")
+    table.add_column("Posisi", style="cyan")
+    table.add_column("Perusahaan", overflow="fold")
+    table.add_column("Gaji")
+    table.add_column("Lokasi", overflow="fold")
+    table.add_column("Logo", justify="center")
+    table.add_column("URL", overflow="fold", style="dim")
+
+    for nomor, job in enumerate(lowongan, start=1):
+        table.add_row(
+            str(nomor),
+            str(job.get("title") or "")[:40],
+            str(job.get("company") or "-")[:28],
+            str(job.get("salary") or "-"),
+            str(job.get("location") or "-")[:26],
+            "[green]ya[/]" if job.get("has_logo") else "[red]tidak[/]",
+            str(job.get("url") or ""),
+        )
+
+    console.print(table)
+
+    berlogo = sum(1 for job in lowongan if job.get("has_logo"))
+    console.print(
+        f"[bold]{berlogo}[/] dari [bold]{len(lowongan)}[/] kartu terdeteksi "
+        "berlogo perusahaan."
+    )
+
+
+def diagnosa_indeed_cli(keyword: str = "", location: str = ""):
+    """Cetak diagnosa pembacaan kartu Indeed."""
+    from indeed import diagnosa_indeed
+
+    console.print(f"[cyan]Versi kode:[/] {versi_kode()}")
+    diagnosa_indeed(keyword, location)
+
+
 def kelola_jawaban(hapus: str = "", reset: bool = False,
                    isi: str = ""):
     """Lihat, tambah, atau hapus ingatan jawaban formulir."""
@@ -910,6 +1001,56 @@ if __name__ == "__main__":
         "simulasi", help="Simulasi alur lamaran Glints (tanpa Chrome)"
     )
 
+    indeed_parser = subparsers.add_parser(
+        "indeed", help="Cari & lamar lowongan di Indeed"
+    )
+    indeed_sub = indeed_parser.add_subparsers(dest="indeed_command")
+
+    indeed_run = indeed_sub.add_parser(
+        "run", help="Riset lalu lamar lowongan Indeed"
+    )
+    indeed_run.add_argument(
+        "--max-pages",
+        type=int,
+        default=0,
+        help=(
+            "Halaman per kombinasi kata kunci & lokasi, maksimal "
+            f"{MAKS_HALAMAN_RISET} (ikut RESEARCH_MAX_PAGES)"
+        ),
+    )
+    indeed_run.add_argument(
+        "--keywords", default="", help="Kata kunci dipisah koma (0=bawaan .env)"
+    )
+    indeed_run.add_argument(
+        "--limit", type=int, default=0, help="Batas lamaran sesi ini (0=tanpa batas)"
+    )
+
+    indeed_cari = indeed_sub.add_parser(
+        "cari", help="Tampilkan lowongan Indeed yang layak + URL-nya"
+    )
+    indeed_cari.add_argument(
+        "--keywords", default="", help="Kata kunci dipisah koma (bawaan .env)"
+    )
+    indeed_cari.add_argument(
+        "--max-pages", type=int, default=1, help="Halaman per kombinasi (1)"
+    )
+    indeed_cari.add_argument(
+        "--limit", type=int, default=10, help="Jumlah lowongan ditampilkan (10)"
+    )
+    indeed_cari.add_argument(
+        "--semua", action="store_true", help="Tanpa saringan judul/lokasi/gaji"
+    )
+
+    indeed_diag = indeed_sub.add_parser(
+        "diagnosa", help="Periksa mengapa kartu Indeed tidak terbaca"
+    )
+    indeed_diag.add_argument(
+        "--keyword", default="", help="Kata kunci yang diuji (default: .env)"
+    )
+    indeed_diag.add_argument(
+        "--location", default="", help="Lokasi yang diuji (opsional)"
+    )
+
     jawab_parser = subparsers.add_parser(
         "jawaban", help="Lihat/ubah ingatan jawaban formulir lamaran"
     )
@@ -1010,6 +1151,17 @@ if __name__ == "__main__":
             simulasi_glints()
         else:
             glints_parser.print_help()
+    elif args.command == "indeed":
+        if args.indeed_command == "run":
+            jalankan_indeed(args.max_pages, args.keywords, args.limit)
+        elif args.indeed_command == "cari":
+            cari_indeed(
+                args.keywords, args.max_pages, args.limit, args.semua
+            )
+        elif args.indeed_command == "diagnosa":
+            diagnosa_indeed_cli(args.keyword, args.location)
+        else:
+            indeed_parser.print_help()
     elif args.command == "jawaban":
         kelola_jawaban(args.hapus, args.reset, args.isi)
     elif args.command == "blacklist":

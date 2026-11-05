@@ -1398,6 +1398,25 @@ class AutoApplier:
     # Alur utama
     # ------------------------------------------------------------------
     def apply(self, job: dict) -> ApplyResult:
+        """Lamar satu lowongan; semua isian pengguna direkam di akhir.
+
+        Pembungkus ini memastikan perubahan jawaban tetap diingat walau alur
+        berakhir dengan `manual_required`, galat, atau waktu tunggu habis —
+        bukan hanya saat lamaran berhasil.
+        """
+        try:
+            potret_awal = self._potret_jawaban()
+        except Exception:
+            potret_awal = {}
+
+        try:
+            return self._apply_alur(job)
+        finally:
+            # Jangan pernah menggagalkan lamaran hanya karena pencatatan.
+            with contextlib.suppress(Exception):
+                self._rekam_jawaban_pengguna(potret_awal)
+
+    def _apply_alur(self, job: dict) -> ApplyResult:
         url = (job.get("url") or "").strip()
 
         if not url:
@@ -1477,8 +1496,6 @@ class AutoApplier:
                 )
 
             review_page = self._is_review_page()
-            # Potret isian awal: selisihnya nanti adalah jawaban pengguna.
-            potret_awal = self._potret_jawaban()
             deadline = time.time() + (
                 self.submit_timeout if review_page else self.step_timeout
             )
@@ -1501,7 +1518,6 @@ class AutoApplier:
                     )
 
                 if self._is_success():
-                    self._rekam_jawaban_pengguna(potret_awal)
                     return ApplyResult(True, "applied", "Terkirim otomatis")
 
                 # Halaman "Review and submit" sering muncul setelah beberapa
@@ -1714,7 +1730,6 @@ class AutoApplier:
                     continue
 
             if self._is_success():
-                self._rekam_jawaban_pengguna(potret_awal)
                 return ApplyResult(True, "applied", "Terkirim otomatis")
 
             self._dump_debug(job)

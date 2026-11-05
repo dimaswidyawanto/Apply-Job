@@ -4,6 +4,7 @@ Program ini tidak mengirim lamaran otomatis: halaman lowongan hanya dibuka
 agar pengguna meninjau dan mengirim lamaran sendiri di browser.
 """
 
+import contextlib
 import hashlib
 import re
 import time
@@ -762,6 +763,14 @@ class JobStreetBot:
                 )
                 return ApplyResult(False, "already_applied", "Sudah pernah dilamar")
 
+            # Mode manual: isian yang pengguna lakukan di halaman ini juga
+            # diingat, supaya lamaran berikutnya terisi otomatis.
+            pencatat = AutoApplier(self.driver, self.wait)
+            try:
+                potret_awal = pencatat._potret_jawaban()
+            except Exception:
+                potret_awal = {}
+
             console.print(f"\n[bold magenta]{title}[/]")
             console.print(f"Perusahaan: {job.get('company', 'Tidak diketahui')}")
             console.print(f"URL: {job_url}")
@@ -774,6 +783,9 @@ class JobStreetBot:
                 "Setelah selesai meninjau, tekan Enter "
                 "(ketik y bila lamaran sudah terkirim): "
             ).strip().lower()
+
+            with contextlib.suppress(Exception):
+                pencatat._rekam_jawaban_pengguna(potret_awal)
 
             if answer in ("y", "ya", "yes"):
                 self._record(
