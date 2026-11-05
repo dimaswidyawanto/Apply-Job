@@ -181,3 +181,20 @@ def test_buka_chrome_memakai_profil_cadangan(monkeypatch, tmp_path):
     assert hasil == "driver-profil-baru"
     assert "-baru" in dipanggil[-1]
     assert (tmp_path / "chrome-profile-baru").exists()
+
+
+def test_tutup_chrome_tidak_menutup_chrome_saat_menempel(monkeypatch, capsys):
+    dipanggil = {"quit": 0}
+
+    class Driver:
+        def quit(self):
+            dipanggil["quit"] += 1
+
+    monkeypatch.setattr(config, "chrome_debug_port", 9222)
+    browser_module.tutup_chrome(Driver())
+    assert dipanggil["quit"] == 0
+    assert "tempel" in capsys.readouterr().out.lower()
+
+    monkeypatch.setattr(config, "chrome_debug_port", 0)
+    browser_module.tutup_chrome(Driver())
+    assert dipanggil["quit"] == 1

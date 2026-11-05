@@ -113,6 +113,20 @@ def tempel_chrome(port: int):
     return webdriver.Chrome(options=options)
 
 
+def tutup_chrome(driver) -> None:
+    """Tutup browser bot; saat menempel, jangan tutup Chrome milik pengguna."""
+    if driver is None:
+        return
+    if int(getattr(config, "chrome_debug_port", 0) or 0) > 0:
+        console.print(
+            "[dim]Mode tempel: Chrome milik Anda dibiarkan terbuka. "
+            "Tutup sendiri setelah selesai.[/]"
+        )
+        return
+    with contextlib.suppress(Exception):
+        driver.quit()
+
+
 def _opsi(headless: bool, profile: Optional[Path]) -> Options:
     """Opsi Chrome yang dipakai semua percobaan."""
     options = Options()

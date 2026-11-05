@@ -20,7 +20,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
 from auto_apply import ApplyResult, AutoApplier
-from browser import buka_chrome
+from browser import buka_chrome, tutup_chrome
 from config import config
 from database import db
 
@@ -805,12 +805,8 @@ class JobStreetBot:
 
     def close(self):
         if self.driver:
-            try:
-                self.driver.quit()
-            except Exception:
-                pass
-            finally:
-                self.driver = None
-                self.wait = None
+            tutup_chrome(self.driver)
+            self.driver = None
+            self.wait = None
 
             console.print("[blue]Chrome ditutup.[/]")

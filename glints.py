@@ -26,7 +26,7 @@ from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.common.by import By
 
 from auto_apply import ApplyResult, AutoApplier
-from browser import buka_chrome
+from browser import buka_chrome, tutup_chrome
 from config import MAKS_HALAMAN_RISET, batas_halaman_riset, config
 from database import db
 from job_filter import JobFilter, dedupe_jobs, rentang_gaji
@@ -1115,8 +1115,7 @@ class GlintsBot:
         return hasil
 
     def tutup(self):
-        with contextlib.suppress(Exception):
-            self.driver.quit()
+        tutup_chrome(self.driver)
 
 
 # ----------------------------------------------------------------------
