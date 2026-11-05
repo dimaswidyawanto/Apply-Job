@@ -69,6 +69,22 @@ PowerShell/Command Prompt di folder itu, lalu:
 ```
 
 Di Command Prompt lama, `.\` boleh dihilangkan (`jalankan.bat run`).
+**Bila `tarik.bat` berhenti dengan “Your local changes to the following
+files would be overwritten by merge”**, artinya ada berkas yang kamu ubah
+sendiri (mis. `.github/copilot-instructions.md`). Versi baru `tarik.bat` sudah
+menyimpan perubahan itu otomatis lewat `git stash` lalu mengembalikannya.
+Untuk versi lama, lakukan sekali secara manual:
+
+```powershell
+git stash push -m "sebelum tarik"
+.\tarik.bat
+git stash pop
+```
+
+Di **PowerShell** awalan `.\` wajib — kalau tidak, muncul
+`tarik.bat : The term 'tarik.bat' is not recognized...` karena PowerShell
+tidak menjalankan perintah dari folder aktif. Nama folder boleh memuat
+spasi (mis. `C:\Dimas\Lamar otomatis Jobstreet dan Glints`).
 
 **macOS / Linux**:
 
@@ -122,13 +138,20 @@ cp .env.example .env
 | `GLINTS_MIN_SALARY` | `4500000` | Khusus Glints: lamar hanya bila gaji bisa mencapai angka ini. Lowongan yang tidak mencantumkan gaji **tetap** dilamar; `0` = tanpa batas |
 | `EXCLUDE_KEYWORDS` | `principal,director,head,senior,lead` | Kata yang membuat judul otomatis ditolak |
 | `STRICT_LOCATION` | `false` | `true` = tolak lowongan yang lokasinya di luar `LOCATION` |
-| `MAX_APPLY_PER_DAY` | `0` | Batas lamaran per hari; `0` = tanpa batas |
+| `REQUIRE_COMPANY_LOGO` | `false` | JobStreet **dan** Glints: `true` = hanya lamar lowongan yang kartunya menampilkan **logo perusahaan**; tanpa logo dilewati |
+| `MAX_APPLY_PER_DAY` | `0` | Batas **lamaran yang dikirim** per hari (mis. `50`); `0` = tanpa batas. Riset & penilaian tetap tanpa batas |
 | `DELAY_BETWEEN_APPLY` | `3` | Jeda (detik) antar lowongan |
-| `MAX_PAGES` | `3` | Jumlah halaman hasil pencarian per kata kunci |
+| `MAX_PAGES` | `3` | Jumlah halaman per kata kunci untuk mode lama (`COLLECT_BEFORE_APPLY=false`) dan `cek-logo` |
+| `RESEARCH_KEYWORDS` | kosong | Kata kunci **khusus riset** (boleh lebih lebar dari `KEYWORDS`); kosong = ikut `KEYWORDS`. Semua kata kunci dicari di semua lokasi |
+| `RESEARCH_MAX_PAGES` | `5` | Halaman riset untuk **setiap kombinasi kata kunci × lokasi**: halaman 1–5 lalu berhenti. Maksimal **5** (batas tetap); `0` atau nilai di atas 5 tetap dipakai sebagai 5, boleh diturunkan |
+| `RESEARCH_MAX_JOBS` | `0` | Batas jumlah lowongan hasil riset (pengaman). `0` = tanpa batas — **riset tidak dibatasi 50** |
+| `SEARCH_WAIT` | `12` | Detik menunggu kartu lowongan muncul sebelum halaman dianggap kosong. Makin kecil makin cepat, tetapi halaman yang sangat lambat bisa terlewat (3–20) |
+| `SKILL_KEYWORDS` | inventory, sap, erp, excel, ppic, ... | Keterampilan yang dicari di deskripsi untuk skor kesesuaian keterampilan |
 | `HEADLESS_MODE` | `false` | `true` = Chrome tanpa jendela (tidak cocok untuk tinjau manual) |
 | `TELEGRAM_BOT_TOKEN` | kosong | Opsional, untuk notifikasi |
 | `TELEGRAM_CHAT_ID` | kosong | Opsional, untuk notifikasi |
-| `COLLECT_BEFORE_APPLY` | `false` | `false` = lamar sambil mencari (halaman terbaru dulu); `true` = kumpulkan dulu |
+| `COLLECT_BEFORE_APPLY` | `true` | `true` = **riset dulu**: kumpulkan → dedup → nilai → peringkat → TOP 50 → lamar. `false` = lamar sambil mencari (hanya bila `MAX_APPLY_PER_DAY=0`) |
+| `RANK_BY` | `relevance` | Urutan pemilihan saat `COLLECT_BEFORE_APPLY=true`: `relevance` = kecocokan tertinggi dulu, `newest` = posting terbaru dulu |
 | `SORT_MODE` | `ListedDate` | Urutan hasil; `ListedDate` = terbaru dulu, `KeywordRelevance` = relevansi |
 | `PREFER_NEWEST` | `true` | Dahulukan lowongan paling baru saat antrean melamar |
 | `MAX_AGE_DAYS` | `0` | Hanya lowongan N hari terakhir (0 = semua). Nilai valid JobStreet: 1, 3, 7, 14, 31 |
@@ -142,6 +165,7 @@ cp .env.example .env
 | `AUTO_APPLY_MAX_PER_SESSION` | `0` | Batas lamaran per sesi; `0` = tanpa batas |
 | `AUTO_APPLY_STEP_TIMEOUT` | `3` | Batas detik mengenali tiap langkah; lewat itu lowongan dilewati |
 | `AUTO_ANSWER_QUESTIONS` | `true` | Jawab otomatis pertanyaan dropdown (pengalaman, gaji, pendidikan) |
+| `AUTO_ANSWER_WAIT` | `20` | Bila ada kuesioner yang tak bisa dijawab otomatis: beri waktu sekian detik agar Anda mengisi di Chrome, lalu bot melanjutkan sendiri. `0` = langsung dilewati |
 | `EXPECTED_SALARY` | `5000000` | Gaji yang diharapkan (kosong = pertanyaan gaji dilewati) |
 | `YEARS_EXPERIENCE` | `3` | Total pengalaman kerja (tahun) untuk pertanyaan pengalaman |
 | `EXPERIENCE_ROLES` | inventory, ppic, gudang, purchasing, ... | Bidang pengalaman Anda; di luar daftar ini dijawab 0 tahun |
@@ -163,8 +187,12 @@ python cli.py run
 # 2b. Meninjau sendiri (tanpa mengirim otomatis)
 python cli.py run --manual
 
-# Hanya lowongan 3 hari terakhir, 5 halaman per kata kunci
+# Hanya lowongan 3 hari terakhir, 5 halaman per kata kunci (mode lama)
 python cli.py run --auto --max-age-days 3 --max-pages 5
+
+# Riset 5 halaman per kombinasi kata kunci x lokasi (bawaan) atau 2 halaman
+python cli.py run --auto --riset-pages 5
+python cli.py run --auto --riset-pages 2
 
 # Lokasi lain tanpa mengubah .env
 python cli.py run --auto --locations "Bandung,Jakarta,Tangerang,Jababeka"
@@ -186,7 +214,7 @@ python cli.py perbarui-env
 python cli.py set-env MAX_APPLY_PER_DAY=0 AUTO_APPLY_MAX_PER_SESSION=0
 
 # 5d. Kirim perubahan ke GitHub dengan satu perintah
-simpan.bat              # Windows
+.\simpan.bat              # Windows
 ./simpan.sh             # macOS/Linux
 
 # 6. Uji alur lamaran dengan halaman palsu (tanpa Chrome, tanpa internet)
@@ -194,6 +222,9 @@ python cli.py simulasi
 
 # 7. Uji alur lamaran pada satu lowongan (tanpa pencarian/filter)
 python cli.py uji-lamar --url "https://id.jobstreet.com/job/95549275"
+
+# 8. Periksa deteksi logo perusahaan pada kartu JobStreet
+python cli.py cek-logo --limit 10
 ```
 
 `uji-lamar` membuka satu lowongan, menjalankan alur lamaran otomatis, lalu
@@ -220,8 +251,8 @@ pun. Pindah dulu: `git checkout arena/4ab2b9fa-dimastes` lalu `git pull`.
 Untuk mengirim perubahan **dari PC ke GitHub** cukup satu klik:
 
 ```bash
-simpan.bat                        # Windows
-simpan.bat "Pesan commit sendiri" # dengan pesan sendiri
+.\simpan.bat                        # Windows
+.\simpan.bat "Pesan commit sendiri" # dengan pesan sendiri
 ./simpan.sh                       # macOS/Linux
 ```
 
@@ -253,19 +284,39 @@ Saat `run` berjalan:
    - tekan **Enter** saja jika lamaran **tidak** dikirim (dicatat `skipped`);
    - ketik **y** jika lamaran benar-benar sudah dikirim (dicatat `applied`).
 
+### Sinkron otomatis dua arah (kirim + tarik)
+
+`pantau` bukan hanya mengirim: saat folder sedang **tidak** ada perubahan
+lokal, ia juga menarik pembaruan supaya isi folder selalu sama dengan GitHub.
+
+- **Ada perubahan lokal** → `git add` → commit → tarik → push (lewat `simpan`).
+- **Tidak ada perubahan lokal** → periksa `origin` dan repo pengembangan;
+  kalau ada commit baru, tarik otomatis (`simpan` untuk origin, `tarik` untuk
+  repo pengembangan).
+- **Penggabungan bentrok** → dibatalkan otomatis (`git merge --abort`), folder
+  tetap utuh, dan dicatat di `pantau.log`. Selesaikan manual dengan `tarik.bat`.
+- Berkas yang sedang Anda sunting **tidak** tertimpa, karena penarikan hanya
+  dilakukan saat tidak ada perubahan lokal.
+
+Jadi setelah dipasang, folder di VS Code mengikuti GitHub tanpa Anda mengetik
+perintah apa pun. VS Code memuat ulang berkas otomatis; bila berkas sedang
+Anda ubah dan versinya berbeda, VS Code menampilkan konflik — pilih *Keep
+Yours*/*Incoming* sesuai keinginan, lalu simpan.
+
 ### Update otomatis ke GitHub setiap ada perubahan
 
 Kalau tidak ingin mengetik perintah, jalankan pemantau di latar belakang:
 
 ```bash
-pantau.bat          # Windows, periksa tiap 60 detik
-pantau.bat 30       # periksa tiap 30 detik
+.\pantau.bat          # Windows, periksa tiap 60 detik
+.\pantau.bat 30       # periksa tiap 30 detik
 ./pantau.sh         # macOS/Linux
 ```
 
 Setiap kali ada file yang berubah, `pantau.bat` memanggil `simpan.bat`
-(`git add -A` → commit → tarik → push) lalu kembali memantau. Berhentikan
-dengan `Ctrl+C`. File `.env`, `jobstreet_auto.db`, dan `debug/` tetap tidak
+(`git add -A` → commit → tarik → push) lalu kembali memantau. Saat tidak ada
+perubahan lokal, ia justru memeriksa apakah ada commit baru di GitHub atau di
+repo pengembangan dan menariknya otomatis. Berhentikan dengan `Ctrl+C`. File `.env`, `jobstreet_auto.db`, dan `debug/` tetap tidak
 pernah ikut terkirim karena ada di `.gitignore`.
 
 **Otomatis penuh — cukup dipasang sekali:**
@@ -280,11 +331,28 @@ jendela**:
 
 - perubahan file dikirim ke GitHub otomatis tiap 60 detik (cukup simpan file,
   tidak perlu mengetik perintah git apa pun),
+- pembaruan dari GitHub maupun dari repo pengembangan ikut ditarik otomatis
+  saat tidak ada perubahan lokal, jadi isi folder selalu terbaru,
 - commit yang belum terkirim — mis. push gagal karena internet putus — ikut
   dikirim ulang pada putaran berikutnya,
 - catatan aktivitasnya ada di `pantau.log`.
 
 Ingin aktif sekarang tanpa menunggu login: `wscript pantau-diam.vbs`.
+
+**Memeriksa pemantau benar-benar berjalan** (berguna bila folder terasa tidak
+ikut berubah):
+
+```powershell
+Get-Content .\.pantau-terakhir     # diperbarui tiap putaran (±1 menit)
+Get-Content .\pantau.log -Tail 15  # aktivitas terakhir
+Get-CimInstance Win32_Process -Filter "Name='wscript.exe' OR Name='cmd.exe'" |
+    Where-Object { $_.CommandLine -like '*pantau*' } |
+    Select-Object ProcessId, CommandLine
+```
+
+Kalau `.pantau-terakhir` tidak berubah dan daftar proses kosong, pemantau
+berhenti — jalankan lagi `wscript pantau-diam.vbs`. Berkas jejak ini tidak
+pernah ikut ke GitHub (ada di `.gitignore`).
 
 Cara manual (bila tidak ingin skrip): tekan `Win+R`, ketik `shell:startup`,
 lalu buat pintasan ke `pantau.bat`.
@@ -323,7 +391,7 @@ Sejak itu `main` adalah salinan penuh di repo Anda, dan `simpan.bat` /
 dengan satu perintah; remote `arena` ditambahkan otomatis:
 
 ```bash
-tarik.bat        # Windows
+.\tarik.bat        # Windows
 ./tarik.sh       # macOS/Linux
 ```
 
@@ -455,6 +523,55 @@ Ingin menambah sendiri? Tambahkan istilah dipisah koma, mis.
 Ingin mematikan filter ini (lamar semua yang muncul)?
 `REQUIRE_KEYWORD_MATCH=false`.
 
+### Hanya perusahaan yang menampilkan logo (JobStreet)
+
+Sebagian lowongan di JobStreet menampilkan **logo perusahaan** di kanan atas
+kartu; sebagian lagi tidak. Bila ingin hanya melamar lowongan yang ada
+logonya:
+
+```bash
+python cli.py cek-logo            # periksa dulu apa yang terdeteksi
+python cli.py cek-logo --limit 20 --keywords "ppic,inventory"
+python cli.py set-env REQUIRE_COMPANY_LOGO=true
+```
+
+Aturan ini berlaku untuk **JobStreet maupun Glints** — keduanya memakai
+penilai logo yang sama (`logo_perusahaan`), hanya sumber gambarnya berbeda
+(kartu JobStreet vs kartu Glints). Untuk Glints, deteksinya bisa dilihat
+langsung lewat kolom **Logo** pada `python cli.py glints cari`; tambahkan
+`--semua` bila ingin melihat kartu yang tersaring oleh aturan ini.
+
+`cek-logo` membuka pencarian JobStreet seperti biasa (perlu login, sama seperti
+`run`),
+lalu menampilkan tabel: judul, perusahaan, **ada logo atau tidak**, dan
+keterangan cara deteksinya. Contoh keluaran:
+
+```
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━┳━━━━━━━━━━━━━━━━━━━━━┓
+┃ Judul                        ┃ Perusahaan      ┃ Logo ┃ Keterangan          ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━╇━━━━━━━━━━━━━━━━━━━━━┩
+│ Admin PPIC GARMENT           │ Trackerindo ... │  ya  │ penanda 'company... │
+│ Staf Gudang                  │ PT Tanpa Logo   │ tidak│ 2 gambar tanpa logo │
+└──────────────────────────────┴━━━━━━━━━━━━━━━━━┵──────┴─────────────────────┘
+2 dari 12 kartu terdeteksi berlogo perusahaan.
+```
+
+Deteksinya berlapis, karena JobStreet bisa mengubah penanda HTML-nya:
+penanda `data-automation`/`data-testid`/`alt` yang memuat kata *logo*, URL
+gambar yang memuat *logo*/*brand*, atau teks alternatif gambar yang memuat
+**nama perusahaan**. Gambar yang jelas ikon/placeholder (mis. `icon`,
+`placeholder`, `sprite`) tidak dihitung logo.
+
+Dengan `REQUIRE_COMPANY_LOGO=true`, lowongan tanpa logo **dilewati** dan
+alasannya tampil di terminal (`Dilewati: … — Tanpa logo perusahaan`). Situs
+lain — Glints — tidak terpengaruh karena tidak mengisi informasi logo.
+
+Bila `cek-logo` menampilkan **tidak** untuk semua kartu padahal di situs
+logonya terlihat, berarti aturan perlu disesuaikan: kirimkan tabel itu (kolom
+*Keterangan* yang penting). Saat `run` berjalan, program juga memberi
+peringatan sekali bila satu halaman penuh kartu terbaca tanpa logo, supaya
+filter tidak diam-diam membuang semua lowongan.
+
 ### Pertanyaan pilihan dari perusahaan
 
 Banyak lowongan menambahkan pertanyaan wajib: dropdown, radio ya/tidak, atau
@@ -480,6 +597,45 @@ internal).
 
 Matikan semuanya dengan `AUTO_ANSWER_QUESTIONS=false` bila ingin semua
 pertanyaan dilewati.
+
+### Kuesioner yang belum terisi: bot menunggu Anda
+
+Tidak semua pertanyaan perusahaan bisa dijawab bot (mis. *"Warna favorit?"*,
+atau pertanyaan pilihan yang polanya tidak dikenali). Dulu lowongan seperti itu
+langsung dilewati. Sekarang bot memberi Anda waktu untuk mengisinya sendiri:
+
+```
+[dim]   belum bisa dijawab otomatis: Warna favorit kamu?
+Ada pertanyaan yang belum terisi: Warna favorit kamu?
+   Silakan isi di jendela Chrome sekarang — menunggu sampai 20 detik...
+   menunggu... sisa 15 detik
+   isian sudah lengkap — melanjutkan pengiriman lamaran.
+[dim]   klik tombol kirim "Kirim lamaran" (percobaan 1)
+Status: applied — Terkirim otomatis
+```
+
+Cara kerjanya:
+
+1. Bot mendeteksi ada pertanyaan wajib yang belum terisi (atau formulir menolak
+   dikirim karena isian wajib).
+2. Pesan muncul di terminal dan bot menunggu sampai `AUTO_ANSWER_WAIT` detik
+   (bawaan **20**). Terminal **tidak** meminta Anda menekan apa pun.
+3. Isi kuesionernya di jendela Chrome yang sedang terbuka.
+4. Bot memeriksa ulang setiap detik: begitu tidak ada pertanyaan tersisa dan
+   peringatan validasi hilang, ia melanjutkan sendiri — mengklik **Kirim**.
+5. Bila waktu habis dan isian masih kurang, lowongan dilewati seperti biasa
+   dan masuk daftar "perlu dilamar manual" di akhir sesi.
+
+Atur lamanya:
+
+```bash
+python cli.py set-env AUTO_ANSWER_WAIT=45    # lebih lega, sesi lebih lambat
+python cli.py set-env AUTO_ANSWER_WAIT=0     # kembali ke perilaku lama: langsung lewati
+```
+
+Tips: jalankan tanpa `HEADLESS_MODE` (bawaan) supaya jendela Chrome terlihat
+dan bisa Anda isi. Di mode headless tidak ada yang bisa diklik, jadi biarkan
+`AUTO_ANSWER_WAIT=0`.
 
 ### Isian lamaran otomatis
 
@@ -537,7 +693,155 @@ menghentikannya (Ctrl+C). Untuk memasang batas lagi:
 python cli.py set-env MAX_APPLY_PER_DAY=100 AUTO_APPLY_MAX_PER_SESSION=50
 ```
 
+### Riset sebanyak mungkin → nilai → peringkat → TOP 50 → apply
+
+**50 adalah batas lamaran per hari, bukan batas riset.** Riset dibatasi
+**halaman**, bukan jumlah lowongan: maksimal 5 halaman untuk setiap kombinasi
+kata kunci × lokasi. Alur yang dijalankan setiap `run`:
+
+```
+Riset sebanyak mungkin → gabung semua hasil → hapus duplikat →
+nilai kecocokan → peringkat → ambil TOP 50 → apply maksimal 50/hari
+```
+
+1. **Riset.** Setiap kata kunci (`RESEARCH_KEYWORDS`, atau `KEYWORDS` bila
+   kosong) dicari di **setiap** lokasi (`LOCATIONS`). Untuk setiap kombinasi
+   kata kunci × lokasi dibuka **halaman 1 → 5 berurutan, lalu berhenti** —
+   halaman 6 dan seterusnya tidak pernah dibuka, langsung lanjut ke kata
+   kunci/lokasi berikutnya. Batas 5 halaman berlaku **independen** untuk tiap
+   kombinasi dan tidak bisa dinaikkan (`RESEARCH_MAX_PAGES` hanya boleh
+   menurunkan). `SORT_MODE=ListedDate` membuat yang **paling baru** muncul
+   lebih dulu. Pencarian satu kombinasi berhenti lebih awal bila halamannya
+   kosong / tidak ada lowongan baru, atau bila `RESEARCH_MAX_JOBS` (opsional)
+   tercapai.
+2. **Gabung & hapus duplikat.** Hasil semua kategori dan lokasi digabung;
+   lowongan yang sama (ID/URL sama, atau judul + perusahaan + lokasi sama)
+   hanya dihitung sekali. Yang sudah pernah dilamar juga dilewati.
+3. **Penilaian.** Setiap lowongan dinilai per dimensi:
+   `posisi` (kata kunci di judul), `lokasi`, `kualifikasi` (bidang yang
+   diminta), `pengalaman`, `pendidikan`, `keterampilan` (`SKILL_KEYWORDS`),
+   `tanggal` (makin baru makin tinggi), dan `gaji`. Data yang tidak tercantum
+   di kartu tidak dihukum.
+4. **Peringkat.** `RANK_BY=relevance` (bawaan) = skor tertinggi dulu, bila
+   sama yang paling baru. `RANK_BY=newest` = tanggal terbaru dulu.
+5. **TOP 50.** Sisa kuota hari ini = `MAX_APPLY_PER_DAY` − lamaran yang sudah
+   terkirim hari ini. Hanya **sebanyak sisa kuota** kandidat teratas yang
+   dilamar — dipilih **global** dari seluruh kategori dan lokasi, bukan 50 per
+   kategori/lokasi. Bila kandidat yang memenuhi kriteria kurang dari 50,
+   semuanya dilamar.
+
+```bash
+python cli.py set-env MAX_APPLY_PER_DAY=50 COLLECT_BEFORE_APPLY=true RANK_BY=relevance
+python cli.py run
+```
+
+Contoh keluaran:
+
+```
+RISET LOWONGAN — 14 kata kunci × 7 lokasi, maksimal 5 halaman per kombinasi kata kunci & lokasi (batas tetap 5), urut tanggal terbaru.
+Riset selesai: 412 lowongan terbaca dari 14 kategori × 7 lokasi → 187 unik (225 duplikat dibuang).
+Penilaian selesai: 187 lowongan dinilai (posisi, lokasi, kualifikasi, pengalaman,
+pendidikan, keterampilan, tanggal, gaji) dan diurutkan dari kecocokan tertinggi.
+Kuota harian: 12 sudah dilamar hari ini, sisa 38 dari 50.
+187 kandidat (dari seluruh kategori & lokasi) bersaing untuk 38 slot — diambil 38 yang paling cocok.
+      Kandidat yang akan dilamar (dibandingkan dari 38)
+┏━━━┳━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━┓
+┃ # ┃ Skor ┃ Judul                 ┃ Perusahaan    ┃ Umur        ┃
+┡━━━╇━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━┩
+│ 1 │   42 │ Inventory Controller  │ PT A          │ hari ini    │
+│ 2 │   38 │ Staff PPIC            │ PT B          │ 1 hari lalu │
+└───┴──────┴───────────────────────┴───────────────┴─────────────┘
+            Rincian skor kandidat teratas
+┏━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━┳━━━━━━┳━━━━━━┳━━━━━━┳━━━━━━┳━━━━━━┳━━━━━┳━━━━┳━━━━━┓
+┃ Judul                ┃ Pos. ┃ Lok. ┃ Kual ┃ Peng ┃ Pend ┃ Kete ┃ Tgl ┃ Gj ┃ Tot ┃
+┡━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━╇━━━━━━╇━━━━━━╇━━━━━━╇━━━━━━╇━━━━━━╇━━━━━╇━━━━╇━━━━━┩
+│ Inventory Controller │   14 │    8 │    4 │    6 │    4 │    2 │   5 │  5 │  42 │
+└──────────────────────┴──────┴──────┴──────┴──────┴──────┴──────┴─────┴────┴─────┘
+```
+
+### Berapa lama risetnya, dan cara mempercepat
+
+Waktu riset = **jumlah kombinasi × halaman × biaya per halaman**:
+
+- Jumlah kombinasi = jumlah kata kunci × jumlah lokasi. Bawaannya 14 × 7 = **98 kombinasi**, masing-masing maksimal **5 halaman** → maksimal **490 pemuatan halaman**.
+- Biaya satu halaman: buka URL + tunggu kartu muncul (`SEARCH_WAIT`, bawaan 12 detik bila kosong) + 1 detik + pembacaan kartu. Normalnya **4–12 detik** per halaman, jadi sesi penuh biasanya **35–80 menit**.
+- Kombinasi yang tidak punya lowongan tetap memakan ±12 detik per halaman (halaman 1 saja, lalu berhenti).
+- Fase lamaran menambah: jeda `DELAY_BETWEEN_APPLY` (3 detik) × 50 lamaran, waktu formulir (`AUTO_APPLY_STEP_TIMEOUT` 3 detik per langkah), dan `AUTO_ANSWER_WAIT` (20 detik) setiap kali ada kuesioner yang harus Anda isi sendiri.
+
+Selama riset, kemajuannya dicetak setelah setiap kombinasi sehingga kelihatan sisa waktunya:
+
+```
+Kemajuan riset: 12/98 kombinasi, 87 lowongan terkumpul, 6m 20s berlalu — perkiraan sisa 41m 05s.
+```
+
+Di akhir riset muncul ringkasan biaya per halaman, untuk mengetahui apakah yang lambat itu situsnya atau jumlah halamannya:
+
+```
+Waktu riset: 42m 18s untuk 392 halaman (rata-rata 6,5 detik/halaman, 98 kombinasi kata kunci × lokasi).
+```
+
+Cara mempercepat (pilih sesuai kebutuhan):
+
+| Cara | Efek |
+| --- | --- |
+| `.\jalankan.bat run --riset-pages 3` | 5 → 3 halaman per kombinasi: **−40%** waktu riset |
+| Persempit `RESEARCH_KEYWORDS` (mis. 6 kata kunci inti) | 98 → 42 kombinasi: **−55%**, dan karena ada deduplikasi, lowongan unik yang didapat biasanya tidak banyak berkurang |
+| `.\jalankan.bat set-env SEARCH_WAIT=8` | Memotong waktu tunggu halaman kosong 12 → 8 detik |
+| `.\jalankan.bat set-env HEADLESS_MODE=true` | Chrome tanpa jendela; lebih ringan, cocok untuk sesi panjang |
+| `.\jalankan.bat set-env AUTO_ANSWER_WAIT=10` | Memotong waktu tunggu kuesioner per lowongan (20 → 10 detik) |
+| `.\jalankan.bat set-env DELAY_BETWEEN_APPLY=2` | Menghemat ±50 detik untuk 50 lamaran |
+
+Catatan: `MAX_APPLY_PER_DAY` adalah batas **per hari kalender** yang dihitung
+dari database, jadi menjalankan `run` dua kali dalam sehari tidak menambah
+kuota — sisanya yang dipakai. Bila kuota habis, program berhenti dengan pesan
+`Kuota lamaran hari ini sudah habis` dan tidak mengirim apa pun.
+
+Ingin kembali melamar sambil mencari (lebih cepat, tanpa perbandingan)?
+Itu hanya berlaku bila tidak ada batas harian:
+`python cli.py set-env COLLECT_BEFORE_APPLY=false MAX_APPLY_PER_DAY=0`.
+
+Aturan yang sama berlaku di Glints: `jalankan.bat glints run` juga meriset
+semua kartu (mengklik "Muat lebih banyak" maksimal 5 kali per kata kunci),
+menghapus duplikat,
+menilai dengan skor yang sama, menampilkan tabel perbandingan + rincian skor,
+lalu hanya melamar sebanyak sisa kuota `MAX_APPLY_PER_DAY` — memakai kuota
+yang sama dengan JobStreet karena keduanya menulis ke database yang sama.
+
 ### Glints (glints.com)
+
+#### "Terbaca 0 lowongan" di Glints
+
+Kalau `glints run`/`glints cari` melaporkan tidak ada lowongan padahal di
+Chrome terlihat ada, jalankan diagnosa:
+
+```bash
+python cli.py glints diagnosa                 # kata kunci pertama .env
+python cli.py glints diagnosa --keyword PPIC  # kata kunci tertentu
+```
+
+Perintah itu membuka satu halaman pencarian, mencoba **semua bentuk URL
+pencarian Glints**, lalu mencetak:
+
+```
+Diagnosa halaman Glints:
+  URL          : https://glints.com/id/opportunities/jobs?keyword=PPIC
+  Judul halaman: Lowongan Kerja ...
+  Tautan lowongan ditemukan: 0, kartu terbaca: 0
+  HTML        : ...\debug\diagnosa-20261105-101500-ppic.html
+  Screenshot  : ...\debug\diagnosa-20261105-101500-ppic.png
+```
+
+Kirimkan dua berkas itu (atau tempelkan 30 baris keluarannya) supaya pola
+tautan/pembacaan kartunya bisa disesuaikan. Hal yang biasanya terlihat:
+
+- `meminta login` → login dulu di jendela Chrome, jalankan lagi.
+- `captcha` → selesaikan verifikasi di Chrome, jalankan lagi.
+- `Tautan lowongan ditemukan: 0` tetapi halaman berisi lowongan → struktur
+  halaman berubah; berkas HTML-nya yang diperlukan untuk memperbaiki pola.
+
+Kalau skrip pembaca kartu tidak menemukan apa pun, bot otomatis mencoba
+**pembaca cadangan** yang membaca elemen `<a>` langsung (tanpa JavaScript)
+dan mencatatnya di log.
 
 Versi Glints memakai mesin lamaran yang sama, tetapi dengan peta situsnya
 sendiri: pencarian `/id/opportunities/jobs/explore`, tautan lowongan
@@ -573,6 +877,9 @@ Perbedaan yang perlu diketahui:
 | Umur lowongan | terbaca ("3 hari yang lalu") | tidak ditampilkan Glints |
 | Lowongan khusus HP | — | *"Lamar & chat di aplikasi"* dilewati otomatis |
 | Batas gaji | `MIN_SALARY` (batas bawah) | `GLINTS_MIN_SALARY` (gaji tertinggi di rentang) |
+| Logo perusahaan | `REQUIRE_COMPANY_LOGO` | `REQUIRE_COMPANY_LOGO` (aturan sama) |
+| Kuota harian & pilih yang paling cocok | `MAX_APPLY_PER_DAY` + `RANK_BY` | sama |
+| Menunggu kuesioner diisi | `AUTO_ANSWER_WAIT` | sama |
 
 Karena Glints tidak menampilkan tanggal tayang di kartu, urutan "terbaru"
 mengandalkan urutan situs, bukan `MAX_AGE_DAYS`.
@@ -605,7 +912,7 @@ python buka_pencarian.py --locations "Bandung,Jakarta,Bekasi" --max-tabs 12
 | `scraper.py` | Selenium: buka Chrome, cari lowongan, baca kartu lowongan |
 | `job_filter.py` | Aturan lolos/tidak dan pemeringkatan |
 | `main.py` | Alur sesi: login → cari → saring → tinjau |
-| `cli.py` | Perintah `run`, `stats`, `history`, `config`, `repair`, `blacklist` |
+| `cli.py` | Perintah `run`, `stats`, `history`, `config`, `repair`, `blacklist`, `cek-logo`, dan `glints` |
 | `notifier.py` | Notifikasi Telegram (opsional) |
 | `auto_apply.py` | Alur klik Lamar → Lanjutkan → Kirim + deteksi pengaman |
 | `glints.py` | Situs Glints: pencarian, kartu lowongan, dan pelamaran |
@@ -616,7 +923,7 @@ python buka_pencarian.py --locations "Bandung,Jakarta,Bekasi" --max-tabs 12
 | `pantau.bat` / `pantau.sh` | Pemantau: kirim otomatis setiap ada perubahan |
 | `pasang-otomatis.bat` / `matikan-otomatis.bat` | Pasang/lepas pemantau saat login |
 | `pantau-diam.vbs` | Menjalankan pemantau tanpa jendela (log: `pantau.log`) |
-| `tarik.bat` / `tarik.sh` | Tarik pembaruan dari repo pengembangan |
+| `tarik.bat` / `tarik.sh` | Tarik pembaruan dari repo pengembangan (dipakai juga oleh `pantau` secara otomatis) |
 | `tests/` | Unit test untuk filter dan database |
 
 ## Seberapa otomatis alat ini?
@@ -659,6 +966,63 @@ hasil pencarian terbuka normal di Chrome, lalu periksa selector di
 Pastikan Google Chrome terpasang dan bukan versi portabel. Bila unduhan
 ChromeDriver otomatis gagal, program mencoba `webdriver-manager`; Anda juga
 bisa memasang ChromeDriver manual dan menaruhnya di `PATH`.
+
+**`session not created: Chrome failed to start ... DevToolsActivePort file
+doesn't exist`.**
+Profil Chrome masih dipakai proses Chrome lain atau profilnya rusak. Program
+sudah otomatis mencoba: (1) profil tersimpan, (2) profil tersimpan setelah
+berkas kunci sisa Chrome (`SingletonLock`, dll.) dibersihkan, (3) profil
+sementara, (4) tanpa mode headless. Bila semuanya gagal:
+
+```powershell
+# 1) tutup semua Chrome, lalu cek Task Manager (Ctrl+Shift+Esc) -> chrome.exe -> End task
+# 2) buat profil Chrome baru (sesi login lama tidak terbawa)
+.\jalankan.bat perbaiki-chrome
+# 3) jalankan lagi; login sekali di jendela yang terbuka
+.\jalankan.bat glints diagnosa --keyword "inventory staff"
+```
+
+Bila muncul peringatan “Chrome terbuka TANPA profil tersimpan”, itu tanda
+profil masih terkunci oleh Chrome lain: tutup semua Chrome, lalu jalankan
+lagi agar sesi login tersimpan kembali. Bila tetap gagal, bot otomatis
+memakai profil cadangan (`~/.dimastes/chrome-profile-baru`) yang tetap
+menyimpan sesi login.
+
+**Cek cepat: apakah Glints sudah berfungsi?**
+Satu perintah memeriksa semuanya berurutan — baca kartu → saring kandidat
+(logo & duplikat) → simulasi alur lamaran → catatan database:
+
+```powershell
+.\cek-glints.bat          # aman: hanya membaca, tidak melamar
+.\cek-glints.bat 3        # ikut mengirim maksimal 3 lamaran uji (minta konfirmasi)
+```
+
+Setara dengan `jalankan.bat glints cek --lamar 3`. Setiap tahap ditandai
+`OK` / `GAGAL` beserta alasannya, dan perintah berhenti dengan kode keluar 1
+bila ada tahap gagal sehingga bisa dipakai di skrip.
+
+**Situs menampilkan “Just a moment...” (verifikasi Cloudflare).**
+Glints dilindungi Cloudflare, sehingga Chrome yang dijalankan otomatis bisa
+diminta verifikasi. Dua cara:
+
+1. Selesaikan verifikasinya di jendela Chrome yang bot buka, lalu jalankan
+   lagi (cookie verifikasi tersimpan di profil bila profil tersimpan dipakai).
+2. Paling stabil — pakai Chrome Anda sendiri, lalu bot menempel ke situ:
+
+```powershell
+# buka Chrome khusus bot (port debug 9222) + halaman Glints
+.\chrome-debug.bat
+# selesaikan "Just a moment..." di jendela itu (sekali saja)
+
+# suruh bot menempel, bukan membuka Chrome sendiri
+.\jalankan.bat set-env CHROME_DEBUG_PORT=9222
+.\jalankan.bat glints diagnosa --keyword "inventory staff"
+.\jalankan.bat glints run
+```
+
+Setelah selesai, kembalikan ke mode biasa dengan
+`set-env CHROME_DEBUG_PORT=0`. Jangan tutup jendela Chrome dari
+`chrome-debug.bat` selama bot berjalan.
 
 **Riwayat menampilkan posisi kosong.**
 Itu data lama dari versi sebelumnya yang menyimpan judul kosong. Jalankan

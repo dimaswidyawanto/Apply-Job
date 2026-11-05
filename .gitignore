@@ -30,3 +30,4 @@ debug/
 # Catatan aktivitas pemantau (pantau.bat/pantau.sh)
 pantau.log
 *.log
+.pantau-terakhir

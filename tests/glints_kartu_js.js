@@ -12,8 +12,9 @@ const mulai = py.indexOf('SKRIP_KARTU = r"""') + 'SKRIP_KARTU = r"""'.length;
 const akhir = py.indexOf('"""', mulai);
 const skrip = py.slice(mulai, akhir);
 
-const kartu = (judul, gaji, perusahaan, lokasi, badge, id) => `
+const kartu = (judul, gaji, perusahaan, lokasi, badge, id, gambar = "") => `
 <div class="job-card">
+  ${gambar}
   <div class="header">
     <a class="title" href="/id/opportunities/jobs/${judul.toLowerCase().replace(/[^a-z0-9]+/g, "-")}/${id}?utm_referrer=explore&traceInfo=abc">
       <h2>${judul}</h2>
@@ -30,9 +31,9 @@ const kartu = (judul, gaji, perusahaan, lokasi, badge, id) => `
 
 const html = `<!doctype html><html><body>
 <div class="list">
-  ${kartu("Admin Warehouse", "Rp 2-3jt", "PT Bangun Selaras Bersama", "Bekasi", "", "aaaaaaaa-1111-2222-3333-444444444444")}
+  ${kartu("Admin Warehouse", "Rp 2-3jt", "PT Bangun Selaras Bersama", "Bekasi", "", "aaaaaaaa-1111-2222-3333-444444444444", '<img alt="PT Bangun Selaras Bersama" src="https://cdn/brand/logo-pt-bsb.png" class="company-logo">')}
   ${kartu("Staff Gudang", "Rp 5-6jt", "PT Sinar Abadi Nusantara", "Kota Bekasi", "", "bbbbbbbb-1111-2222-3333-444444444444")}
-  ${kartu("Kepala Gudang", "Gaji Tidak Ditampilkan", "PT Contoh", "Cikarang", "Lamar 1x tap di aplikasi", "cccccccc-1111-2222-3333-444444444444")}
+  ${kartu("Kepala Gudang", "Gaji Tidak Ditampilkan", "PT Contoh", "Cikarang", "Lamar 1x tap di aplikasi", "cccccccc-1111-2222-3333-444444444444", '<img alt="" src="https://cdn/icon-search.svg">')}
   <a href="/id/opportunities/jobs/warehouse">Warehouse (tanpa UUID, harus diabaikan)</a>
   <a href="/id/opportunities/jobs/warehouse/aaaaaaaa-1111-2222-3333-444444444444?utm_referrer=similar">Duplikat</a>
 </div>
@@ -57,6 +58,12 @@ cek(hasil[2].salary === "", `gaji tidak ditampilkan -> kosong (dapat "${hasil[2]
 cek(/1x tap di aplikasi/i.test(hasil[2].text), "badge aplikasi masuk ke teks kartu");
 cek(!hasil.some((x) => x.url.includes("?")), "URL dibersihkan dari query");
 cek(new Set(hasil.map((x) => x.url)).size === 3, "tidak ada URL ganda");
+cek(Array.isArray(hasil[0].logo) && hasil[0].logo.length === 1, "kartu 1 punya data gambar");
+cek(hasil[0].logo[0].alt === "PT Bangun Selaras Bersama", `alt gambar: ${hasil[0].logo[0].alt}`);
+cek(hasil[0].logo[0].src.includes("logo-pt-bsb"), "src gambar terbaca");
+cek(hasil[0].logo[0].penanda.includes("company-logo"), `penanda gambar: ${hasil[0].logo[0].penanda}`);
+cek(hasil[1].logo.length === 0, "kartu tanpa gambar -> logo kosong");
+cek(hasil[2].logo.length === 1 && hasil[2].logo[0].src.includes("icon"), "ikon ikut terbaca sebagai gambar");
 
 console.log(gagal === 0 ? "\nSEMUA CEK JS LULUS" : `\n${gagal} CEK GAGAL`);
 process.exit(gagal === 0 ? 0 : 1);

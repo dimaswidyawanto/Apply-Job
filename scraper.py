@@ -7,23 +7,20 @@ agar pengguna meninjau dan mengirim lamaran sendiri di browser.
 import hashlib
 import re
 import time
-from pathlib import Path
 from typing import Dict, List, Optional
 from urllib.parse import urldefrag, urlencode, urljoin
 
 from rich.console import Console
-from selenium import webdriver
 from selenium.common.exceptions import (
     NoSuchElementException,
     TimeoutException,
 )
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
 from auto_apply import ApplyResult, AutoApplier
+from browser import buka_chrome, tutup_chrome
 from config import config
 from database import db
 
@@ -42,6 +39,26 @@ APPLIED_CARD_SELECTORS = (
     "[data-testid*='applied']",
 )
 
+# Penanda logo perusahaan pada kartu lowongan JobStreet.
+LOGO_SELECTORS = (
+    "[data-automation*='logo']",
+    "[data-testid*='logo']",
+    "img[alt*='logo' i]",
+)
+
+# Kata yang menunjukkan gambar itu ikon/placeholder, bukan logo perusahaan.
+KATA_BUKAN_LOGO = (
+    "icon",
+    "ikon",
+    "sprite",
+    "pixel",
+    "placeholder",
+    "spacer",
+    "flag",
+    "bendera",
+    "avatar-default",
+)
+
 APPLIED_CARD_TEXTS = {
     "applied",
     "anda sudah melamar",
@@ -58,6 +75,52 @@ ALREADY_APPLIED_MARKERS = (
 )
 
 
+def _norm_teks(teks: str) -> str:
+    """Huruf kecil tanpa tanda baca, untuk membandingkan nama perusahaan."""
+    return re.sub(r"[^a-z0-9]+", "", (teks or "").lower())
+
+
+def logo_perusahaan(
+    alt: str = "", src: str = "", penanda: str = "", perusahaan: str = ""
+) -> bool:
+    """Menilai apakah satu gambar pada kartu lowongan adalah logo perusahaan.
+
+    Dipisah dari Selenium supaya bisa diuji tanpa membuka browser. Aturannya
+    berlapis karena JobStreet dapat mengubah penanda HTML-nya:
+
+    1. penanda/atribut memuat "logo" (data-automation, data-testid, alt);
+    2. gambar yang jelas ikon/placeholder ditolak;
+    3. URL gambar memuat "logo"/"brand";
+    4. teks alternatif gambar memuat nama perusahaan.
+    """
+    alt = (alt or "").strip()
+    src = (src or "").strip()
+    penanda = (penanda or "").strip()
+
+    if not alt and not src and not penanda:
+        return False
+
+    gabungan = f"{alt} {src} {penanda}".lower()
+
+    if "logo" in penanda.lower() or "logo" in alt.lower():
+        return True
+
+    if any(kata in gabungan for kata in KATA_BUKAN_LOGO):
+        return False
+
+    if "logo" in src.lower() or "brand" in src.lower():
+        return True
+
+    nama_perusahaan = _norm_teks(perusahaan)
+    nama_alt = _norm_teks(alt)
+
+    return bool(
+        nama_perusahaan
+        and len(nama_alt) >= 3
+        and (nama_perusahaan in nama_alt or nama_alt in nama_perusahaan)
+    )
+
+
 class JobStreetBot:
     def __init__(self):
         self.driver = None
@@ -71,55 +134,10 @@ class JobStreetBot:
         """Membuka Chrome. Mode headless mengikuti HEADLESS_MODE di .env."""
         console.print("[bold blue]Membuka Chrome...[/]")
 
-        options = Options()
-        options.add_argument("--window-size=1400,900")
-        options.add_argument("--disable-blink-features=AutomationControlled")
+        self.driver = buka_chrome(label="JobStreet")
 
-        # Profil tetap -> cookie login tersimpan, tidak perlu login tiap sesi.
-        if config.use_profile:
-            profile_path = Path(config.profile_dir).expanduser()
-
-            try:
-                profile_path.mkdir(parents=True, exist_ok=True)
-                options.add_argument(f"--user-data-dir={profile_path}")
-                options.add_argument("--profile-directory=Default")
-                console.print(f"[dim]Profil Chrome: {profile_path}[/]")
-            except Exception as exc:
-                console.print(
-                    f"[yellow]Profil Chrome tidak bisa dipakai ({exc}); "
-                    "memakai profil sementara.[/]"
-                )
-
-        if config.headless:
-            options.add_argument("--headless=new")
-            options.add_argument("--disable-gpu")
-        else:
-            options.add_argument("--start-maximized")
-
-        try:
-            # Selenium 4.6+ sudah punya Selenium Manager, jadi tidak wajib
-            # menyiapkan chromedriver secara manual.
-            self.driver = webdriver.Chrome(options=options)
-        except Exception as first_error:
-            console.print(
-                f"[yellow]ChromeDriver otomatis gagal ({first_error}). "
-                "Mencoba webdriver-manager...[/]"
-            )
-            try:
-                from webdriver_manager.chrome import ChromeDriverManager
-
-                service = Service(ChromeDriverManager().install())
-                self.driver = webdriver.Chrome(
-                    service=service, options=options
-                )
-            except Exception as second_error:
-                raise RuntimeError(
-                    "Chrome tidak bisa dibuka. Pastikan Google Chrome sudah "
-                    "terpasang, lalu jalankan ulang program. "
-                    f"Detail: {second_error}"
-                ) from first_error
-
-        self.wait = WebDriverWait(self.driver, 20)
+        detik = max(3, int(getattr(config, "search_wait", 20) or 20))
+        self.wait = WebDriverWait(self.driver, detik)
         console.print("[bold green]Chrome siap.[/]")
 
     def _has_session_cookie(self) -> bool:
@@ -303,6 +321,9 @@ class JobStreetBot:
                 f"[bold cyan]Mencari: {keyword} — {lokasi or 'semua lokasi'} "
                 f"— halaman {page}[/]"
             )
+            detik_tunggu = max(
+                3, int(getattr(config, "search_wait", 20) or 20)
+            )
             self.driver.get(url)
 
             try:
@@ -313,7 +334,7 @@ class JobStreetBot:
                 )
             except TimeoutException:
                 console.print(
-                    "[yellow]Kartu lowongan tidak muncul dalam 20 detik. "
+                    f"[yellow]Kartu lowongan tidak muncul dalam {detik_tunggu} detik. "
                     "Mungkin halaman masih memuat atau struktur website "
                     "berubah.[/]"
                 )
@@ -355,6 +376,54 @@ class JobStreetBot:
             console.print(f"[bold red]Gagal membaca hasil pencarian: {exc}[/]")
 
         return jobs
+
+    def _logo_card(self, card, company: str = "") -> tuple[bool, str]:
+        """Cari logo perusahaan pada satu kartu lowongan.
+
+        Kembalikan (ada_logo, keterangan) — keterangan dipakai perintah
+        `cek-logo` agar deteksi bisa diperiksa dengan data nyata.
+        """
+        for selector in LOGO_SELECTORS:
+            try:
+                elemen = card.find_elements(By.CSS_SELECTOR, selector)
+            except Exception:
+                continue
+
+            for el in elemen:
+                if not self._visible(el):
+                    continue
+
+                alt = el.get_attribute("alt") or (el.text or "")
+                src = el.get_attribute("src") or ""
+                penanda = " ".join(
+                    bagian
+                    for bagian in (
+                        el.get_attribute("data-automation"),
+                        el.get_attribute("data-testid"),
+                        el.get_attribute("class"),
+                    )
+                    if bagian
+                )
+
+                if logo_perusahaan(alt, src, penanda, company):
+                    return True, f"penanda '{penanda.strip()[:40]}'"
+
+        try:
+            gambar = card.find_elements(By.TAG_NAME, "img")
+        except Exception:
+            gambar = []
+
+        for img in gambar:
+            if not self._visible(img):
+                continue
+
+            alt = img.get_attribute("alt") or ""
+            src = img.get_attribute("src") or ""
+
+            if logo_perusahaan(alt, src, "", company):
+                return True, f"<img alt='{alt.strip()[:30]}'>"
+
+        return False, f"{len(gambar)} gambar tanpa logo"
 
     def _parse_job_card(self, card) -> Optional[Dict]:
         """Membaca satu kartu lowongan. Kartu tanpa judul/URL dilewati."""
@@ -419,7 +488,11 @@ class JobStreetBot:
         except Exception:
             description = ""
 
+        has_logo, info_logo = self._logo_card(card, company)
+
         return {
+            "has_logo": has_logo,
+            "logo_src": info_logo,
             "job_id": self._extract_job_id(job_url),
             "title": title,
             "company": company or "Tidak diketahui",
@@ -732,12 +805,8 @@ class JobStreetBot:
 
     def close(self):
         if self.driver:
-            try:
-                self.driver.quit()
-            except Exception:
-                pass
-            finally:
-                self.driver = None
-                self.wait = None
+            tutup_chrome(self.driver)
+            self.driver = None
+            self.wait = None
 
             console.print("[blue]Chrome ditutup.[/]")

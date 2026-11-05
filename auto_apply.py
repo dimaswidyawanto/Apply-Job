@@ -1051,6 +1051,52 @@ class AutoApplier:
 
         return gagal
 
+    def _tunggu_jawaban(self, rinci: str = "") -> str:
+        """Beri waktu pengguna mengisi kuesioner di jendela Chrome.
+
+        Kembalikan:
+          "applied" — lamaran ternyata sudah terkirim,
+          "lanjut"  — isian sudah lengkap, alur boleh diteruskan,
+          "habis"   — waktu tunggu selesai dan isian masih belum lengkap.
+        """
+        batas = max(0, int(config.auto_answer_wait or 0))
+
+        if batas <= 0:
+            return "habis"
+
+        console.print(
+            "[bold yellow]Ada pertanyaan yang belum terisi:[/] "
+            f"{(rinci or 'kuesioner perusahaan')[:100]}"
+        )
+        console.print(
+            "   Silakan isi di jendela Chrome sekarang — menunggu sampai "
+            f"{batas} detik..."
+        )
+
+        for sisa in range(batas, 0, -1):
+            time.sleep(1)
+
+            if self._is_success():
+                return "applied"
+
+            # Lanjut hanya bila tidak ada pertanyaan tersisa DAN tidak ada
+            # peringatan validasi — supaya tidak mengklik Kirim berulang kali.
+            if not self.jawab_pertanyaan() and not self._validation_error():
+                console.print(
+                    "[green]   isian sudah lengkap — melanjutkan pengiriman "
+                    "lamaran.[/]"
+                )
+                return "lanjut"
+
+            if sisa % 5 == 0:
+                console.print(f"[dim]   menunggu... sisa {sisa} detik[/]")
+
+        console.print(
+            "[yellow]   waktu tunggu habis — lamaran ini dilewati dan "
+            "dikembalikan ke daftar manual.[/]"
+        )
+        return "habis"
+
     def _validation_error(self) -> str:
         """Teks peringatan validasi formulir lamaran ('' bila tidak ada)."""
         body = self._body_text()
@@ -1334,6 +1380,19 @@ class AutoApplier:
                         console.print(
                             f"[dim]   belum bisa dijawab otomatis: {rinci}[/]"
                         )
+
+                        # Beri waktu pengguna mengisi kuesioner di Chrome.
+                        hasil_tunggu = self._tunggu_jawaban(rinci)
+                        if hasil_tunggu == "applied":
+                            return ApplyResult(
+                                True, "applied", "Terkirim otomatis"
+                            )
+                        if hasil_tunggu == "lanjut":
+                            deadline = max(
+                                deadline, time.time() + self.step_timeout
+                            )
+                            continue
+
                         self._dump_debug(job)
                         return ApplyResult(
                             False,
@@ -1386,6 +1445,19 @@ class AutoApplier:
                         console.print(
                             f"[dim]   formulir menolak dikirim: {rinci}[/]"
                         )
+
+                        hasil_tunggu = self._tunggu_jawaban(rinci)
+                        if hasil_tunggu == "applied":
+                            return ApplyResult(
+                                True, "applied", "Terkirim otomatis"
+                            )
+                        if hasil_tunggu == "lanjut":
+                            sudah_klik_kirim = False
+                            deadline = max(
+                                deadline, time.time() + self.submit_timeout
+                            )
+                            continue
+
                         self._dump_debug(job)
                         return ApplyResult(
                             False,

@@ -24,6 +24,22 @@ if ! git fetch "$ARENA_REMOTE"; then
     exit 1
 fi
 
+# Bereskan sisa penggabungan yang gagal sebelumnya.
+if [ -f ".git/MERGE_HEAD" ]; then
+    echo "[info] Membatalkan penggabungan sebelumnya yang belum selesai..."
+    git merge --abort || true
+fi
+
+# Simpan perubahan lokal agar penggabungan tidak ditolak
+# ("Your local changes ... would be overwritten by merge").
+DISIMPAN=""
+if ! git diff --quiet || ! git diff --cached --quiet; then
+    echo "[info] Menyimpan perubahan lokal sementara (git stash)..."
+    if git stash push -m "tarik-otomatis" >/dev/null 2>&1; then
+        DISIMPAN="1"
+    fi
+fi
+
 echo "[2/2] Menggabungkan $ARENA_REMOTE/$ARENA_CABANG ke cabang ini..."
 if ! git merge --no-edit "$ARENA_REMOTE/$ARENA_CABANG"; then
     # Riwayat berbeda (repo baru dibuat ulang) -> coba gabungkan tetap.
@@ -36,7 +52,19 @@ if [ -n "$(git ls-files --unmerged)" ]; then
     echo "  git status"
     echo "  ... perbaiki file yang bertanda konflik ..."
     echo "  git add -A && git commit"
+    if [ -n "$DISIMPAN" ]; then
+        echo "Perubahan lokal Anda masih tersimpan: git stash pop"
+    fi
     exit 1
+fi
+
+if [ -n "$DISIMPAN" ]; then
+    if git stash pop >/dev/null 2>&1; then
+        echo "[info] Perubahan lokal dikembalikan."
+    else
+        echo "[PERHATIAN] Perubahan lokal belum bisa dikembalikan otomatis."
+        echo "  Perubahan itu aman di git stash. Kembalikan dengan: git stash pop"
+    fi
 fi
 
 echo

@@ -1,11 +1,13 @@
 import argparse
 import contextlib
 import subprocess
+import time
+from pathlib import Path
 
 from rich.console import Console
 from rich.table import Table
 
-from config import config
+from config import MAKS_HALAMAN_RISET, batas_halaman_riset, config
 from database import db
 
 console = Console()
@@ -74,6 +76,97 @@ def uji_lamar(url: str):
         )
 
 
+def cek_logo(limit: int = 10, max_pages: int = 1, keywords: str = ""):
+    """Periksa deteksi logo perusahaan pada kartu lowongan JobStreet.
+
+    Menampilkan kartu yang terbaca beserta hasil deteksi dan keterangannya,
+    supaya aturan deteksi bisa dicocokkan dengan tampilan situs yang nyata.
+    """
+    from scraper import JobStreetBot
+
+    daftar_keyword = [k.strip() for k in (keywords or "").split(",") if k.strip()]
+    if not daftar_keyword:
+        daftar_keyword = list(config.keywords)[:1] or ["inventory"]
+
+    console.print(f"[cyan]Versi kode:[/] {versi_kode()}")
+    console.print("[cyan]Situs:[/] JobStreet — pemeriksaan deteksi logo")
+    console.print(
+        f"[dim]Kata kunci: {', '.join(daftar_keyword)} | halaman: {max_pages} "
+        f"| batas tampil: {limit}[/]"
+    )
+
+    bot = JobStreetBot()
+    terbaca: list[dict] = []
+
+    try:
+        bot.init_browser()
+        if not bot.login():
+            console.print(
+                "[bold red]Login belum selesai. Pemeriksaan dibatalkan.[/]"
+            )
+            return
+
+        for keyword in daftar_keyword:
+            for page in range(1, max(1, max_pages) + 1):
+                for job in bot.search_jobs(
+                    keyword, page, location=config.location
+                ):
+                    terbaca.append(job)
+                    if len(terbaca) >= limit:
+                        break
+                if len(terbaca) >= limit:
+                    break
+            if len(terbaca) >= limit:
+                break
+    finally:
+        with contextlib.suppress(Exception):
+            bot.close()
+
+    if not terbaca:
+        console.print("[yellow]Tidak ada kartu lowongan yang terbaca.[/]")
+        return
+
+    table = Table(title="Deteksi logo perusahaan")
+    table.add_column("Judul", style="cyan", max_width=38)
+    table.add_column("Perusahaan", max_width=24)
+    table.add_column("Logo", justify="center")
+    table.add_column("Keterangan", style="dim", max_width=34)
+
+    for job in terbaca:
+        table.add_row(
+            (job.get("title") or "-")[:38],
+            (job.get("company") or "-")[:24],
+            "[green]ya[/]" if job.get("has_logo") else "[red]tidak[/]",
+            (job.get("logo_src") or "-")[:34],
+        )
+
+    console.print(table)
+
+    berlogo = sum(1 for job in terbaca if job.get("has_logo"))
+    console.print(
+        f"[bold]{berlogo}[/] dari [bold]{len(terbaca)}[/] kartu terdeteksi "
+        "berlogo perusahaan."
+    )
+
+    if berlogo == 0:
+        console.print(
+            "[yellow]Tidak ada logo terdeteksi sama sekali. Bila di situs "
+            "logo memang terlihat, kirimkan tabel di atas agar aturan deteksi "
+            "disesuaikan.[/]"
+        )
+
+    if config.require_company_logo:
+        console.print(
+            "[green]REQUIRE_COMPANY_LOGO=true[/] — lowongan tanpa logo "
+            "otomatis dilewati saat melamar."
+        )
+    else:
+        console.print(
+            "[yellow]REQUIRE_COMPANY_LOGO=false[/] — filter logo belum aktif. "
+            "Aktifkan dengan: python cli.py set-env REQUIRE_COMPANY_LOGO=true"
+        )
+
+
 def jalankan_glints(max_pages: int = 0, keywords: str = "", batas: int = 0):
     """Cari, saring, lalu lamar lowongan di Glints."""
     from glints import jalankan_glints as _jalankan
@@ -102,6 +195,14 @@ def jalankan_glints(max_pages: int = 0, keywords: str = "", batas: int = 0):
         f"{laporan['dilewati']} dilewati · {laporan['gagal']} gagal · "
         f"{laporan['khusus_aplikasi']} hanya via aplikasi"
     )
+
+
+def diagnosa_glints_cli(keyword: str = ""):
+    """Cetak diagnosa pembacaan kartu Glints."""
+    from glints import diagnosa_glints
+
+    console.print(f"[cyan]Versi kode:[/] {versi_kode()}")
+    diagnosa_glints(keyword)
 
 
 def cari_glints(keywords: str = "", max_pages: int = 1, batas: int = 10,
@@ -135,6 +236,7 @@ def cari_glints(keywords: str = "", max_pages: int = 1, batas: int = 10,
     table.add_column("Perusahaan", overflow="fold")
     table.add_column("Gaji")
     table.add_column("Lokasi", overflow="fold")
+    table.add_column("Logo", justify="center")
     table.add_column("URL", overflow="fold", style="dim")
 
     for nomor, job in enumerate(lowongan, start=1):
@@ -144,6 +246,7 @@ def cari_glints(keywords: str = "", max_pages: int = 1, batas: int = 10,
             (job.get("company") or "-")[:28],
             job.get("salary") or "-",
             (job.get("location") or "-")[:26],
+            "[green]ya[/]" if job.get("has_logo") else "[red]tidak[/]",
             job.get("url", ""),
         )
 
@@ -152,6 +255,23 @@ def cari_glints(keywords: str = "", max_pages: int = 1, batas: int = 10,
         "[dim]Salin salah satu URL untuk: "
         "jalankan.bat glints uji --url \"URL\"[/]"
     )
+
+    berlogo = sum(1 for job in lowongan if job.get("has_logo"))
+    console.print(
+        f"[bold]{berlogo}[/] dari [bold]{len(lowongan)}[/] kartu terdeteksi "
+        "berlogo perusahaan."
+    )
+
+    if config.require_company_logo:
+        console.print(
+            "[green]REQUIRE_COMPANY_LOGO=true[/] — kartu tanpa logo dilewati "
+            "saat melamar. Tambahkan --semua untuk melihat kartu yang tersaring."
+        )
+    else:
+        console.print(
+            "[yellow]REQUIRE_COMPANY_LOGO=false[/] — filter logo belum aktif "
+            "(sama seperti JobStreet)."
+        )
 
 
 def uji_glints_otomatis(keywords: str = "", max_pages: int = 1):
@@ -182,6 +302,28 @@ def uji_glints_otomatis(keywords: str = "", max_pages: int = 1):
             "[dim]Bila perlu, kirim file di folder debug/ (txt + png) untuk "
             "perbaikan selector.[/]"
         )
+
+
+def cek_glints_cli(keyword: str = "", max_pages: int = 1, lamar: int = 0,
+                   ya: bool = False):
+    """Periksa Glints berurutan: baca kartu, saring, simulasi, lalu (opsional) lamar."""
+    from glints import cek_glints
+
+    console.print(f"[cyan]Versi kode:[/] {versi_kode()}")
+    try:
+        lulus = cek_glints(
+            keyword=keyword, max_pages=max(1, max_pages),
+            lamar=max(0, lamar), ya=ya,
+        )
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Dihentikan oleh pengguna.[/]")
+        return
+    except Exception as exc:
+        console.print(f"[bold red]Pemeriksaan Glints gagal:[/] {exc}")
+        return
+
+    if not lulus:
+        raise SystemExit(1)
 
 
 def simulasi_glints():
@@ -304,6 +446,11 @@ def show_config():
         "Aktif" if config.strict_location else "Tidak aktif",
     )
     table.add_row(
+        "Wajib ada logo perusahaan",
+        "Aktif (JobStreet & Glints)" if config.require_company_logo
+        else "Tidak aktif",
+    )
+    table.add_row(
         "Pertanyaan pilihan otomatis",
         (
             "Aktif "
@@ -327,9 +474,35 @@ def show_config():
     )
     table.add_row("Halaman per kata kunci", str(config.max_pages))
     table.add_row(
+        "Riset lowongan",
+        f"Maksimal {config.research_max_pages} halaman per kombinasi "
+        f"kata kunci & lokasi (batas tetap {MAKS_HALAMAN_RISET}) "
+        "— tidak dibatasi 50",
+    )
+    table.add_row(
+        "Kata kunci riset",
+        f"{len(config.keywords_riset)} kategori"
+        + (
+            " (dari RESEARCH_KEYWORDS)"
+            if config.research_keywords
+            else " (ikut KEYWORDS)"
+        ),
+    )
+    table.add_row(
+        "Batas hasil riset",
+        str(config.research_max_jobs)
+        if config.research_max_jobs > 0
+        else "Tanpa batas",
+    )
+    table.add_row(
         "Urutan pelamaran",
         (
-            "Kumpulkan dulu, mulai dari posting terbaru"
+            "Kumpulkan dulu lalu bandingkan — "
+            + (
+                "posting terbaru dulu"
+                if config.rank_by == "newest"
+                else "kecocokan tertinggi dulu"
+            )
             if config.auto_apply and config.collect_before_apply
             else "Lamar sambil mencari (halaman terbaru dulu)"
         ),
@@ -343,6 +516,12 @@ def show_config():
         ),
     )
     table.add_row("Jeda antar-lowongan", f"{config.delay_between_apply} detik")
+    table.add_row(
+        "Waktu tunggu kuesioner",
+        f"{config.auto_answer_wait} detik"
+        if config.auto_answer_wait > 0
+        else "Tidak menunggu (langsung dilewati)",
+    )
     table.add_row("Mode browser", "Headless" if config.headless else "Terlihat")
     table.add_row(
         "Mode lamaran",
@@ -406,6 +585,45 @@ def show_applications(limit: int = 50):
     console.print(table)
 
 
+def perbaiki_chrome():
+    """Pindahkan profil Chrome bot ke folder cadangan (dibuat ulang bersih).
+
+    Dipakai saat Chrome gagal dibuka (`DevToolsActivePort file doesn't exist`)
+    karena profilnya terkunci atau rusak.
+    """
+    profil = Path(config.profile_dir).expanduser()
+
+    if not profil.exists():
+        console.print(
+            f"[yellow]Profil Chrome belum ada:[/] {profil}"
+        )
+        console.print(
+            "[dim]Jalankan `python cli.py run` seperti biasa; profil baru "
+            "akan dibuat otomatis.[/]"
+        )
+        return
+
+    cadangan = profil.with_name(
+        f"{profil.name}-lama-{time.strftime('%Y%m%d-%H%M%S')}"
+    )
+
+    try:
+        profil.rename(cadangan)
+    except Exception as exc:
+        console.print(f"[bold red]Gagal memindahkan profil:[/] {exc}")
+        console.print(
+            "[yellow]Tutup semua jendela Chrome (cek juga Task Manager) lalu "
+            "jalankan perintah ini lagi.[/]"
+        )
+        return
+
+    console.print(f"[green]Profil lama dipindahkan ke:[/] {cadangan}")
+    console.print(
+        "Mulai sekarang bot memakai profil Chrome baru. Sesi login lama tidak "
+        "terbawa — login sekali lagi saat menjalankan `run`."
+    )
+
+
 def repair_data():
     report = db.repair_data()
 
@@ -455,7 +673,19 @@ if __name__ == "__main__":
         "--max-pages",
         type=int,
         default=None,
-        help="Jumlah halaman hasil pencarian per kata kunci",
+        help=(
+            "Jumlah halaman per kata kunci untuk mode lamar-sambil-mencari "
+            "(tidak membatasi riset)"
+        ),
+    )
+    run_parser.add_argument(
+        "--riset-pages",
+        type=int,
+        default=None,
+        help=(
+            "Halaman riset per kombinasi kata kunci & lokasi, "
+            f"maksimal {MAKS_HALAMAN_RISET} (bawaan RESEARCH_MAX_PAGES)"
+        ),
     )
     run_parser.add_argument(
         "--headless",
@@ -481,6 +711,10 @@ if __name__ == "__main__":
     subparsers.add_parser("config", help="Tampilkan konfigurasi aktif")
     subparsers.add_parser("repair", help="Rapikan data lama di database")
     subparsers.add_parser(
+        "perbaiki-chrome",
+        help="Buat ulang profil Chrome bila Chrome gagal dibuka",
+    )
+    subparsers.add_parser(
         "simulasi",
         help="Uji alur lamaran dengan halaman palsu (tanpa Chrome)",
     )
@@ -502,6 +736,20 @@ if __name__ == "__main__":
     )
     uji_parser.add_argument("--url", required=True, help="URL lowongan JobStreet")
 
+    logo_parser = subparsers.add_parser(
+        "cek-logo",
+        help="Periksa deteksi logo perusahaan pada kartu lowongan JobStreet",
+    )
+    logo_parser.add_argument(
+        "--limit", type=int, default=10, help="Jumlah kartu yang ditampilkan"
+    )
+    logo_parser.add_argument(
+        "--max-pages", type=int, default=1, help="Jumlah halaman (default 1)"
+    )
+    logo_parser.add_argument(
+        "--keywords", default="", help="Kata kunci pencarian (pisah koma)"
+    )
+
     env_parser = subparsers.add_parser(
         "set-env",
         help="Ubah nilai di .env, mis. set-env MAX_APPLY_PER_DAY=500",
@@ -519,7 +767,13 @@ if __name__ == "__main__":
 
     glints_run = glints_sub.add_parser("run", help="Jalankan pencarian Glints")
     glints_run.add_argument(
-        "--max-pages", type=int, default=0, help="Halaman per kata kunci (0=default)"
+        "--max-pages",
+        type=int,
+        default=0,
+        help=(
+            "Muat per kata kunci, maksimal "
+            f"{MAKS_HALAMAN_RISET} (ikut RESEARCH_MAX_PAGES)"
+        ),
     )
     glints_run.add_argument(
         "--keywords", default="", help="Kata kunci dipisah koma (0=bawaan .env)"
@@ -560,6 +814,36 @@ if __name__ == "__main__":
         help="Tampilkan semua hasil, tanpa saringan gaji/lokasi/judul",
     )
 
+    glints_diag = glints_sub.add_parser(
+        "diagnosa",
+        help="Periksa mengapa kartu Glints tidak terbaca (simpan HTML + PNG)",
+    )
+    glints_diag.add_argument(
+        "--keyword",
+        default="",
+        help="Kata kunci yang diuji (default: kata kunci pertama di .env)",
+    )
+
+    glints_cek = glints_sub.add_parser(
+        "cek",
+        help="Periksa Glints berurutan: baca kartu, saring, simulasi, lamar",
+    )
+    glints_cek.add_argument(
+        "--keyword", default="", help="Kata kunci uji (default: .env)"
+    )
+    glints_cek.add_argument(
+        "--max-pages", type=int, default=1, help="Muat per kata kunci (1)"
+    )
+    glints_cek.add_argument(
+        "--lamar",
+        type=int,
+        default=0,
+        help="Uji kirim N lamaran sungguhan (0 = tidak melamar)",
+    )
+    glints_cek.add_argument(
+        "--ya", action="store_true", help="Lewati konfirmasi sebelum melamar"
+    )
+
     glints_sub.add_parser(
         "simulasi", help="Simulasi alur lamaran Glints (tanpa Chrome)"
     )
@@ -590,6 +874,9 @@ if __name__ == "__main__":
         if args.max_pages is not None:
             config.max_pages = max(1, args.max_pages)
 
+        if getattr(args, "riset_pages", None) is not None:
+            config.research_max_pages = batas_halaman_riset(args.riset_pages)
+
         if args.headless:
             config.headless = True
 
@@ -612,6 +899,8 @@ if __name__ == "__main__":
         show_config()
     elif args.command == "repair":
         repair_data()
+    elif args.command == "perbaiki-chrome":
+        perbaiki_chrome()
     elif args.command == "perbarui-env":
         perbarui_env()
     elif args.command == "simulasi":
@@ -622,6 +911,8 @@ if __name__ == "__main__":
         show_applications(args.limit)
     elif args.command == "uji-lamar":
         uji_lamar(args.url)
+    elif args.command == "cek-logo":
+        cek_logo(args.limit, args.max_pages, args.keywords)
     elif args.command == "glints":
         if args.glints_command == "run":
             jalankan_glints(args.max_pages, args.keywords, args.limit)
@@ -633,6 +924,12 @@ if __name__ == "__main__":
         elif args.glints_command == "cari":
             cari_glints(
                 args.keywords, args.max_pages, args.limit, args.semua
+            )
+        elif args.glints_command == "diagnosa":
+            diagnosa_glints_cli(args.keyword)
+        elif args.glints_command == "cek":
+            cek_glints_cli(
+                args.keyword, args.max_pages, args.lamar, args.ya
             )
         elif args.glints_command == "simulasi":
             simulasi_glints()
