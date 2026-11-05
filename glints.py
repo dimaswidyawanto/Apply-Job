@@ -62,14 +62,30 @@ def chrome_mati(pesan: str) -> bool:
 
 DOMAIN = "glints.com"
 BASE = "https://glints.com"
-SEARCH_URL = BASE + "/id/opportunities/jobs/explore?keyword={keyword}&countryCode=ID"
+# Glints kadang memindahkan halaman pencarian. Semua bentuk ini dicoba
+# berurutan sampai ada kartu lowongan; yang berhasil diingat untuk kata
+# kunci berikutnya.
+SEARCH_URL_CANDIDATES = (
+    BASE + "/id/opportunities/jobs/explore?keyword={keyword}&countryCode=ID",
+    BASE + "/id/opportunities/jobs?keyword={keyword}",
+    BASE + "/id/opportunities/jobs/explore?keyword={keyword}",
+    BASE + "/id/search?keyword={keyword}",
+    BASE + "/id/opportunities/jobs/explore?keyword={keyword}&sortBy=LATEST",
+)
+SEARCH_URL = SEARCH_URL_CANDIDATES[0]
 LOGIN_URL = BASE + "/id/login"
 
-# Pola tautan lowongan Glints: /id/opportunities/jobs/<slug>/<uuid>
+# Pola tautan lowongan Glints. UUID boleh berada setelah slug
+# (/opportunities/jobs/<slug>/<uuid>) atau langsung
+# (/opportunities/jobs/<uuid>), karena dua bentuk itu pernah dipakai.
 TAUTAN_LOWONGAN = re.compile(
-    r"/opportunities/jobs/[^/?#]+/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-"
-    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"
+    r"/opportunities/jobs/(?:[^/?#]+/)?"
+    r"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{12})"
 )
+
+# Tautan yang bukan lowongan (halaman pencarian/kategori).
+TAUTAN_BUKAN_LOWONGAN = ("/explore", "/search", "/job-location/", "/companies/")
 
 # Teks tombol yang berarti "sudah pernah dilamar" pada kartu Glints.
 SUDAH_DILAMAR_TEXTS = (
@@ -132,6 +148,11 @@ SIBUK_TEXTS = (
     "anda sudah melamar",
     "you have already applied",
 )
+
+def folder_debug() -> Path:
+    """Folder penyimpanan HTML/screenshot saat pembacaan gagal."""
+    return Path(__file__).resolve().parent / "debug"
+
 
 # Skrip pembaca kartu. Dijalankan di halaman hasil pencarian Glints.
 SKRIP_KARTU = r"""
@@ -658,6 +679,10 @@ class GlintsBot:
     def __init__(self):
         self.driver = None
         self.filters = JobFilter()
+        # Pola URL pencarian yang terbukti menghasilkan kartu.
+        self.search_url = ""
+        # Ringkasan diagnosa terakhir (dipakai tes & laporan).
+        self.diagnosa_terakhir: Dict = {}
 
     # ------------------------------ browser ---------------------------
     def init_browser(self):
@@ -753,18 +778,164 @@ class GlintsBot:
 
         return False
 
-    # ----------------------------- pencarian --------------------------
-    def buka_pencarian(self, keyword: str) -> bool:
-        url = SEARCH_URL.format(keyword=quote_plus(keyword))
-        self.driver.get(url)
-        time.sleep(2.5)
+    # --------------------------- diagnosa -----------------------------
+    def _judul_halaman(self) -> str:
+        with contextlib.suppress(Exception):
+            return " ".join(str(self.driver.title or "").split())
+        return ""
+
+    def _tautan_kartu(self) -> List[str]:
+        """Semua href yang mengarah ke halaman lowongan di halaman ini."""
+        try:
+            elemen = self.driver.find_elements(
+                By.CSS_SELECTOR, "a[href*='/opportunities/jobs/']"
+            )
+        except Exception:
+            return []
+
+        hasil = []
+        for elemen_satu in elemen:
+            with contextlib.suppress(Exception):
+                href = elemen_satu.get_attribute("href") or ""
+                if not href or any(bukan in href for bukan in TAUTAN_BUKAN_LOWONGAN):
+                    continue
+                if TAUTAN_LOWONGAN.search(href):
+                    hasil.append(href)
+
+        return hasil
+
+    def _tunggu_kartu(self, detik: Optional[int] = None) -> int:
+        """Tunggu sampai tautan lowongan muncul (SEARCH_WAIT detik)."""
+        batas = time.time() + max(
+            3, int(detik if detik is not None else config.search_wait)
+        )
+        mulai = time.time()
+        digulir = False
+        jumlah = len(self._tautan_kartu())
+
+        while jumlah == 0 and time.time() < batas:
+            # Sebagian halaman memuat kartu saat digulir, bukan saat dibuka.
+            if not digulir and time.time() - mulai >= 3:
+                with contextlib.suppress(Exception):
+                    self.driver.execute_script(
+                        "window.scrollTo(0, document.body.scrollHeight);"
+                    )
+                digulir = True
+
+            time.sleep(0.5)
+            jumlah = len(self._tautan_kartu())
+
+        return jumlah
+
+    def simpan_diagnosa(self, awalan: str = "glints", keyword: str = "") -> Dict:
+        """Simpan HTML + screenshot dan cetak ringkasan penyebab 0 kartu."""
+        folder = folder_debug()
+        cap = f"{awalan}-{time.strftime('%Y%m%d-%H%M%S')}"
+
+        if keyword:
+            bersih = re.sub(r"[^a-z0-9]+", "-", keyword.lower()).strip("-")
+            if bersih:
+                cap += f"-{bersih}"
+
+        html = folder / f"{cap}.html"
+        png = folder / f"{cap}.png"
 
         teks = self._teks_halaman()
-        if "masuk" in teks and "lowongan" not in teks:
-            console.print("[yellow]Halaman Glints meminta login.[/]")
-            return False
+        tautan = self._tautan_kartu()
+        kartu = []
+        with contextlib.suppress(Exception):
+            kartu = [
+                rapikan_kartu(mentah) for mentah in self._kartu_mentah()
+            ]
 
-        return True
+        info = {
+            "url": self._url(),
+            "judul": self._judul_halaman(),
+            "jumlah_tautan": len(tautan),
+            "contoh_tautan": tautan[:8],
+            "jumlah_kartu": len([k for k in kartu if k]),
+            "meminta_login": "masuk" in teks and "lowongan" not in teks,
+            "captcha": any(
+                tanda in teks
+                for tanda in ("captcha", "unusual traffic", "verifikasi")
+            ),
+            "berkas_html": "",
+            "berkas_png": "",
+        }
+
+        with contextlib.suppress(Exception):
+            folder.mkdir(parents=True, exist_ok=True)
+            html.write_text(self.driver.page_source or "", encoding="utf-8")
+            info["berkas_html"] = str(html)
+
+        with contextlib.suppress(Exception):
+            self.driver.save_screenshot(str(png))
+            info["berkas_png"] = str(png)
+
+        self.diagnosa_terakhir = info
+
+        console.print("[bold yellow]Diagnosa halaman Glints:[/]")
+        console.print(f"  URL          : {info['url'] or '-'}")
+        console.print(f"  Judul halaman: {info['judul'] or '-'}")
+        console.print(
+            f"  Tautan lowongan ditemukan: {info['jumlah_tautan']}, "
+            f"kartu terbaca: {info['jumlah_kartu']}"
+        )
+
+        for contoh in info["contoh_tautan"]:
+            console.print(f"    - {contoh}")
+
+        if info["meminta_login"]:
+            console.print(
+                "[yellow]  Halaman meminta login: masuk dulu ke Glints di "
+                "jendela Chrome, lalu jalankan lagi.[/]"
+            )
+        if info["captcha"]:
+            console.print(
+                "[yellow]  Halaman menampilkan captcha/verifikasi: buka "
+                "Chrome, selesaikan verifikasinya, lalu jalankan lagi.[/]"
+            )
+        if info["berkas_html"]:
+            console.print(f"  HTML        : {info['berkas_html']}")
+        if info["berkas_png"]:
+            console.print(f"  Screenshot  : {info['berkas_png']}")
+
+        return info
+
+    # ----------------------------- pencarian --------------------------
+    def buka_pencarian(self, keyword: str) -> bool:
+        """Buka halaman hasil pencarian Glints; coba beberapa bentuk URL."""
+        kandidat = ([self.search_url] if self.search_url else [])
+        kandidat += [u for u in SEARCH_URL_CANDIDATES if u not in kandidat]
+
+        for pola in kandidat:
+            url = pola.format(keyword=quote_plus(keyword))
+            self.driver.get(url)
+            jumlah = self._tunggu_kartu()
+
+            if jumlah:
+                if pola != self.search_url:
+                    console.print(
+                        f"[dim]Halaman pencarian Glints yang dipakai: {url}[/]"
+                    )
+                self.search_url = pola
+                return True
+
+            if "/login" in self._url().lower():
+                console.print("[yellow]Halaman Glints meminta login.[/]")
+                return False
+
+            teks = self._teks_halaman()
+            if "masuk" in teks and "lowongan" not in teks:
+                console.print("[yellow]Halaman Glints meminta login.[/]")
+                return False
+
+        console.print(
+            "[bold yellow]Tidak ada kartu lowongan yang muncul di halaman "
+            f"pencarian Glints untuk \"{keyword}\".[/]"
+        )
+        self.simpan_diagnosa("pencarian", keyword)
+        return False
 
     def urutkan_terbaru(self) -> bool:
         """Klik tombol urut "Baru Ditambahkan" bila ada."""
@@ -834,7 +1005,57 @@ class GlintsBot:
             sudah_ada.add(job["job_id"])
             lowongan.append(job)
 
+        if not lowongan:
+            # Skrip kartu tidak menemukan apa pun: coba baca langsung dari
+            # elemen <a> (struktur situs bisa berubah sewaktu-waktu).
+            for mentah in self._kartu_fallback():
+                job = rapikan_kartu(mentah)
+                if not job or job["job_id"] in sudah_ada:
+                    continue
+                sudah_ada.add(job["job_id"])
+                lowongan.append(job)
+
+            if lowongan:
+                console.print(
+                    f"[yellow]Pembaca kartu utama tidak mengenali halaman; "
+                    f"dipakai cara cadangan ({len(lowongan)} lowongan).[/]"
+                )
+            else:
+                self.simpan_diagnosa("kartu-kosong", keyword)
+
         return lowongan
+
+    def _kartu_fallback(self) -> list:
+        """Baca kartu langsung dari elemen <a>, tanpa skrip JavaScript."""
+        try:
+            elemen_semua = self.driver.find_elements(
+                By.CSS_SELECTOR, "a[href*='/opportunities/jobs/']"
+            )
+        except Exception:
+            return []
+
+        hasil = []
+
+        for elemen in elemen_semua:
+            with contextlib.suppress(Exception):
+                href = elemen.get_attribute("href") or ""
+                if not href or not TAUTAN_LOWONGAN.search(href):
+                    continue
+                if any(bukan in href for bukan in TAUTAN_BUKAN_LOWONGAN):
+                    continue
+
+                teks = " ".join((elemen.text or "").split())
+                hasil.append({
+                    "url": href.split("?")[0],
+                    "title": teks,
+                    "company": "",
+                    "location": "",
+                    "salary": "",
+                    "text": teks,
+                    "logo": [],
+                })
+
+        return hasil
 
     # ------------------------------ lamar -----------------------------
     def lamar(self, job: dict) -> ApplyResult:
@@ -1022,6 +1243,11 @@ def jalankan_glints(max_pages: int = 0, keywords: Optional[List[str]] = None,
 
         if not layak:
             console.print("[yellow]Tidak ada lowongan Glints yang lolos filter.[/]")
+            if not lowongan:
+                console.print(
+                    "[dim]Jalankan `python cli.py glints diagnosa` untuk "
+                    "memeriksa apakah kartu lowongan terbaca.[/]"
+                )
             return laporan
 
         # Sisa kuota harian, sama seperti di JobStreet.
@@ -1134,6 +1360,67 @@ def pilih_kandidat(lowongan: List[Dict], batas: int = 0,
             break
 
     return hasil
+
+def diagnosa_glints(keyword: str = "") -> Dict:
+    """Periksa mengapa kartu lowongan Glints tidak terbaca.
+
+    Membuka satu kata kunci di Chrome, mencoba semua bentuk URL pencarian,
+    lalu melaporkan URL akhir, judul halaman, jumlah tautan lowongan, contoh
+    tautannya, serta menyimpan HTML + screenshot ke folder debug/.
+    """
+    kata = (keyword or "").strip()
+    if not kata:
+        kata = config.keywords[0] if config.keywords else "inventory"
+
+    bot = GlintsBot()
+    info: Dict = {}
+
+    try:
+        bot.init_browser()
+        console.print(f"[cyan]Diagnosa Glints — kata kunci: '{kata}'[/]")
+
+        berhasil = bot.buka_pencarian(kata)
+        info = bot.simpan_diagnosa("diagnosa", kata)
+
+        console.print(
+            f"[cyan]Login Glints terdeteksi:[/] "
+            f"{'ya' if bot.sudah_login() else 'belum'}"
+        )
+
+        if berhasil:
+            kartu = [rapikan_kartu(mentah) for mentah in bot._kartu_mentah()]
+            kartu = [job for job in kartu if job]
+            console.print(
+                f"[green]Pembaca kartu utama berhasil: {len(kartu)} "
+                "lowongan terbaca.[/]"
+            )
+
+            for job in kartu[:5]:
+                console.print(
+                    f"  - {job['title'][:45]} | {job['company'] or '-'} | "
+                    f"{job['location'] or '-'} | {job['salary'] or '-'} | "
+                    f"logo: {'ada' if job.get('has_logo') else 'tidak'}"
+                )
+
+            if not kartu:
+                cadangan = bot._kartu_fallback()
+                console.print(
+                    f"[yellow]Cara cadangan (tanpa JS) menemukan "
+                    f"{len(cadangan)} tautan lowongan.[/]"
+                )
+        else:
+            console.print(
+                "[bold yellow]Tidak ada kartu yang bisa dibaca. Kirimkan "
+                "berkas HTML + screenshot di atas untuk penyesuaian.[/]"
+            )
+
+    except Exception as exc:
+        console.print(f"[bold red]Diagnosa gagal:[/] {exc}")
+    finally:
+        bot.tutup()
+
+    return info
+
 
 def pesan_url_salah(url: str) -> str:
     """Pesan bantuan saat URL uji tidak bisa dipakai."""

@@ -793,6 +793,40 @@ yang sama dengan JobStreet karena keduanya menulis ke database yang sama.
 
 ### Glints (glints.com)
 
+#### "Terbaca 0 lowongan" di Glints
+
+Kalau `glints run`/`glints cari` melaporkan tidak ada lowongan padahal di
+Chrome terlihat ada, jalankan diagnosa:
+
+```bash
+python cli.py glints diagnosa                 # kata kunci pertama .env
+python cli.py glints diagnosa --keyword PPIC  # kata kunci tertentu
+```
+
+Perintah itu membuka satu halaman pencarian, mencoba **semua bentuk URL
+pencarian Glints**, lalu mencetak:
+
+```
+Diagnosa halaman Glints:
+  URL          : https://glints.com/id/opportunities/jobs?keyword=PPIC
+  Judul halaman: Lowongan Kerja ...
+  Tautan lowongan ditemukan: 0, kartu terbaca: 0
+  HTML        : ...\debug\diagnosa-20261105-101500-ppic.html
+  Screenshot  : ...\debug\diagnosa-20261105-101500-ppic.png
+```
+
+Kirimkan dua berkas itu (atau tempelkan 30 baris keluarannya) supaya pola
+tautan/pembacaan kartunya bisa disesuaikan. Hal yang biasanya terlihat:
+
+- `meminta login` → login dulu di jendela Chrome, jalankan lagi.
+- `captcha` → selesaikan verifikasi di Chrome, jalankan lagi.
+- `Tautan lowongan ditemukan: 0` tetapi halaman berisi lowongan → struktur
+  halaman berubah; berkas HTML-nya yang diperlukan untuk memperbaiki pola.
+
+Kalau skrip pembaca kartu tidak menemukan apa pun, bot otomatis mencoba
+**pembaca cadangan** yang membaca elemen `<a>` langsung (tanpa JavaScript)
+dan mencatatnya di log.
+
 Versi Glints memakai mesin lamaran yang sama, tetapi dengan peta situsnya
 sendiri: pencarian `/id/opportunities/jobs/explore`, tautan lowongan
 `/id/opportunities/jobs/<slug>/<uuid>`, tombol **Lamar** lalu **Lamar

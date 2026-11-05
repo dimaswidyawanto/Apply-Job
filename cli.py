@@ -195,6 +195,14 @@ def jalankan_glints(max_pages: int = 0, keywords: str = "", batas: int = 0):
     )
 
 
+def diagnosa_glints_cli(keyword: str = ""):
+    """Cetak diagnosa pembacaan kartu Glints."""
+    from glints import diagnosa_glints
+
+    console.print(f"[cyan]Versi kode:[/] {versi_kode()}")
+    diagnosa_glints(keyword)
+
+
 def cari_glints(keywords: str = "", max_pages: int = 1, batas: int = 10,
                 semuanya: bool = False):
     """Tampilkan lowongan Glints yang layak dilamar beserta URL-nya."""
@@ -739,6 +747,16 @@ if __name__ == "__main__":
         help="Tampilkan semua hasil, tanpa saringan gaji/lokasi/judul",
     )
 
+    glints_diag = glints_sub.add_parser(
+        "diagnosa",
+        help="Periksa mengapa kartu Glints tidak terbaca (simpan HTML + PNG)",
+    )
+    glints_diag.add_argument(
+        "--keyword",
+        default="",
+        help="Kata kunci yang diuji (default: kata kunci pertama di .env)",
+    )
+
     glints_sub.add_parser(
         "simulasi", help="Simulasi alur lamaran Glints (tanpa Chrome)"
     )
@@ -818,6 +836,8 @@ if __name__ == "__main__":
             cari_glints(
                 args.keywords, args.max_pages, args.limit, args.semua
             )
+        elif args.glints_command == "diagnosa":
+            diagnosa_glints_cli(args.keyword)
         elif args.glints_command == "simulasi":
             simulasi_glints()
         else:
