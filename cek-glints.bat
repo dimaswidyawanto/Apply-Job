@@ -20,7 +20,12 @@ echo  PERIKSA GLINTS  ^(lamar uji: %LAMAR%^)
 echo ============================================================
 echo.
 
-call jalankan.bat glints cek --keyword "inventory staff" --max-pages 1 --lamar %LAMAR% %YA%
+if exist ".venv\Scripts\python.exe" (
+    rem Lingkungan sudah siap: jalankan langsung, tanpa memasang ulang dependensi.
+    ".venv\Scripts\python.exe" cli.py glints cek --keyword "inventory staff" --max-pages 1 --lamar %LAMAR% %YA%
+) else (
+    call jalankan.bat glints cek --keyword "inventory staff" --max-pages 1 --lamar %LAMAR% %YA%
+)
 
 echo.
 echo ============================================================
