@@ -74,6 +74,97 @@ def uji_lamar(url: str):
         )
 
 
+def cek_logo(limit: int = 10, max_pages: int = 1, keywords: str = ""):
+    """Periksa deteksi logo perusahaan pada kartu lowongan JobStreet.
+
+    Menampilkan kartu yang terbaca beserta hasil deteksi dan keterangannya,
+    supaya aturan deteksi bisa dicocokkan dengan tampilan situs yang nyata.
+    """
+    from scraper import JobStreetBot
+
+    daftar_keyword = [k.strip() for k in (keywords or "").split(",") if k.strip()]
+    if not daftar_keyword:
+        daftar_keyword = list(config.keywords)[:1] or ["inventory"]
+
+    console.print(f"[cyan]Versi kode:[/] {versi_kode()}")
+    console.print("[cyan]Situs:[/] JobStreet — pemeriksaan deteksi logo")
+    console.print(
+        f"[dim]Kata kunci: {', '.join(daftar_keyword)} | halaman: {max_pages} "
+        f"| batas tampil: {limit}[/]"
+    )
+
+    bot = JobStreetBot()
+    terbaca: list[dict] = []
+
+    try:
+        bot.init_browser()
+        if not bot.login():
+            console.print(
+                "[bold red]Login belum selesai. Pemeriksaan dibatalkan.[/]"
+            )
+            return
+
+        for keyword in daftar_keyword:
+            for page in range(1, max(1, max_pages) + 1):
+                for job in bot.search_jobs(
+                    keyword, page, location=config.location
+                ):
+                    terbaca.append(job)
+                    if len(terbaca) >= limit:
+                        break
+                if len(terbaca) >= limit:
+                    break
+            if len(terbaca) >= limit:
+                break
+    finally:
+        with contextlib.suppress(Exception):
+            bot.close()
+
+    if not terbaca:
+        console.print("[yellow]Tidak ada kartu lowongan yang terbaca.[/]")
+        return
+
+    table = Table(title="Deteksi logo perusahaan")
+    table.add_column("Judul", style="cyan", max_width=38)
+    table.add_column("Perusahaan", max_width=24)
+    table.add_column("Logo", justify="center")
+    table.add_column("Keterangan", style="dim", max_width=34)
+
+    for job in terbaca:
+        table.add_row(
+            (job.get("title") or "-")[:38],
+            (job.get("company") or "-")[:24],
+            "[green]ya[/]" if job.get("has_logo") else "[red]tidak[/]",
+            (job.get("logo_src") or "-")[:34],
+        )
+
+    console.print(table)
+
+    berlogo = sum(1 for job in terbaca if job.get("has_logo"))
+    console.print(
+        f"[bold]{berlogo}[/] dari [bold]{len(terbaca)}[/] kartu terdeteksi "
+        "berlogo perusahaan."
+    )
+
+    if berlogo == 0:
+        console.print(
+            "[yellow]Tidak ada logo terdeteksi sama sekali. Bila di situs "
+            "logo memang terlihat, kirimkan tabel di atas agar aturan deteksi "
+            "disesuaikan.[/]"
+        )
+
+    if config.require_company_logo:
+        console.print(
+            "[green]REQUIRE_COMPANY_LOGO=true[/] — lowongan tanpa logo "
+            "otomatis dilewati saat melamar."
+        )
+    else:
+        console.print(
+            "[yellow]REQUIRE_COMPANY_LOGO=false[/] — filter logo belum aktif. "
+            "Aktifkan dengan: python cli.py set-env REQUIRE_COMPANY_LOGO=true"
+        )
+
+
 def jalankan_glints(max_pages: int = 0, keywords: str = "", batas: int = 0):
     """Cari, saring, lalu lamar lowongan di Glints."""
     from glints import jalankan_glints as _jalankan
@@ -135,6 +226,7 @@ def cari_glints(keywords: str = "", max_pages: int = 1, batas: int = 10,
     table.add_column("Perusahaan", overflow="fold")
     table.add_column("Gaji")
     table.add_column("Lokasi", overflow="fold")
+    table.add_column("Logo", justify="center")
     table.add_column("URL", overflow="fold", style="dim")
 
     for nomor, job in enumerate(lowongan, start=1):
@@ -144,6 +236,7 @@ def cari_glints(keywords: str = "", max_pages: int = 1, batas: int = 10,
             (job.get("company") or "-")[:28],
             job.get("salary") or "-",
             (job.get("location") or "-")[:26],
+            "[green]ya[/]" if job.get("has_logo") else "[red]tidak[/]",
             job.get("url", ""),
         )
 
@@ -152,6 +245,23 @@ def cari_glints(keywords: str = "", max_pages: int = 1, batas: int = 10,
         "[dim]Salin salah satu URL untuk: "
         "jalankan.bat glints uji --url \"URL\"[/]"
     )
+
+    berlogo = sum(1 for job in lowongan if job.get("has_logo"))
+    console.print(
+        f"[bold]{berlogo}[/] dari [bold]{len(lowongan)}[/] kartu terdeteksi "
+        "berlogo perusahaan."
+    )
+
+    if config.require_company_logo:
+        console.print(
+            "[green]REQUIRE_COMPANY_LOGO=true[/] — kartu tanpa logo dilewati "
+            "saat melamar. Tambahkan --semua untuk melihat kartu yang tersaring."
+        )
+    else:
+        console.print(
+            "[yellow]REQUIRE_COMPANY_LOGO=false[/] — filter logo belum aktif "
+            "(sama seperti JobStreet)."
+        )
 
 
 def uji_glints_otomatis(keywords: str = "", max_pages: int = 1):
@@ -502,6 +612,20 @@ if __name__ == "__main__":
     )
     uji_parser.add_argument("--url", required=True, help="URL lowongan JobStreet")
 
+    logo_parser = subparsers.add_parser(
+        "cek-logo",
+        help="Periksa deteksi logo perusahaan pada kartu lowongan JobStreet",
+    )
+    logo_parser.add_argument(
+        "--limit", type=int, default=10, help="Jumlah kartu yang ditampilkan"
+    )
+    logo_parser.add_argument(
+        "--max-pages", type=int, default=1, help="Jumlah halaman (default 1)"
+    )
+    logo_parser.add_argument(
+        "--keywords", default="", help="Kata kunci pencarian (pisah koma)"
+    )
+
     env_parser = subparsers.add_parser(
         "set-env",
         help="Ubah nilai di .env, mis. set-env MAX_APPLY_PER_DAY=500",
@@ -622,6 +746,8 @@ if __name__ == "__main__":
         show_applications(args.limit)
     elif args.command == "uji-lamar":
         uji_lamar(args.url)
+    elif args.command == "cek-logo":
+        cek_logo(args.limit, args.max_pages, args.keywords)
     elif args.command == "glints":
         if args.glints_command == "run":
             jalankan_glints(args.max_pages, args.keywords, args.limit)

@@ -132,6 +132,12 @@ class JobFilter:
             if dikecualikan:
                 return False, f"Perusahaan di-blacklist: {dikecualikan}"
 
+        # JobStreet: hanya lamar lowongan yang kartunya menampilkan logo
+        # perusahaan. Situs lain (mis. Glints) tidak mengisi has_logo, jadi
+        # lowongannya tidak ikut tertolak.
+        if config.require_company_logo and job.get("has_logo") is False:
+            return False, "Tanpa logo perusahaan"
+
         title_lower = title.lower()
 
         if config.require_keyword_match and not self._matches_interest(title_lower):
@@ -335,7 +341,14 @@ class JobFilter:
                 )
             )
         else:
-            scored_jobs.sort(key=lambda item: item["_score"], reverse=True)
+            # Kecocokan tertinggi dulu; bila skornya sama, yang paling baru.
+            scored_jobs.sort(
+                key=lambda item: (
+                    -item["_score"],
+                    item.get("age_days") is None,
+                    item.get("age_days") or 0,
+                )
+            )
 
         return scored_jobs
 

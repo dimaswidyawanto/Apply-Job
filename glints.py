@@ -21,6 +21,7 @@ from typing import Dict, List, Optional
 from urllib.parse import quote_plus
 
 from rich.console import Console
+from rich.table import Table
 from selenium import webdriver
 from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.chrome.options import Options
@@ -31,6 +32,7 @@ from auto_apply import ApplyResult, AutoApplier
 from config import config
 from database import db
 from job_filter import JobFilter, rentang_gaji
+from job_filter import job_filter as penyaring
 from notifier import notifier
 
 console = Console()
@@ -160,6 +162,9 @@ tautan.forEach(function (a) {
     const lokasi = wadah
         ? Array.from(wadah.querySelectorAll("a[href*='/job-location/']"))
         : [];
+    const gambar = wadah
+        ? Array.from(wadah.querySelectorAll("img")).slice(0, 4)
+        : [];
     const polaGaji =
         /Rp\s?[\d.,]+(?:\s?(-|–)\s?[\d.,]+)?\s?(jt|juta|rb|ribu)?/i;
     const gaji = (teks.match(polaGaji) || [""])[0];
@@ -175,7 +180,17 @@ tautan.forEach(function (a) {
             .map(function (x) { return (x.textContent || "").trim(); })
             .join(", "),
         salary: gaji,
-        text: teks.slice(0, 600)
+        text: teks.slice(0, 600),
+        logo: gambar.map(function (img) {
+            return {
+                alt: (img.getAttribute("alt") || "").trim(),
+                src: (img.getAttribute("src") || "").trim(),
+                penanda: [
+                    img.getAttribute("data-testid") || "",
+                    img.getAttribute("class") || ""
+                ].join(" ").trim()
+            };
+        })
     });
 });
 return hasil;
@@ -191,6 +206,83 @@ def id_dari_url(url: str) -> str:
     return cocok.group(1) if cocok else ""
 
 
+def logo_kartu(kandidat, perusahaan: str = "") -> tuple:
+    """Apakah kartu Glints menampilkan logo perusahaan.
+
+    Memakai aturan yang sama dengan kartu JobStreet (`logo_perusahaan`),
+    supaya `REQUIRE_COMPANY_LOGO` berlaku di kedua situs.
+    """
+    from scraper import logo_perusahaan
+
+    if not isinstance(kandidat, (list, tuple)):
+        return False, "tidak ada gambar"
+
+    for item in kandidat:
+        if not isinstance(item, dict):
+            continue
+
+        alt = str(item.get("alt") or "")
+        src = str(item.get("src") or "")
+        penanda = str(item.get("penanda") or "")
+
+        if logo_perusahaan(alt, src, penanda, perusahaan):
+            return True, f"<img alt='{alt[:30]}'>"
+
+    return False, f"{len(kandidat)} gambar tanpa logo"
+
+
+def pilih_teratas(lowongan: List[Dict], batas: int = 0) -> List[Dict]:
+    """Urutkan kandidat seperti di JobStreet, lalu batasi sesuai sisa kuota.
+
+    `RANK_BY=relevance` (bawaan) = kecocokan tertinggi dulu, `newest` =
+    posting terbaru dulu. `batas` 0 berarti tanpa pemotongan.
+    """
+    if not lowongan:
+        return []
+
+    urut_terbaru = getattr(config, "rank_by", "relevance") == "newest"
+    terurut = penyaring.rank_jobs(lowongan, prefer_newest=urut_terbaru)
+
+    if batas and batas > 0:
+        return terurut[:batas]
+
+    return terurut
+
+
+def tampilkan_perbandingan(kandidat: List[Dict], maksimal: int = 10):
+    """Tabel kandidat teratas beserta skor kecocokannya (Glints)."""
+    if not kandidat:
+        return
+
+    table = Table(
+        title=f"Kandidat Glints yang akan dilamar (dibandingkan dari "
+        f"{len(kandidat)})",
+        show_lines=False,
+    )
+    table.add_column("#", justify="right", style="dim")
+    table.add_column("Skor", justify="right", style="green")
+    table.add_column("Judul", style="cyan", max_width=44)
+    table.add_column("Perusahaan", max_width=26)
+    table.add_column("Lokasi", style="dim", max_width=20)
+
+    for nomor, job in enumerate(kandidat[:maksimal], start=1):
+        table.add_row(
+            str(nomor),
+            str(job.get("_score", 0)),
+            (job.get("title") or "-")[:44],
+            (job.get("company") or "-")[:26],
+            (job.get("location") or "-")[:20],
+        )
+
+    console.print(table)
+
+    if len(kandidat) > maksimal:
+        console.print(
+            f"[dim]… dan {len(kandidat) - maksimal} lowongan lain di bawahnya "
+            "(tidak dilamar pada sesi ini).[/]"
+        )
+
+
 def rapikan_kartu(data: dict) -> Optional[Dict]:
     """Ubah hasil skrip kartu menjadi dict lowongan; None bila tidak layak."""
     if not isinstance(data, dict):
@@ -204,11 +296,15 @@ def rapikan_kartu(data: dict) -> Optional[Dict]:
         return None
 
     teks = " ".join(str(data.get("text") or "").split()).lower()
+    perusahaan = " ".join(str(data.get("company") or "").split())
+    punya_logo, info_logo = logo_kartu(data.get("logo"), perusahaan)
 
     return {
+        "has_logo": punya_logo,
+        "logo_src": info_logo,
         "job_id": f"glints:{job_id}",
         "title": judul,
-        "company": " ".join(str(data.get("company") or "").split()),
+        "company": perusahaan,
         "location": " ".join(str(data.get("location") or "").split()),
         "salary": " ".join(str(data.get("salary") or "").split()),
         "description": " ".join(str(data.get("text") or "").split())[:800],
@@ -721,14 +817,10 @@ def jalankan_glints(max_pages: int = 0, keywords: Optional[List[str]] = None,
         laporan["dibaca"] = len(lowongan)
         console.print(f"[bold]Terbaca {len(lowongan)} lowongan Glints.[/]")
 
-        for job in lowongan:
-            if batas and laporan["dilamar"] >= batas:
-                console.print("[yellow]Batas lamaran sesi ini tercapai.[/]")
-                break
-            if _batas_harian_tercapai():
-                console.print("[yellow]Batas lamaran harian tercapai.[/]")
-                break
+        # --- Saring dulu semuanya, baru bandingkan dan pilih yang terbaik ---
+        layak: List[Dict] = []
 
+        for job in lowongan:
             if job.get("khusus_aplikasi"):
                 # Glints menandai lowongan "Lamar 1x tap di aplikasi"; tidak
                 # ada formulir web, jadi jangan buka halamannya sama sekali.
@@ -763,6 +855,47 @@ def jalankan_glints(max_pages: int = 0, keywords: Optional[List[str]] = None,
                 laporan["dilewati"] += 1
                 console.print(f"[dim]Lewati: {job['title']} — {alasan}[/]")
                 continue
+
+            layak.append(job)
+
+        if not layak:
+            console.print("[yellow]Tidak ada lowongan Glints yang lolos filter.[/]")
+            return laporan
+
+        # Sisa kuota harian, sama seperti di JobStreet.
+        sisa = 0
+        if config.max_apply_per_day > 0:
+            sudah = db.get_today_apply_count()
+            sisa = max(0, config.max_apply_per_day - sudah)
+            console.print(
+                f"[cyan]Kuota harian:[/] {sudah} sudah dilamar hari ini, "
+                f"sisa {sisa} dari {config.max_apply_per_day}."
+            )
+
+            if sisa == 0:
+                console.print(
+                    "[bold yellow]Kuota lamaran hari ini sudah habis. "
+                    "Tidak ada lamaran dikirim.[/]"
+                )
+                return laporan
+
+        dipilih = pilih_teratas(layak, sisa)
+
+        if sisa and len(layak) > sisa:
+            console.print(
+                f"[bold]{len(layak)} kandidat[/] bersaing untuk "
+                f"[bold]{sisa} slot[/] — diambil {sisa} yang paling cocok."
+            )
+
+        tampilkan_perbandingan(dipilih)
+
+        for job in dipilih:
+            if batas and laporan["dilamar"] >= batas:
+                console.print("[yellow]Batas lamaran sesi ini tercapai.[/]")
+                break
+            if _batas_harian_tercapai():
+                console.print("[yellow]Batas lamaran harian tercapai.[/]")
+                break
 
             if db.add_job(job):
                 laporan["baru"] += 1

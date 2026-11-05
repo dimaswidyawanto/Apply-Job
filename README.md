@@ -122,6 +122,7 @@ cp .env.example .env
 | `GLINTS_MIN_SALARY` | `4500000` | Khusus Glints: lamar hanya bila gaji bisa mencapai angka ini. Lowongan yang tidak mencantumkan gaji **tetap** dilamar; `0` = tanpa batas |
 | `EXCLUDE_KEYWORDS` | `principal,director,head,senior,lead` | Kata yang membuat judul otomatis ditolak |
 | `STRICT_LOCATION` | `false` | `true` = tolak lowongan yang lokasinya di luar `LOCATION` |
+| `REQUIRE_COMPANY_LOGO` | `false` | JobStreet **dan** Glints: `true` = hanya lamar lowongan yang kartunya menampilkan **logo perusahaan**; tanpa logo dilewati |
 | `MAX_APPLY_PER_DAY` | `0` | Batas lamaran per hari; `0` = tanpa batas |
 | `DELAY_BETWEEN_APPLY` | `3` | Jeda (detik) antar lowongan |
 | `MAX_PAGES` | `3` | Jumlah halaman hasil pencarian per kata kunci |
@@ -129,6 +130,7 @@ cp .env.example .env
 | `TELEGRAM_BOT_TOKEN` | kosong | Opsional, untuk notifikasi |
 | `TELEGRAM_CHAT_ID` | kosong | Opsional, untuk notifikasi |
 | `COLLECT_BEFORE_APPLY` | `false` | `false` = lamar sambil mencari (halaman terbaru dulu); `true` = kumpulkan dulu |
+| `RANK_BY` | `relevance` | Urutan pemilihan saat `COLLECT_BEFORE_APPLY=true`: `relevance` = kecocokan tertinggi dulu, `newest` = posting terbaru dulu |
 | `SORT_MODE` | `ListedDate` | Urutan hasil; `ListedDate` = terbaru dulu, `KeywordRelevance` = relevansi |
 | `PREFER_NEWEST` | `true` | Dahulukan lowongan paling baru saat antrean melamar |
 | `MAX_AGE_DAYS` | `0` | Hanya lowongan N hari terakhir (0 = semua). Nilai valid JobStreet: 1, 3, 7, 14, 31 |
@@ -142,6 +144,7 @@ cp .env.example .env
 | `AUTO_APPLY_MAX_PER_SESSION` | `0` | Batas lamaran per sesi; `0` = tanpa batas |
 | `AUTO_APPLY_STEP_TIMEOUT` | `3` | Batas detik mengenali tiap langkah; lewat itu lowongan dilewati |
 | `AUTO_ANSWER_QUESTIONS` | `true` | Jawab otomatis pertanyaan dropdown (pengalaman, gaji, pendidikan) |
+| `AUTO_ANSWER_WAIT` | `20` | Bila ada kuesioner yang tak bisa dijawab otomatis: beri waktu sekian detik agar Anda mengisi di Chrome, lalu bot melanjutkan sendiri. `0` = langsung dilewati |
 | `EXPECTED_SALARY` | `5000000` | Gaji yang diharapkan (kosong = pertanyaan gaji dilewati) |
 | `YEARS_EXPERIENCE` | `3` | Total pengalaman kerja (tahun) untuk pertanyaan pengalaman |
 | `EXPERIENCE_ROLES` | inventory, ppic, gudang, purchasing, ... | Bidang pengalaman Anda; di luar daftar ini dijawab 0 tahun |
@@ -194,6 +197,9 @@ python cli.py simulasi
 
 # 7. Uji alur lamaran pada satu lowongan (tanpa pencarian/filter)
 python cli.py uji-lamar --url "https://id.jobstreet.com/job/95549275"
+
+# 8. Periksa deteksi logo perusahaan pada kartu JobStreet
+python cli.py cek-logo --limit 10
 ```
 
 `uji-lamar` membuka satu lowongan, menjalankan alur lamaran otomatis, lalu
@@ -455,6 +461,55 @@ Ingin menambah sendiri? Tambahkan istilah dipisah koma, mis.
 Ingin mematikan filter ini (lamar semua yang muncul)?
 `REQUIRE_KEYWORD_MATCH=false`.
 
+### Hanya perusahaan yang menampilkan logo (JobStreet)
+
+Sebagian lowongan di JobStreet menampilkan **logo perusahaan** di kanan atas
+kartu; sebagian lagi tidak. Bila ingin hanya melamar lowongan yang ada
+logonya:
+
+```bash
+python cli.py cek-logo            # periksa dulu apa yang terdeteksi
+python cli.py cek-logo --limit 20 --keywords "ppic,inventory"
+python cli.py set-env REQUIRE_COMPANY_LOGO=true
+```
+
+Aturan ini berlaku untuk **JobStreet maupun Glints** — keduanya memakai
+penilai logo yang sama (`logo_perusahaan`), hanya sumber gambarnya berbeda
+(kartu JobStreet vs kartu Glints). Untuk Glints, deteksinya bisa dilihat
+langsung lewat kolom **Logo** pada `python cli.py glints cari`; tambahkan
+`--semua` bila ingin melihat kartu yang tersaring oleh aturan ini.
+
+`cek-logo` membuka pencarian JobStreet seperti biasa (perlu login, sama seperti
+`run`),
+lalu menampilkan tabel: judul, perusahaan, **ada logo atau tidak**, dan
+keterangan cara deteksinya. Contoh keluaran:
+
+```
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━┳━━━━━━━━━━━━━━━━━━━━━┓
+┃ Judul                        ┃ Perusahaan      ┃ Logo ┃ Keterangan          ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━╇━━━━━━━━━━━━━━━━━━━━━┩
+│ Admin PPIC GARMENT           │ Trackerindo ... │  ya  │ penanda 'company... │
+│ Staf Gudang                  │ PT Tanpa Logo   │ tidak│ 2 gambar tanpa logo │
+└──────────────────────────────┴━━━━━━━━━━━━━━━━━┵──────┴─────────────────────┘
+2 dari 12 kartu terdeteksi berlogo perusahaan.
+```
+
+Deteksinya berlapis, karena JobStreet bisa mengubah penanda HTML-nya:
+penanda `data-automation`/`data-testid`/`alt` yang memuat kata *logo*, URL
+gambar yang memuat *logo*/*brand*, atau teks alternatif gambar yang memuat
+**nama perusahaan**. Gambar yang jelas ikon/placeholder (mis. `icon`,
+`placeholder`, `sprite`) tidak dihitung logo.
+
+Dengan `REQUIRE_COMPANY_LOGO=true`, lowongan tanpa logo **dilewati** dan
+alasannya tampil di terminal (`Dilewati: … — Tanpa logo perusahaan`). Situs
+lain — Glints — tidak terpengaruh karena tidak mengisi informasi logo.
+
+Bila `cek-logo` menampilkan **tidak** untuk semua kartu padahal di situs
+logonya terlihat, berarti aturan perlu disesuaikan: kirimkan tabel itu (kolom
+*Keterangan* yang penting). Saat `run` berjalan, program juga memberi
+peringatan sekali bila satu halaman penuh kartu terbaca tanpa logo, supaya
+filter tidak diam-diam membuang semua lowongan.
+
 ### Pertanyaan pilihan dari perusahaan
 
 Banyak lowongan menambahkan pertanyaan wajib: dropdown, radio ya/tidak, atau
@@ -480,6 +535,45 @@ internal).
 
 Matikan semuanya dengan `AUTO_ANSWER_QUESTIONS=false` bila ingin semua
 pertanyaan dilewati.
+
+### Kuesioner yang belum terisi: bot menunggu Anda
+
+Tidak semua pertanyaan perusahaan bisa dijawab bot (mis. *"Warna favorit?"*,
+atau pertanyaan pilihan yang polanya tidak dikenali). Dulu lowongan seperti itu
+langsung dilewati. Sekarang bot memberi Anda waktu untuk mengisinya sendiri:
+
+```
+[dim]   belum bisa dijawab otomatis: Warna favorit kamu?
+Ada pertanyaan yang belum terisi: Warna favorit kamu?
+   Silakan isi di jendela Chrome sekarang — menunggu sampai 20 detik...
+   menunggu... sisa 15 detik
+   isian sudah lengkap — melanjutkan pengiriman lamaran.
+[dim]   klik tombol kirim "Kirim lamaran" (percobaan 1)
+Status: applied — Terkirim otomatis
+```
+
+Cara kerjanya:
+
+1. Bot mendeteksi ada pertanyaan wajib yang belum terisi (atau formulir menolak
+   dikirim karena isian wajib).
+2. Pesan muncul di terminal dan bot menunggu sampai `AUTO_ANSWER_WAIT` detik
+   (bawaan **20**). Terminal **tidak** meminta Anda menekan apa pun.
+3. Isi kuesionernya di jendela Chrome yang sedang terbuka.
+4. Bot memeriksa ulang setiap detik: begitu tidak ada pertanyaan tersisa dan
+   peringatan validasi hilang, ia melanjutkan sendiri — mengklik **Kirim**.
+5. Bila waktu habis dan isian masih kurang, lowongan dilewati seperti biasa
+   dan masuk daftar "perlu dilamar manual" di akhir sesi.
+
+Atur lamanya:
+
+```bash
+python cli.py set-env AUTO_ANSWER_WAIT=45    # lebih lega, sesi lebih lambat
+python cli.py set-env AUTO_ANSWER_WAIT=0     # kembali ke perilaku lama: langsung lewati
+```
+
+Tips: jalankan tanpa `HEADLESS_MODE` (bawaan) supaya jendela Chrome terlihat
+dan bisa Anda isi. Di mode headless tidak ada yang bisa diklik, jadi biarkan
+`AUTO_ANSWER_WAIT=0`.
 
 ### Isian lamaran otomatis
 
@@ -537,6 +631,58 @@ menghentikannya (Ctrl+C). Untuk memasang batas lagi:
 python cli.py set-env MAX_APPLY_PER_DAY=100 AUTO_APPLY_MAX_PER_SESSION=50
 ```
 
+### Batas 50 lamaran/hari — hanya yang paling cocok
+
+Bila ingin kuota harian dipakai untuk lowongan yang **paling cocok** (bukan
+yang kebetulan ditemukan lebih dulu), kumpulkan dulu semua kandidat dari
+**semua lokasi**, bandingkan, baru lamar yang terbaik:
+
+```bash
+python cli.py set-env MAX_APPLY_PER_DAY=50 COLLECT_BEFORE_APPLY=true RANK_BY=relevance
+python cli.py run
+```
+
+Yang terjadi saat `run`:
+
+1. Semua lokasi × kata kunci × halaman dikumpulkan (duplikat dibuang, yang
+   sudah pernah dilamar dilewati).
+2. Kandidat **diurutkan dari skor kecocokan tertinggi** (`RANK_BY=relevance`);
+   bila skornya sama, yang paling baru didahulukan.
+3. Sisa kuota hari ini dihitung: `MAX_APPLY_PER_DAY` − lamaran yang sudah
+   dikirim hari ini.
+4. Hanya **sebanyak sisa kuota** yang dilamar, diambil dari urutan teratas.
+   Kandidat di bawahnya tidak disentuh pada sesi itu.
+5. Perbandingannya ditampilkan lebih dulu:
+
+```
+Pengumpulan selesai: 63 lowongan lolos filter, diurutkan dari kecocokan tertinggi.
+Kuota harian: 12 sudah dilamar hari ini, sisa 38 dari 50.
+63 kandidat bersaing untuk 38 slot — diambil 38 yang paling cocok.
+      Kandidat yang akan dilamar (dibandingkan dari 38)
+┏━━━┳━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━┓
+┃ # ┃ Skor ┃ Judul                 ┃ Perusahaan    ┃ Umur        ┃
+┡━━━╇━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━┩
+│ 1 │   28 │ Staff PPIC            │ PT A          │ hari ini    │
+│ 2 │   25 │ Inventory Controller  │ PT B          │ 1 hari lalu │
+└───┴──────┴───────────────────────┴───────────────┴─────────────┘
+```
+
+Skor kecocokan dihitung dari: kata kunci `KEYWORDS` ada di **judul** (+10)
+atau di deskripsi (+3), gaji dicantumkan (+5), dan lowongan tayang hari ini
+(+5) atau kemarin (+3).
+
+Catatan: `MAX_APPLY_PER_DAY` adalah batas **per hari kalender** yang dihitung
+dari database, jadi menjalankan `run` dua kali dalam sehari tidak menambah
+kuota — sisanya yang dipakai. Bila kuota habis, program berhenti dengan pesan
+`Kuota lamaran hari ini sudah habis` dan tidak mengirim apa pun.
+
+Ingin kembali melamar sambil mencari (lebih cepat, tanpa perbandingan)?
+`python cli.py set-env COLLECT_BEFORE_APPLY=false`.
+
+Aturan yang sama berlaku di Glints: `jalankan.bat glints run` juga mengumpulkan
+semua kandidat, mengurutkan dari kecocokan tertinggi, menampilkan tabel
+perbandingan, lalu hanya melamar sebanyak sisa kuota `MAX_APPLY_PER_DAY`.
+
 ### Glints (glints.com)
 
 Versi Glints memakai mesin lamaran yang sama, tetapi dengan peta situsnya
@@ -573,6 +719,9 @@ Perbedaan yang perlu diketahui:
 | Umur lowongan | terbaca ("3 hari yang lalu") | tidak ditampilkan Glints |
 | Lowongan khusus HP | — | *"Lamar & chat di aplikasi"* dilewati otomatis |
 | Batas gaji | `MIN_SALARY` (batas bawah) | `GLINTS_MIN_SALARY` (gaji tertinggi di rentang) |
+| Logo perusahaan | `REQUIRE_COMPANY_LOGO` | `REQUIRE_COMPANY_LOGO` (aturan sama) |
+| Kuota harian & pilih yang paling cocok | `MAX_APPLY_PER_DAY` + `RANK_BY` | sama |
+| Menunggu kuesioner diisi | `AUTO_ANSWER_WAIT` | sama |
 
 Karena Glints tidak menampilkan tanggal tayang di kartu, urutan "terbaru"
 mengandalkan urutan situs, bukan `MAX_AGE_DAYS`.
@@ -605,7 +754,7 @@ python buka_pencarian.py --locations "Bandung,Jakarta,Bekasi" --max-tabs 12
 | `scraper.py` | Selenium: buka Chrome, cari lowongan, baca kartu lowongan |
 | `job_filter.py` | Aturan lolos/tidak dan pemeringkatan |
 | `main.py` | Alur sesi: login → cari → saring → tinjau |
-| `cli.py` | Perintah `run`, `stats`, `history`, `config`, `repair`, `blacklist` |
+| `cli.py` | Perintah `run`, `stats`, `history`, `config`, `repair`, `blacklist`, `cek-logo`, dan `glints` |
 | `notifier.py` | Notifikasi Telegram (opsional) |
 | `auto_apply.py` | Alur klik Lamar → Lanjutkan → Kirim + deteksi pengaman |
 | `glints.py` | Situs Glints: pencarian, kartu lowongan, dan pelamaran |

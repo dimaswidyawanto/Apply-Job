@@ -42,6 +42,26 @@ APPLIED_CARD_SELECTORS = (
     "[data-testid*='applied']",
 )
 
+# Penanda logo perusahaan pada kartu lowongan JobStreet.
+LOGO_SELECTORS = (
+    "[data-automation*='logo']",
+    "[data-testid*='logo']",
+    "img[alt*='logo' i]",
+)
+
+# Kata yang menunjukkan gambar itu ikon/placeholder, bukan logo perusahaan.
+KATA_BUKAN_LOGO = (
+    "icon",
+    "ikon",
+    "sprite",
+    "pixel",
+    "placeholder",
+    "spacer",
+    "flag",
+    "bendera",
+    "avatar-default",
+)
+
 APPLIED_CARD_TEXTS = {
     "applied",
     "anda sudah melamar",
@@ -56,6 +76,52 @@ ALREADY_APPLIED_MARKERS = (
     "[data-automation='appliedBadge']",
     "[data-testid='applied-badge']",
 )
+
+
+def _norm_teks(teks: str) -> str:
+    """Huruf kecil tanpa tanda baca, untuk membandingkan nama perusahaan."""
+    return re.sub(r"[^a-z0-9]+", "", (teks or "").lower())
+
+
+def logo_perusahaan(
+    alt: str = "", src: str = "", penanda: str = "", perusahaan: str = ""
+) -> bool:
+    """Menilai apakah satu gambar pada kartu lowongan adalah logo perusahaan.
+
+    Dipisah dari Selenium supaya bisa diuji tanpa membuka browser. Aturannya
+    berlapis karena JobStreet dapat mengubah penanda HTML-nya:
+
+    1. penanda/atribut memuat "logo" (data-automation, data-testid, alt);
+    2. gambar yang jelas ikon/placeholder ditolak;
+    3. URL gambar memuat "logo"/"brand";
+    4. teks alternatif gambar memuat nama perusahaan.
+    """
+    alt = (alt or "").strip()
+    src = (src or "").strip()
+    penanda = (penanda or "").strip()
+
+    if not alt and not src and not penanda:
+        return False
+
+    gabungan = f"{alt} {src} {penanda}".lower()
+
+    if "logo" in penanda.lower() or "logo" in alt.lower():
+        return True
+
+    if any(kata in gabungan for kata in KATA_BUKAN_LOGO):
+        return False
+
+    if "logo" in src.lower() or "brand" in src.lower():
+        return True
+
+    nama_perusahaan = _norm_teks(perusahaan)
+    nama_alt = _norm_teks(alt)
+
+    return bool(
+        nama_perusahaan
+        and len(nama_alt) >= 3
+        and (nama_perusahaan in nama_alt or nama_alt in nama_perusahaan)
+    )
 
 
 class JobStreetBot:
@@ -356,6 +422,54 @@ class JobStreetBot:
 
         return jobs
 
+    def _logo_card(self, card, company: str = "") -> tuple[bool, str]:
+        """Cari logo perusahaan pada satu kartu lowongan.
+
+        Kembalikan (ada_logo, keterangan) — keterangan dipakai perintah
+        `cek-logo` agar deteksi bisa diperiksa dengan data nyata.
+        """
+        for selector in LOGO_SELECTORS:
+            try:
+                elemen = card.find_elements(By.CSS_SELECTOR, selector)
+            except Exception:
+                continue
+
+            for el in elemen:
+                if not self._visible(el):
+                    continue
+
+                alt = el.get_attribute("alt") or (el.text or "")
+                src = el.get_attribute("src") or ""
+                penanda = " ".join(
+                    bagian
+                    for bagian in (
+                        el.get_attribute("data-automation"),
+                        el.get_attribute("data-testid"),
+                        el.get_attribute("class"),
+                    )
+                    if bagian
+                )
+
+                if logo_perusahaan(alt, src, penanda, company):
+                    return True, f"penanda '{penanda.strip()[:40]}'"
+
+        try:
+            gambar = card.find_elements(By.TAG_NAME, "img")
+        except Exception:
+            gambar = []
+
+        for img in gambar:
+            if not self._visible(img):
+                continue
+
+            alt = img.get_attribute("alt") or ""
+            src = img.get_attribute("src") or ""
+
+            if logo_perusahaan(alt, src, "", company):
+                return True, f"<img alt='{alt.strip()[:30]}'>"
+
+        return False, f"{len(gambar)} gambar tanpa logo"
+
     def _parse_job_card(self, card) -> Optional[Dict]:
         """Membaca satu kartu lowongan. Kartu tanpa judul/URL dilewati."""
         links = self._collect_job_links(card)
@@ -419,7 +533,11 @@ class JobStreetBot:
         except Exception:
             description = ""
 
+        has_logo, info_logo = self._logo_card(card, company)
+
         return {
+            "has_logo": has_logo,
+            "logo_src": info_logo,
             "job_id": self._extract_job_id(job_url),
             "title": title,
             "company": company or "Tidak diketahui",

@@ -15,6 +15,13 @@ QUOTA_STATUSES = ("applied",)
 TITLE_FALLBACK = "(judul tidak tersedia)"
 
 
+def _nilai_logo(nilai) -> int | None:
+    """True/False -> 1/0; tidak diketahui (mis. dari situs lain) -> NULL."""
+    if nilai is None:
+        return None
+    return 1 if nilai else 0
+
+
 class Database:
     def __init__(self, db_path: str | None = None):
         # Path absolut supaya database tidak "hilang" ketika program
@@ -79,6 +86,8 @@ class Database:
                     description TEXT,
                     url TEXT NOT NULL,
                     date_posted TEXT,
+                    has_logo INTEGER,
+                    logo_src TEXT,
                     date_scraped TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
 
@@ -125,6 +134,21 @@ class Database:
                     f"ALTER TABLE applications ADD COLUMN {column} {definition}"
                 )
 
+        # Kolom tambahan pada tabel lowongan (database versi lama belum punya).
+        job_columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(jobs)")
+        }
+
+        for column, definition in (
+            ("has_logo", "INTEGER"),
+            ("logo_src", "TEXT"),
+        ):
+            if column not in job_columns:
+                conn.execute(
+                    f"ALTER TABLE jobs ADD COLUMN {column} {definition}"
+                )
+
     # ------------------------------------------------------------------
     # Lowongan
     # ------------------------------------------------------------------
@@ -145,9 +169,10 @@ class Database:
                     """
                     INSERT INTO jobs (
                         job_id, title, company, location,
-                        salary, description, url, date_posted
+                        salary, description, url, date_posted,
+                        has_logo, logo_src
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         job_id,
@@ -158,6 +183,8 @@ class Database:
                         str(job_data.get("description") or ""),
                         url,
                         str(job_data.get("date_posted") or ""),
+                        _nilai_logo(job_data.get("has_logo")),
+                        str(job_data.get("logo_src") or ""),
                     ),
                 )
                 return True

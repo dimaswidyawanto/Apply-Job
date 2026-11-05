@@ -1052,3 +1052,127 @@ def test_klik_ulang_dibatasi_dua_kali(monkeypatch):
     assert hasil.applied is False
     assert jumlah["klik"] == 2
     assert "konfirmasi tidak muncul" in hasil.reason.lower()
+
+
+# ----------------------------------------------------------------------
+# Kuesioner yang belum terisi: beri waktu pengguna mengisinya
+# ----------------------------------------------------------------------
+def test_tunggu_jawaban_lanjut_setelah_diisi(monkeypatch):
+    monkeypatch.setattr(config, "auto_answer_wait", 5)
+    applier = AutoApplier(FakeDriver())
+    panggilan = {"n": 0}
+
+    def jawab():
+        panggilan["n"] += 1
+        return ["Warna favorit?"] if panggilan["n"] < 3 else []
+
+    monkeypatch.setattr(applier, "jawab_pertanyaan", jawab)
+    monkeypatch.setattr(applier, "_validation_error", lambda: "")
+
+    assert applier._tunggu_jawaban("Warna favorit?") == "lanjut"
+    # Dua detik pertama masih kosong, detik ketiga sudah diisi pengguna.
+    assert panggilan["n"] == 3
+
+
+def test_tunggu_jawaban_habis_bila_tidak_diisi(monkeypatch):
+    monkeypatch.setattr(config, "auto_answer_wait", 3)
+    applier = AutoApplier(FakeDriver())
+    monkeypatch.setattr(applier, "jawab_pertanyaan", lambda: ["Warna favorit?"])
+    monkeypatch.setattr(applier, "_validation_error", lambda: "wajib diisi")
+
+    jeda = {"n": 0}
+
+    def tidur(detik=0):
+        jeda["n"] += 1
+
+    monkeypatch.setattr(auto_apply.time, "sleep", tidur)
+
+    assert applier._tunggu_jawaban("Warna favorit?") == "habis"
+    assert jeda["n"] == 3
+
+
+def test_tunggu_jawaban_nol_langsung_dilewati(monkeypatch):
+    monkeypatch.setattr(config, "auto_answer_wait", 0)
+    applier = AutoApplier(FakeDriver())
+
+    jeda = {"n": 0}
+    monkeypatch.setattr(
+        auto_apply.time, "sleep", lambda *_: jeda.__setitem__("n", jeda["n"] + 1)
+    )
+
+    assert applier._tunggu_jawaban("Warna favorit?") == "habis"
+    assert jeda["n"] == 0
+
+
+def test_tunggu_jawaban_mendeteksi_lamaran_terkirim(monkeypatch):
+    monkeypatch.setattr(config, "auto_answer_wait", 5)
+    driver = FakeDriver()
+    applier = AutoApplier(driver)
+
+    def jawab():
+        # Pengguna menekan Kirim sendiri di jendela Chrome.
+        driver.body = "Lamaran Anda telah dikirim"
+        return ["Warna favorit?"]
+
+    monkeypatch.setattr(applier, "jawab_pertanyaan", jawab)
+
+    assert applier._tunggu_jawaban("Warna favorit?") == "applied"
+
+
+def test_kuesioner_diisi_pengguna_lalu_terkirim(monkeypatch):
+    """Alur penuh: bot menunggu pengguna mengisi kuesioner, lalu Kirim diklik."""
+    monkeypatch.setattr(config, "auto_answer_wait", 4)
+    monkeypatch.setattr(config, "auto_apply_step_timeout", 2)
+    monkeypatch.setattr(config, "auto_apply_submit_timeout", 2)
+
+    driver = FakeDriver()
+
+    def klik_kirim():
+        driver.body = "Lamaran Anda telah dikirim"
+
+    driver.elements = {
+        APPLY_SELECTORS[0]: [tombol_apply(driver, teks_sukses="")],
+        SUBMIT_SELECTORS[0]: [
+            FakeElement(text="Kirim lamaran", on_click=klik_kirim)
+        ],
+    }
+
+    applier = AutoApplier(driver)
+    keadaan = {
+        "pertanyaan": ["Warna favorit kamu?"],
+        "galat": "please address the following issues",
+        "menunggu": False,
+        "tidur": 0,
+    }
+
+    monkeypatch.setattr(
+        applier, "jawab_pertanyaan", lambda: list(keadaan["pertanyaan"])
+    )
+    monkeypatch.setattr(applier, "_validation_error", lambda: keadaan["galat"])
+
+    panggilan = {"tunggu": 0}
+    asli_tunggu = applier._tunggu_jawaban
+
+    def bungkus_tunggu(rinci=""):
+        panggilan["tunggu"] += 1
+        keadaan["menunggu"] = True
+        return asli_tunggu(rinci)
+
+    monkeypatch.setattr(applier, "_tunggu_jawaban", bungkus_tunggu)
+
+    def tidur(detik=0):
+        # Pengguna mengisi kuesioner setelah dua detik menunggu.
+        if not keadaan["menunggu"]:
+            return
+        keadaan["tidur"] += 1
+        if keadaan["tidur"] >= 2:
+            keadaan["pertanyaan"] = []
+            keadaan["galat"] = ""
+
+    monkeypatch.setattr(auto_apply.time, "sleep", tidur)
+
+    hasil = applier.apply({"url": driver.current_url})
+
+    assert panggilan["tunggu"] >= 1, "jalur tunggu pengguna tidak dipakai"
+    assert hasil.applied is True
+    assert hasil.status == "applied"

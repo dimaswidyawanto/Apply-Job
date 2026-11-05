@@ -41,6 +41,12 @@ def _float_setting(name: str, default: float) -> float:
         return default
 
 
+def _pilihan_setting(name: str, default: str, pilihan: tuple[str, ...]) -> str:
+    """Nilai teks yang dibatasi pada daftar pilihan; salah ketik -> default."""
+    nilai = str(os.getenv(name, default) or default).strip().lower()
+    return nilai if nilai in pilihan else default
+
+
 def _bool_setting(name: str, default: bool = False) -> bool:
     value = str(os.getenv(name, str(default))).strip().lower()
     return value in ("1", "true", "yes", "y", "ya")
@@ -101,6 +107,15 @@ class Config:
     # Tolak lowongan yang lokasinya jelas di luar LOCATION.
     strict_location: bool = _bool_setting("STRICT_LOCATION", False)
 
+    # JobStreet: lamar hanya lowongan yang kartunya menampilkan logo
+    # perusahaan. Bawaan false agar perilaku lama tidak berubah.
+    require_company_logo: bool = _bool_setting("REQUIRE_COMPANY_LOGO", False)
+
+    # Bila ada kuesioner yang tidak bisa dijawab otomatis, beri kesempatan
+    # mengisinya sendiri di jendela Chrome selama ini (detik). 0 = langsung
+    # dilewati seperti sebelumnya.
+    auto_answer_wait: int = _int_setting("AUTO_ANSWER_WAIT", 20)
+
     # Hanya lamar lowongan yang judulnya cocok dengan minat.
     require_keyword_match: bool = _bool_setting("REQUIRE_KEYWORD_MATCH", True)
     # Kata kunci untuk mencocokkan judul. Kosong = pakai KEYWORDS.
@@ -125,6 +140,11 @@ class Config:
     # true  = kumpulkan semua kandidat dulu, baru lamar (mulai terbaru).
     # false = lamar sambil mencari, per halaman (halaman 1 = terbaru).
     collect_before_apply: bool = _bool_setting("COLLECT_BEFORE_APPLY", False)
+
+    # Urutan pemilihan saat mengumpulkan dulu (COLLECT_BEFORE_APPLY=true):
+    #   relevance = yang paling cocok dengan minat didahulukan (bawaan)
+    #   newest    = yang paling baru didahulukan
+    rank_by: str = _pilihan_setting("RANK_BY", "relevance", ("relevance", "newest"))
 
     # Urutkan hasil pencarian dari yang paling baru (ListedDate).
     # Kosongkan SORT_MODE untuk kembali ke urutan relevansi JobStreet.
