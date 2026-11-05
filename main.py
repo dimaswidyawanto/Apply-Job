@@ -579,6 +579,11 @@ class AutoApplyEngine:
             "Filter lokasi ketat",
             "Aktif" if config.strict_location else "Tidak aktif",
         )
+        table.add_row(
+            "Wajib ada logo perusahaan",
+            "Aktif (JobStreet & Glints)" if config.require_company_logo
+            else "Tidak aktif",
+        )
         table.add_row("Gaji minimum", f"Rp {config.min_salary:,}")
         table.add_row("Batas pengalaman", f"{config.max_experience} tahun")
         table.add_row(
@@ -614,6 +619,12 @@ class AutoApplyEngine:
             ),
         )
         table.add_row("Jeda antar-lowongan", f"{config.delay_between_apply} detik")
+        table.add_row(
+            "Waktu tunggu kuesioner",
+            f"{config.auto_answer_wait} detik"
+            if config.auto_answer_wait > 0
+            else "Tidak menunggu (langsung dilewati)",
+        )
         table.add_row(
             "Mode browser",
             "Headless" if config.headless else "Terlihat",

@@ -414,6 +414,11 @@ def show_config():
         "Aktif" if config.strict_location else "Tidak aktif",
     )
     table.add_row(
+        "Wajib ada logo perusahaan",
+        "Aktif (JobStreet & Glints)" if config.require_company_logo
+        else "Tidak aktif",
+    )
+    table.add_row(
         "Pertanyaan pilihan otomatis",
         (
             "Aktif "
@@ -439,7 +444,12 @@ def show_config():
     table.add_row(
         "Urutan pelamaran",
         (
-            "Kumpulkan dulu, mulai dari posting terbaru"
+            "Kumpulkan dulu lalu bandingkan — "
+            + (
+                "posting terbaru dulu"
+                if config.rank_by == "newest"
+                else "kecocokan tertinggi dulu"
+            )
             if config.auto_apply and config.collect_before_apply
             else "Lamar sambil mencari (halaman terbaru dulu)"
         ),
@@ -453,6 +463,12 @@ def show_config():
         ),
     )
     table.add_row("Jeda antar-lowongan", f"{config.delay_between_apply} detik")
+    table.add_row(
+        "Waktu tunggu kuesioner",
+        f"{config.auto_answer_wait} detik"
+        if config.auto_answer_wait > 0
+        else "Tidak menunggu (langsung dilewati)",
+    )
     table.add_row("Mode browser", "Headless" if config.headless else "Terlihat")
     table.add_row(
         "Mode lamaran",
