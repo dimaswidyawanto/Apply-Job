@@ -259,6 +259,25 @@ Saat `run` berjalan:
    - tekan **Enter** saja jika lamaran **tidak** dikirim (dicatat `skipped`);
    - ketik **y** jika lamaran benar-benar sudah dikirim (dicatat `applied`).
 
+### Sinkron otomatis dua arah (kirim + tarik)
+
+`pantau` bukan hanya mengirim: saat folder sedang **tidak** ada perubahan
+lokal, ia juga menarik pembaruan supaya isi folder selalu sama dengan GitHub.
+
+- **Ada perubahan lokal** → `git add` → commit → tarik → push (lewat `simpan`).
+- **Tidak ada perubahan lokal** → periksa `origin` dan repo pengembangan;
+  kalau ada commit baru, tarik otomatis (`simpan` untuk origin, `tarik` untuk
+  repo pengembangan).
+- **Penggabungan bentrok** → dibatalkan otomatis (`git merge --abort`), folder
+  tetap utuh, dan dicatat di `pantau.log`. Selesaikan manual dengan `tarik.bat`.
+- Berkas yang sedang Anda sunting **tidak** tertimpa, karena penarikan hanya
+  dilakukan saat tidak ada perubahan lokal.
+
+Jadi setelah dipasang, folder di VS Code mengikuti GitHub tanpa Anda mengetik
+perintah apa pun. VS Code memuat ulang berkas otomatis; bila berkas sedang
+Anda ubah dan versinya berbeda, VS Code menampilkan konflik — pilih *Keep
+Yours*/*Incoming* sesuai keinginan, lalu simpan.
+
 ### Update otomatis ke GitHub setiap ada perubahan
 
 Kalau tidak ingin mengetik perintah, jalankan pemantau di latar belakang:
@@ -270,8 +289,9 @@ pantau.bat 30       # periksa tiap 30 detik
 ```
 
 Setiap kali ada file yang berubah, `pantau.bat` memanggil `simpan.bat`
-(`git add -A` → commit → tarik → push) lalu kembali memantau. Berhentikan
-dengan `Ctrl+C`. File `.env`, `jobstreet_auto.db`, dan `debug/` tetap tidak
+(`git add -A` → commit → tarik → push) lalu kembali memantau. Saat tidak ada
+perubahan lokal, ia justru memeriksa apakah ada commit baru di GitHub atau di
+repo pengembangan dan menariknya otomatis. Berhentikan dengan `Ctrl+C`. File `.env`, `jobstreet_auto.db`, dan `debug/` tetap tidak
 pernah ikut terkirim karena ada di `.gitignore`.
 
 **Otomatis penuh — cukup dipasang sekali:**
@@ -286,6 +306,8 @@ jendela**:
 
 - perubahan file dikirim ke GitHub otomatis tiap 60 detik (cukup simpan file,
   tidak perlu mengetik perintah git apa pun),
+- pembaruan dari GitHub maupun dari repo pengembangan ikut ditarik otomatis
+  saat tidak ada perubahan lokal, jadi isi folder selalu terbaru,
 - commit yang belum terkirim — mis. push gagal karena internet putus — ikut
   dikirim ulang pada putaran berikutnya,
 - catatan aktivitasnya ada di `pantau.log`.
@@ -765,7 +787,7 @@ python buka_pencarian.py --locations "Bandung,Jakarta,Bekasi" --max-tabs 12
 | `pantau.bat` / `pantau.sh` | Pemantau: kirim otomatis setiap ada perubahan |
 | `pasang-otomatis.bat` / `matikan-otomatis.bat` | Pasang/lepas pemantau saat login |
 | `pantau-diam.vbs` | Menjalankan pemantau tanpa jendela (log: `pantau.log`) |
-| `tarik.bat` / `tarik.sh` | Tarik pembaruan dari repo pengembangan |
+| `tarik.bat` / `tarik.sh` | Tarik pembaruan dari repo pengembangan (dipakai juga oleh `pantau` secara otomatis) |
 | `tests/` | Unit test untuk filter dan database |
 
 ## Seberapa otomatis alat ini?

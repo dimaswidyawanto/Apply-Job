@@ -31,6 +31,7 @@ echo.
 echo Selesai. Mulai sekarang, setiap Anda login:
 echo   - pemantau berjalan diam-diam (tanpa jendela)
 echo   - perubahan di folder ini dikirim ke GitHub otomatis tiap 60 detik
+echo   - pembaruan dari GitHub / repo pengembangan ditarik otomatis
 echo   - catatan aktivitas ada di pantau.log
 echo.
 echo Ingin langsung aktif sekarang tanpa menunggu login? jalankan:
