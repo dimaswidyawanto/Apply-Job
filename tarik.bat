@@ -29,6 +29,27 @@ if errorlevel 1 (
     exit /b 1
 )
 
+rem --- Bereskan sisa penggabungan yang gagal sebelumnya ---
+if exist ".git\MERGE_HEAD" (
+    echo [info] Membatalkan penggabungan sebelumnya yang belum selesai...
+    git merge --abort
+)
+
+rem --- Simpan dulu perubahan lokal (mis. .github\copilot-instructions.md)
+rem     supaya penggabungan tidak ditolak "would be overwritten by merge".
+set "DISIMPAN="
+git diff --quiet
+if errorlevel 1 goto :simpan_lokal
+git diff --cached --quiet
+if errorlevel 1 goto :simpan_lokal
+goto :gabung
+
+:simpan_lokal
+echo [info] Menyimpan perubahan lokal sementara ^(git stash^)...
+git stash push -m "tarik-otomatis" >nul 2>&1
+if not errorlevel 1 set "DISIMPAN=1"
+
+:gabung
 echo [2/2] Menggabungkan %ARENA_REMOTE%/%ARENA_CABANG% ke cabang ini...
 git merge --no-edit %ARENA_REMOTE%/%ARENA_CABANG%
 if errorlevel 1 (
@@ -41,7 +62,18 @@ if errorlevel 1 (
     echo   git status
     echo   ... perbaiki file yang bertanda konflik ...
     echo   git add -A ^&^& git commit
+    if defined DISIMPAN echo Perubahan lokal Anda masih tersimpan: git stash pop
     exit /b 1
+)
+
+if defined DISIMPAN (
+    git stash pop >nul 2>&1
+    if errorlevel 1 (
+        echo [PERHATIAN] Perubahan lokal belum bisa dikembalikan otomatis.
+        echo   Perubahan itu aman di git stash. Kembalikan dengan: git stash pop
+    ) else (
+        echo [info] Perubahan lokal dikembalikan.
+    )
 )
 
 echo.

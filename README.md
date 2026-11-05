@@ -69,6 +69,18 @@ PowerShell/Command Prompt di folder itu, lalu:
 ```
 
 Di Command Prompt lama, `.\` boleh dihilangkan (`jalankan.bat run`).
+**Bila `tarik.bat` berhenti dengan “Your local changes to the following
+files would be overwritten by merge”**, artinya ada berkas yang kamu ubah
+sendiri (mis. `.github/copilot-instructions.md`). Versi baru `tarik.bat` sudah
+menyimpan perubahan itu otomatis lewat `git stash` lalu mengembalikannya.
+Untuk versi lama, lakukan sekali secara manual:
+
+```powershell
+git stash push -m "sebelum tarik"
+.\tarik.bat
+git stash pop
+```
+
 Di **PowerShell** awalan `.\` wajib — kalau tidak, muncul
 `tarik.bat : The term 'tarik.bat' is not recognized...` karena PowerShell
 tidak menjalankan perintah dari folder aktif. Nama folder boleh memuat
