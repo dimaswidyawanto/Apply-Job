@@ -511,6 +511,10 @@ def alasan_tidak_layak(job: Dict, saringan: Optional[JobFilter] = None) -> str:
     if job.get("sudah_dilamar"):
         return "sudah pernah dilamar"
 
+    job_id = str(job.get("job_id") or "").strip()
+    if job_id and db.is_already_applied(job_id):
+        return "Sudah tercatat dilamar"
+
     alasan = alasan_gaji(job)
     if alasan:
         return alasan
@@ -692,6 +696,9 @@ class GlintsBot:
     def __init__(self):
         self.driver = None
         self.filters = JobFilter()
+        # Sama seperti JobStreet: bila Glints meminta login di tengah sesi,
+        # sesi dihentikan agar tidak menumpuk galat.
+        self.login_expired = False
         # Pola URL pencarian yang terbukti menghasilkan kartu.
         self.search_url = ""
         # Ringkasan diagnosa terakhir (dipakai tes & laporan).
@@ -1092,6 +1099,46 @@ class GlintsBot:
 
     # ------------------------------ lamar -----------------------------
     def lamar(self, job: dict) -> ApplyResult:
+        """Lamar satu lowongan Glints dengan aturan yang sama seperti JobStreet.
+
+        Urutannya: periksa judul/URL → periksa catatan database → mode otomatis
+        (`AUTO_APPLY=true`) atau tinjau manual. Status selalu dicatat ke
+        database, termasuk `already_applied` dan `login_required`.
+        """
+        title = (job.get("title") or "").strip()
+        url = (job.get("url") or "").strip()
+        job_id = str(job.get("job_id") or "").strip()
+
+        if not title or not url:
+            console.print(
+                "[yellow]Lowongan dilewati karena judul atau URL tidak terbaca.[/]"
+            )
+            return ApplyResult(False, "error", "Judul atau URL tidak terbaca")
+
+        if not job_id:
+            job_id = f"glints:{id_dari_url(url)}"
+            job["job_id"] = job_id
+
+        # Sama seperti JobStreet: jangan pernah melamar dua kali.
+        if db.is_already_applied(job_id):
+            return ApplyResult(False, "already_applied", "Sudah tercatat dilamar")
+
+        if config.auto_apply:
+            return self._lamar_otomatis(job, job_id)
+
+        return self._lamar_manual(job, job_id)
+
+    @staticmethod
+    def _catat(job_id: str, status: str, catatan: str) -> None:
+        try:
+            db.record_application(job_id, status, catatan)
+        except Exception as exc:
+            console.print(f"[yellow]Gagal mencatat lamaran: {exc}[/]")
+
+    def _lamar_otomatis(self, job: dict, job_id: str) -> ApplyResult:
+        title = (job.get("title") or "").strip()
+        console.print(f"\n[bold magenta]{title}[/] [cyan](otomatis)[/]")
+
         try:
             hasil = GlintsApplier(self.driver).apply(job)
         except WebDriverException as exc:
@@ -1099,11 +1146,11 @@ class GlintsBot:
                 raise ChromeTertutup(
                     "Jendela Chrome tertutup saat program berjalan"
                 ) from exc
+            self._catat(job_id, "error", f"Galat browser: {exc}")
             return ApplyResult(False, "error", f"Galat browser: {exc}")
         except Exception as exc:  # jaring pengaman: jangan hentikan sesi
-            return ApplyResult(
-                False, "error", f"Galat tak terduga: {exc}"
-            )
+            self._catat(job_id, "error", f"Galat tak terduga: {exc}")
+            return ApplyResult(False, "error", f"Galat tak terduga: {exc}")
 
         # apply() menelan galat browser menjadi ApplyResult; ubah lagi menjadi
         # ChromeTertutup supaya sesi berhenti rapi, bukan mencetak traceback.
@@ -1112,7 +1159,86 @@ class GlintsBot:
                 "Jendela Chrome tertutup saat program berjalan"
             )
 
+        if hasil.status == "applied":
+            self._catat(job_id, "applied", hasil.reason or "Dikirim otomatis")
+            console.print("[bold green]Lamaran terkirim otomatis.[/]")
+        elif hasil.status == "already_applied":
+            self._catat(job_id, "already_applied", hasil.reason)
+        elif hasil.status == "login_required":
+            self._catat(job_id, "error", hasil.reason)
+            self.login_expired = True
+            console.print(
+                "[bold red]Sesi login Glints sudah habis. Sesi dihentikan.[/]"
+            )
+        elif hasil.status == "manual_required":
+            self._catat(job_id, "manual_required", hasil.reason)
+            console.print(f"[yellow]Dilewati: {hasil.reason}[/]")
+        else:
+            self._catat(job_id, "error", hasil.reason)
+            console.print(f"[bold red]Gagal melamar otomatis: {hasil.reason}[/]")
+
         return hasil
+
+    def _lamar_manual(self, job: dict, job_id: str) -> ApplyResult:
+        """Buka halaman lowongan supaya pengguna melamar sendiri (JobStreet)."""
+        title = (job.get("title") or "").strip()
+        url = (job.get("url") or "").strip()
+
+        try:
+            self.driver.get(url)
+            time.sleep(2)
+
+            if self._halaman_sudah_dilamar():
+                self._catat(
+                    job_id, "already_applied",
+                    "Halaman menandai lowongan ini sudah pernah dilamar",
+                )
+                console.print(
+                    f"[yellow]Glints menandai '{title}' sudah pernah dilamar. "
+                    "Dicatat dan dilewati.[/]"
+                )
+                return ApplyResult(False, "already_applied", "Sudah pernah dilamar")
+
+            console.print(f"\n[bold magenta]{title}[/]")
+            console.print(f"Perusahaan: {job.get('company', 'Tidak diketahui')}")
+            console.print(f"URL: {url}")
+            console.print(
+                "[cyan]Tinjau persyaratan di Chrome. Jika cocok, lakukan Lamar "
+                "dan Kirim sendiri.[/]"
+            )
+
+            jawab = input(
+                "Setelah selesai meninjau, tekan Enter "
+                "(ketik y bila lamaran sudah terkirim): "
+            ).strip().lower()
+
+            if jawab in ("y", "ya", "yes"):
+                self._catat(
+                    job_id, "applied", "Dikirim manual dan dikonfirmasi pengguna"
+                )
+                console.print("[bold green]Lamaran dicatat sebagai terkirim.[/]")
+                return ApplyResult(True, "applied", "Dikonfirmasi manual")
+
+            self._catat(
+                job_id, "skipped",
+                "Tidak dikonfirmasi sebagai lamaran terkirim",
+            )
+            console.print("[yellow]Tidak dicatat sebagai lamaran terkirim.[/]")
+            return ApplyResult(False, "skipped", "Tidak dikonfirmasi")
+
+        except (EOFError, KeyboardInterrupt):
+            console.print(
+                "\n[yellow]Tinjauan dibatalkan; lamaran tidak dicatat.[/]"
+            )
+            return ApplyResult(False, "skipped", "Dibatalkan")
+        except Exception as exc:
+            console.print(f"[bold red]Gagal membuka lowongan: {exc}[/]")
+            self._catat(job_id, "error", str(exc))
+            return ApplyResult(False, "error", str(exc))
+
+    def _halaman_sudah_dilamar(self) -> bool:
+        teks = self._teks_halaman()
+        return any(tanda in teks for tanda in SUDAH_DILAMAR_TEXTS)
 
     def tutup(self):
         tutup_chrome(self.driver)
@@ -1128,6 +1254,57 @@ def _batas_harian_tercapai() -> bool:
     return db.get_today_apply_count() >= batas
 
 
+def tampilkan_konfigurasi_glints() -> None:
+    """Ringkasan pengaturan aktif, isinya sama dengan banner JobStreet."""
+    mode = "otomatis" if config.auto_apply else "manual (tinjau sendiri)"
+    kuota = (
+        f"{config.max_apply_per_day} per hari"
+        if config.max_apply_per_day > 0
+        else "tanpa batas"
+    )
+    batas_sesi = int(getattr(config, "auto_apply_max_per_session", 0) or 0)
+    port = int(getattr(config, "chrome_debug_port", 0) or 0)
+
+    tabel = Table(title="Pengaturan sesi Glints", show_header=False)
+    tabel.add_column("Pengaturan", style="cyan")
+    tabel.add_column("Nilai")
+
+    kata_kunci = list(config.keywords_riset or [])
+    tabel.add_row("Mode lamar", mode)
+    tabel.add_row("Kuota lamaran", kuota)
+    tabel.add_row(
+        "Batas per sesi", f"{batas_sesi} lamaran" if batas_sesi else "tanpa batas"
+    )
+    tabel.add_row(
+        "Kata kunci riset",
+        f"{len(kata_kunci)} — {', '.join(kata_kunci[:3])}"
+        + (" ..." if len(kata_kunci) > 3 else ""),
+    )
+    tabel.add_row(
+        "Lokasi disaring",
+        f"{len(config.locations)} — {', '.join(config.locations[:3])}"
+        if config.locations
+        else "semua lokasi",
+    )
+    tabel.add_row(
+        "Wajib logo perusahaan", "ya" if config.require_company_logo else "tidak"
+    )
+    tabel.add_row("Urutan kandidat", getattr(config, "rank_by", "relevance"))
+    tabel.add_row("Jeda antar lamaran", f"{config.delay_between_apply} detik")
+    tabel.add_row(
+        "Gaji minimal Glints",
+        f"Rp{config.glints_min_salary:,}".replace(",", ".")
+        if getattr(config, "glints_min_salary", 0)
+        else "tanpa batas",
+    )
+    tabel.add_row(
+        "Chrome",
+        f"menempel ke port {port}" if port else "dibuka oleh bot",
+    )
+
+    console.print(tabel)
+
+
 def jalankan_glints(max_pages: int = 0, keywords: Optional[List[str]] = None,
                     batas: int = 0) -> dict:
     """Cari, saring, lalu lamar lowongan Glints secara otomatis."""
@@ -1141,6 +1318,15 @@ def jalankan_glints(max_pages: int = 0, keywords: Optional[List[str]] = None,
         "dilewati": 0, "gagal": 0, "perlu_manual": 0,
         "khusus_aplikasi": 0,
     }
+
+    tampilkan_konfigurasi_glints()
+
+    if not config.auto_apply:
+        console.print(
+            "[bold yellow]Mode manual aktif: setiap lowongan dibuka untuk Anda "
+            "tinjau dan kirim sendiri. Pakai AUTO_APPLY=true untuk mengirim "
+            "otomatis.[/]\n"
+        )
 
     try:
         bot.init_browser()
@@ -1237,8 +1423,23 @@ def jalankan_glints(max_pages: int = 0, keywords: Optional[List[str]] = None,
 
             if job.get("sudah_dilamar"):
                 laporan["sudah"] += 1
+                db.add_job(job)
+                db.record_application(
+                    job["job_id"], "already_applied",
+                    "Ditandai sudah dilamar di Glints",
+                )
                 console.print(f"[dim]Lewati: {job['title']} — sudah dilamar[/]")
                 continue
+
+            # Sama seperti JobStreet: lowongan yang pernah dilamar bot (atau
+            # tercatat di database) dilewati diam-diam, tidak memakai kuota.
+            if db.is_already_applied(job["job_id"]):
+                laporan["sudah"] += 1
+                continue
+
+            # Catat lowongan baru seperti JobStreet menghitung "baru".
+            if db.add_job(job):
+                laporan["baru"] += 1
 
             alasan = alasan_gaji(job)
             if alasan:
@@ -1310,6 +1511,8 @@ def jalankan_glints(max_pages: int = 0, keywords: Optional[List[str]] = None,
         tampilkan_perbandingan(dipilih)
         tampilkan_rincian_skor(dipilih)
 
+        batas_sesi = int(getattr(config, "auto_apply_max_per_session", 0) or 0)
+
         for job in dipilih:
             if batas and laporan["dilamar"] >= batas:
                 console.print("[yellow]Batas lamaran sesi ini tercapai.[/]")
@@ -1317,9 +1520,12 @@ def jalankan_glints(max_pages: int = 0, keywords: Optional[List[str]] = None,
             if _batas_harian_tercapai():
                 console.print("[yellow]Batas lamaran harian tercapai.[/]")
                 break
-
-            if db.add_job(job):
-                laporan["baru"] += 1
+            if batas_sesi and laporan["dilamar"] >= batas_sesi:
+                console.print(
+                    "[bold yellow]Batas lamaran otomatis per sesi "
+                    f"({batas_sesi}) tercapai. Sisa lowongan dilewati.[/]"
+                )
+                break
 
             try:
                 hasil = bot.lamar(job)
@@ -1328,34 +1534,55 @@ def jalankan_glints(max_pages: int = 0, keywords: Optional[List[str]] = None,
                 laporan["gagal"] += 1
                 break
 
+            if hasil.status == "login_required":
+                laporan["gagal"] += 1
+                console.print(
+                    "[bold red]Sesi login Glints sudah habis. Sesi dihentikan "
+                    "agar tidak menumpuk galat.[/]"
+                )
+                notifier.send_error("Sesi login Glints habis")
+                break
+
             if hasil.applied:
                 laporan["dilamar"] += 1
-                db.record_application(
-                    job["job_id"], "applied", hasil.reason
-                )
                 notifier.send_apply_success(job)
                 console.print(f"[green]Terkirim: {job['title']}[/]")
             elif hasil.status == "already_applied":
                 laporan["sudah"] += 1
-                db.record_application(
-                    job["job_id"], "already_applied", hasil.reason
-                )
             elif hasil.status == "manual_required":
                 laporan["perlu_manual"] += 1
-                db.record_application(
-                    job["job_id"], "manual_required", hasil.reason
-                )
                 console.print(
                     f"[yellow]Perlu manual: {job['title']} — {hasil.reason}[/]"
                 )
+            elif hasil.status == "skipped":
+                laporan["dilewati"] += 1
             else:
                 laporan["gagal"] += 1
-                db.record_application(job["job_id"], hasil.status, hasil.reason)
                 console.print(f"[red]Gagal: {job['title']} — {hasil.reason}[/]")
 
-            time.sleep(max(0.0, float(config.delay_between_apply or 0)))
+            # Jeda hanya setelah lamaran benar-benar diproses, sama seperti
+            # JobStreet; lowongan yang dilewati langsung lanjut.
+            if hasil.applied or hasil.status == "error":
+                jeda = max(0.0, float(config.delay_between_apply or 0))
+                if jeda:
+                    console.print(
+                        f"[dim]Jeda {jeda:.0f} detik sebelum lowongan "
+                        "berikutnya...[/]"
+                    )
+                    time.sleep(jeda)
+    except Exception as exc:
+        # Sama seperti JobStreet: galat tak terduga dilaporkan ke Telegram.
+        notifier.send_error(str(exc))
+        raise
+
     finally:
         bot.tutup()
+
+        # Ringkasan harian ke Telegram, sama seperti sesi JobStreet.
+        try:
+            notifier.send_daily_report(db.get_stats())
+        except Exception as exc:
+            console.print(f"[yellow]Laporan harian gagal dikirim: {exc}[/]")
 
     return laporan
 

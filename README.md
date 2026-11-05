@@ -815,6 +815,36 @@ yang sama dengan JobStreet karena keduanya menulis ke database yang sama.
 
 ### Glints (glints.com)
 
+#### Aturan Glints = aturan JobStreet
+
+JobStreet dipakai sebagai acuan; Glints mengikuti aturan yang sama:
+
+| Aturan | JobStreet | Glints |
+|---|---|---|
+| Riset semua kata kunci, maks 5 halaman per kombinasi | ya | ya (5 kali muat "Muat lebih banyak") |
+| Urut posting terbaru | ya | ya ("Baru Ditambahkan") |
+| Dedupe lintas kata kunci | ya | ya |
+| Saring judul/lokasi/gaji/kualifikasi | `JobFilter` | `JobFilter` yang sama |
+| Wajib logo perusahaan (`REQUIRE_COMPANY_LOGO`) | ya | ya |
+| Skor 8 dimensi + ranking global | ya | ya |
+| TOP 50 global per hari, kuota dipakai bersama | ya | ya |
+| Lewati yang sudah pernah dilamar (situs **dan** database) | ya | ya |
+| Lewati lowongan yang hanya bisa dilamar via aplikasi | tidak berlaku | ya (khusus Glints) |
+| `AUTO_APPLY_MAX_PER_SESSION` | ya | ya |
+| `DELAY_BETWEEN_APPLY` (hanya setelah lamaran/error) | ya | ya |
+| Mode manual `AUTO_APPLY=false` (tinjau lalu konfirmasi) | ya | ya |
+| Login habis → sesi berhenti + notifikasi Telegram | ya | ya |
+| Laporan harian Telegram di akhir sesi | ya | ya |
+| Pencarian per lokasi | `LOCATIONS` × kata kunci | satu pencarian nasional per kata kunci, hasil disaring `LOCATIONS` |
+
+Dua perbedaan yang memang disengaja:
+
+1. **Glints selalu riset dulu** (tidak ada mode "lamar sambil mencari"),
+   karena TOP 50 global hanya bisa ditentukan setelah semua hasil dinilai.
+2. **Pencarian Glints tidak per lokasi** — alamat explore-nya nasional
+   (`countryCode=ID`), jadi hasilnya lebih luas lalu disaring dengan
+   `LOCATIONS`. Aturan "semua lokasi tercakup" tetap terpenuhi.
+
 #### "Terbaca 0 lowongan" di Glints
 
 Kalau `glints run`/`glints cari` melaporkan tidak ada lowongan padahal di
