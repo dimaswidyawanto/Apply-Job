@@ -442,6 +442,30 @@ def show_config():
     )
     table.add_row("Halaman per kata kunci", str(config.max_pages))
     table.add_row(
+        "Riset lowongan",
+        (
+            "Tanpa batas halaman (sampai habis)"
+            if config.research_max_pages == 0
+            else f"Maksimal {config.research_max_pages} halaman/kata kunci"
+        )
+        + " — tidak dibatasi 50",
+    )
+    table.add_row(
+        "Kata kunci riset",
+        f"{len(config.keywords_riset)} kategori"
+        + (
+            " (dari RESEARCH_KEYWORDS)"
+            if config.research_keywords
+            else " (ikut KEYWORDS)"
+        ),
+    )
+    table.add_row(
+        "Batas hasil riset",
+        str(config.research_max_jobs)
+        if config.research_max_jobs > 0
+        else "Tanpa batas",
+    )
+    table.add_row(
         "Urutan pelamaran",
         (
             "Kumpulkan dulu lalu bandingkan — "
@@ -581,7 +605,19 @@ if __name__ == "__main__":
         "--max-pages",
         type=int,
         default=None,
-        help="Jumlah halaman hasil pencarian per kata kunci",
+        help=(
+            "Jumlah halaman per kata kunci untuk mode lamar-sambil-mencari "
+            "(tidak membatasi riset)"
+        ),
+    )
+    run_parser.add_argument(
+        "--riset-pages",
+        type=int,
+        default=None,
+        help=(
+            "Batas halaman fase riset per kata kunci "
+            "(0 = tanpa batas, bawaan RESEARCH_MAX_PAGES)"
+        ),
     )
     run_parser.add_argument(
         "--headless",
@@ -659,7 +695,13 @@ if __name__ == "__main__":
 
     glints_run = glints_sub.add_parser("run", help="Jalankan pencarian Glints")
     glints_run.add_argument(
-        "--max-pages", type=int, default=0, help="Halaman per kata kunci (0=default)"
+        "--max-pages",
+        type=int,
+        default=0,
+        help=(
+            "Muat per kata kunci (0 = riset sampai habis, ikut "
+            "RESEARCH_MAX_PAGES)"
+        ),
     )
     glints_run.add_argument(
         "--keywords", default="", help="Kata kunci dipisah koma (0=bawaan .env)"
@@ -729,6 +771,9 @@ if __name__ == "__main__":
 
         if args.max_pages is not None:
             config.max_pages = max(1, args.max_pages)
+
+        if getattr(args, "riset_pages", None) is not None:
+            config.research_max_pages = max(0, args.riset_pages)
 
         if args.headless:
             config.headless = True

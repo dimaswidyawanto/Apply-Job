@@ -48,6 +48,10 @@ def siapkan(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "locations", ["Bandung"])
     monkeypatch.setattr(config, "keywords", ["inventory", "ppic"])
     monkeypatch.setattr(config, "max_pages", 1)
+    # Fixture ini menguji satu halaman per kata kunci; riset tanpa batas
+    # diuji terpisah di tests/test_riset.py.
+    monkeypatch.setattr(config, "research_max_pages", 1)
+    monkeypatch.setattr(config, "research_max_jobs", 0)
     monkeypatch.setattr(config, "auto_apply", True)
     monkeypatch.setattr(config, "require_keyword_match", False)
     monkeypatch.setattr(config, "max_age_days", 0)

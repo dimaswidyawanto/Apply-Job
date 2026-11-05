@@ -223,6 +223,8 @@ def _siapkan_sesi(monkeypatch, kartu, kuota=0, logo=False):
     )
     monkeypatch.setattr(config, "keywords", ["inventory"])
     monkeypatch.setattr(config, "max_pages", 1)
+    # Satu muat per kata kunci; riset tanpa batas diuji di test_riset.py.
+    monkeypatch.setattr(config, "research_max_pages", 1)
     monkeypatch.setattr(config, "locations", ["Bekasi"])
     monkeypatch.setattr(config, "glints_min_salary", 0)
     monkeypatch.setattr(config, "max_apply_per_day", kuota)

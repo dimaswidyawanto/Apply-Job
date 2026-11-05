@@ -31,11 +31,15 @@ from selenium.webdriver.common.by import By
 from auto_apply import ApplyResult, AutoApplier
 from config import config
 from database import db
-from job_filter import JobFilter, rentang_gaji
+from job_filter import JobFilter, dedupe_jobs, rentang_gaji
 from job_filter import job_filter as penyaring
 from notifier import notifier
 
 console = Console()
+
+# Pengaman riset Glints tanpa batas: berapa kali tombol "Muat lebih banyak"
+# boleh diklik per kata kunci sebelum berhenti (tombolnya habis sendiri).
+BATAS_MUAT_GLINTS = 20
 
 
 class ChromeTertutup(RuntimeError):
@@ -229,6 +233,24 @@ def logo_kartu(kandidat, perusahaan: str = "") -> tuple:
             return True, f"<img alt='{alt[:30]}'>"
 
     return False, f"{len(kandidat)} gambar tanpa logo"
+
+
+def halaman_per_kata_kunci(max_pages: int = 0) -> int:
+    """Berapa kali daftar dimuat per kata kunci.
+
+    `max_pages` > 0 dari CLI dipakai apa adanya. Selain itu ikut
+    RESEARCH_MAX_PAGES; 0 = riset sampai habis (dibatasi BATAS_MUAT_GLINTS
+    sebagai pengaman, karena tombol "Muat lebih banyak" berhenti sendiri
+    saat lowongan sudah habis).
+    """
+    if max_pages and max_pages > 0:
+        return max_pages
+
+    riset = int(getattr(config, "research_max_pages", 0) or 0)
+    if riset > 0:
+        return riset
+
+    return BATAS_MUAT_GLINTS
 
 
 def pilih_teratas(lowongan: List[Dict], batas: int = 0) -> List[Dict]:
@@ -782,8 +804,9 @@ def _batas_harian_tercapai() -> bool:
 def jalankan_glints(max_pages: int = 0, keywords: Optional[List[str]] = None,
                     batas: int = 0) -> dict:
     """Cari, saring, lalu lamar lowongan Glints secara otomatis."""
-    kata_kunci = list(keywords or config.keywords)
-    halaman = max_pages or config.max_pages
+    kata_kunci = list(keywords) if keywords else config.keywords_riset
+    halaman = halaman_per_kata_kunci(max_pages)
+    batas_riset = int(getattr(config, "research_max_jobs", 0) or 0)
 
     bot = GlintsBot()
     laporan = {
@@ -802,20 +825,58 @@ def jalankan_glints(max_pages: int = 0, keywords: Optional[List[str]] = None,
         lowongan: List[Dict] = []
         terlihat = set()
 
-        for keyword in kata_kunci:
-            for nomor in range(halaman):
-                console.print(
-                    f"[cyan]Glints: '{keyword}' halaman {nomor + 1}[/]"
-                )
-                for job in bot.cari(keyword, nomor):
-                    if job["job_id"] in terlihat:
-                        continue
-                    terlihat.add(job["job_id"])
-                    lowongan.append(job)
+        batas_halaman = max_pages or int(
+            getattr(config, "research_max_pages", 0) or 0
+        )
+        console.print(
+            f"[bold blue]RISET GLINTS[/] — {len(kata_kunci)} kata kunci, "
+            + (
+                f"maksimal {halaman} muat per kata kunci"
+                if batas_halaman
+                else "tanpa batas sampai lowongan habis"
+            )
+            + ", urut 'Baru Ditambahkan'."
+        )
 
-        # Mulai dari lowongan yang tampil paling atas (urut "Baru Ditambahkan").
+        for keyword in kata_kunci:
+            console.print(
+                f"[cyan]Glints: '{keyword}' — muat sampai {halaman} kali[/]"
+            )
+            # Sekali buka per kata kunci: `cari` sendiri yang mengklik "Muat
+            # lebih banyak" sampai tombolnya habis, lalu mengembalikan semua
+            # kartu yang sudah termuat. Jauh lebih cepat daripada membuka
+            # ulang halaman untuk setiap nomor halaman.
+            kartu = bot.cari(keyword, max(0, halaman - 1))
+
+            baru = 0
+            for job in kartu:
+                if job["job_id"] in terlihat:
+                    continue
+                terlihat.add(job["job_id"])
+                lowongan.append(job)
+                baru += 1
+
+            if baru == 0:
+                console.print(
+                    "[dim]Tidak ada lowongan baru untuk kata kunci ini.[/]"
+                )
+
+            if batas_riset and len(lowongan) >= batas_riset:
+                console.print(
+                    f"[cyan]Batas riset RESEARCH_MAX_JOBS={batas_riset} "
+                    "tercapai — riset Glints dihentikan.[/]"
+                )
+                break
+
+        sebelum_dedup = len(lowongan)
+        lowongan = dedupe_jobs(lowongan)
+        dibuang = sebelum_dedup - len(lowongan)
+
         laporan["dibaca"] = len(lowongan)
-        console.print(f"[bold]Terbaca {len(lowongan)} lowongan Glints.[/]")
+        console.print(
+            f"[bold green]Riset Glints selesai:[/] {sebelum_dedup} terbaca → "
+            f"{len(lowongan)} unik ({dibuang} duplikat dibuang)."
+        )
 
         # --- Saring dulu semuanya, baru bandingkan dan pilih yang terbaik ---
         layak: List[Dict] = []
@@ -945,15 +1006,16 @@ def kumpulkan_lowongan(bot, kata_kunci, halaman: int) -> List[Dict]:
     terlihat = set()
 
     for keyword in kata_kunci:
-        for nomor in range(max(1, halaman)):
-            console.print(f"[cyan]Glints: '{keyword}' halaman {nomor + 1}[/]")
-            for job in bot.cari(keyword, nomor):
-                if job["job_id"] in terlihat:
-                    continue
-                terlihat.add(job["job_id"])
-                lowongan.append(job)
+        console.print(
+            f"[cyan]Glints: '{keyword}' — muat sampai {max(1, halaman)} kali[/]"
+        )
+        for job in bot.cari(keyword, max(0, halaman - 1)):
+            if job["job_id"] in terlihat:
+                continue
+            terlihat.add(job["job_id"])
+            lowongan.append(job)
 
-    return lowongan
+    return dedupe_jobs(lowongan)
 
 
 def pilih_kandidat(lowongan: List[Dict], batas: int = 0,

@@ -123,13 +123,17 @@ cp .env.example .env
 | `EXCLUDE_KEYWORDS` | `principal,director,head,senior,lead` | Kata yang membuat judul otomatis ditolak |
 | `STRICT_LOCATION` | `false` | `true` = tolak lowongan yang lokasinya di luar `LOCATION` |
 | `REQUIRE_COMPANY_LOGO` | `false` | JobStreet **dan** Glints: `true` = hanya lamar lowongan yang kartunya menampilkan **logo perusahaan**; tanpa logo dilewati |
-| `MAX_APPLY_PER_DAY` | `0` | Batas lamaran per hari; `0` = tanpa batas |
+| `MAX_APPLY_PER_DAY` | `0` | Batas **lamaran yang dikirim** per hari (mis. `50`); `0` = tanpa batas. Riset & penilaian tetap tanpa batas |
 | `DELAY_BETWEEN_APPLY` | `3` | Jeda (detik) antar lowongan |
-| `MAX_PAGES` | `3` | Jumlah halaman hasil pencarian per kata kunci |
+| `MAX_PAGES` | `3` | Jumlah halaman per kata kunci untuk mode lama (`COLLECT_BEFORE_APPLY=false`) dan `cek-logo` |
+| `RESEARCH_KEYWORDS` | kosong | Kata kunci **khusus riset** (boleh lebih lebar dari `KEYWORDS`); kosong = ikut `KEYWORDS`. Semua kata kunci dicari di semua lokasi |
+| `RESEARCH_MAX_PAGES` | `0` | Halaman riset per kata kunci. `0` = **tanpa batas** (lanjut sampai halaman kosong / tidak ada lowongan baru) |
+| `RESEARCH_MAX_JOBS` | `0` | Batas jumlah lowongan hasil riset (pengaman). `0` = tanpa batas — **riset tidak dibatasi 50** |
+| `SKILL_KEYWORDS` | inventory, sap, erp, excel, ppic, ... | Keterampilan yang dicari di deskripsi untuk skor kesesuaian keterampilan |
 | `HEADLESS_MODE` | `false` | `true` = Chrome tanpa jendela (tidak cocok untuk tinjau manual) |
 | `TELEGRAM_BOT_TOKEN` | kosong | Opsional, untuk notifikasi |
 | `TELEGRAM_CHAT_ID` | kosong | Opsional, untuk notifikasi |
-| `COLLECT_BEFORE_APPLY` | `false` | `false` = lamar sambil mencari (halaman terbaru dulu); `true` = kumpulkan dulu |
+| `COLLECT_BEFORE_APPLY` | `true` | `true` = **riset dulu**: kumpulkan → dedup → nilai → peringkat → TOP 50 → lamar. `false` = lamar sambil mencari (hanya bila `MAX_APPLY_PER_DAY=0`) |
 | `RANK_BY` | `relevance` | Urutan pemilihan saat `COLLECT_BEFORE_APPLY=true`: `relevance` = kecocokan tertinggi dulu, `newest` = posting terbaru dulu |
 | `SORT_MODE` | `ListedDate` | Urutan hasil; `ListedDate` = terbaru dulu, `KeywordRelevance` = relevansi |
 | `PREFER_NEWEST` | `true` | Dahulukan lowongan paling baru saat antrean melamar |
@@ -166,8 +170,12 @@ python cli.py run
 # 2b. Meninjau sendiri (tanpa mengirim otomatis)
 python cli.py run --manual
 
-# Hanya lowongan 3 hari terakhir, 5 halaman per kata kunci
+# Hanya lowongan 3 hari terakhir, 5 halaman per kata kunci (mode lama)
 python cli.py run --auto --max-age-days 3 --max-pages 5
+
+# Riset tanpa batas halaman (bawaan) atau dibatasi 10 halaman per kata kunci
+python cli.py run --auto --riset-pages 0
+python cli.py run --auto --riset-pages 10
 
 # Lokasi lain tanpa mengubah .env
 python cli.py run --auto --locations "Bandung,Jakarta,Tangerang,Jababeka"
@@ -668,45 +676,66 @@ menghentikannya (Ctrl+C). Untuk memasang batas lagi:
 python cli.py set-env MAX_APPLY_PER_DAY=100 AUTO_APPLY_MAX_PER_SESSION=50
 ```
 
-### Batas 50 lamaran/hari — hanya yang paling cocok
+### Riset sebanyak mungkin → nilai → peringkat → TOP 50 → apply
 
-Bila ingin kuota harian dipakai untuk lowongan yang **paling cocok** (bukan
-yang kebetulan ditemukan lebih dulu), kumpulkan dulu semua kandidat dari
-**semua lokasi**, bandingkan, baru lamar yang terbaik:
+**50 adalah batas lamaran per hari, bukan batas riset.** Alur yang dijalankan
+setiap `run`:
+
+```
+Riset sebanyak mungkin → gabung semua hasil → hapus duplikat →
+nilai kecocokan → peringkat → ambil TOP 50 → apply maksimal 50/hari
+```
+
+1. **Riset.** Setiap kata kunci (`RESEARCH_KEYWORDS`, atau `KEYWORDS` bila
+   kosong) dicari di **setiap** lokasi (`LOCATIONS`). Halaman diteruskan
+   sampai situs tidak lagi memberi lowongan baru (`RESEARCH_MAX_PAGES=0`),
+   dengan `SORT_MODE=ListedDate` sehingga yang **paling baru** muncul lebih
+   dulu. Riset berhenti hanya bila halaman kosong, tidak ada lowongan baru,
+   atau `RESEARCH_MAX_JOBS` (opsional) tercapai.
+2. **Gabung & hapus duplikat.** Hasil semua kategori dan lokasi digabung;
+   lowongan yang sama (ID/URL sama, atau judul + perusahaan + lokasi sama)
+   hanya dihitung sekali. Yang sudah pernah dilamar juga dilewati.
+3. **Penilaian.** Setiap lowongan dinilai per dimensi:
+   `posisi` (kata kunci di judul), `lokasi`, `kualifikasi` (bidang yang
+   diminta), `pengalaman`, `pendidikan`, `keterampilan` (`SKILL_KEYWORDS`),
+   `tanggal` (makin baru makin tinggi), dan `gaji`. Data yang tidak tercantum
+   di kartu tidak dihukum.
+4. **Peringkat.** `RANK_BY=relevance` (bawaan) = skor tertinggi dulu, bila
+   sama yang paling baru. `RANK_BY=newest` = tanggal terbaru dulu.
+5. **TOP 50.** Sisa kuota hari ini = `MAX_APPLY_PER_DAY` − lamaran yang sudah
+   terkirim hari ini. Hanya **sebanyak sisa kuota** kandidat teratas yang
+   dilamar — dipilih **global** dari seluruh kategori dan lokasi, bukan 50 per
+   kategori/lokasi. Bila kandidat yang memenuhi kriteria kurang dari 50,
+   semuanya dilamar.
 
 ```bash
 python cli.py set-env MAX_APPLY_PER_DAY=50 COLLECT_BEFORE_APPLY=true RANK_BY=relevance
 python cli.py run
 ```
 
-Yang terjadi saat `run`:
-
-1. Semua lokasi × kata kunci × halaman dikumpulkan (duplikat dibuang, yang
-   sudah pernah dilamar dilewati).
-2. Kandidat **diurutkan dari skor kecocokan tertinggi** (`RANK_BY=relevance`);
-   bila skornya sama, yang paling baru didahulukan.
-3. Sisa kuota hari ini dihitung: `MAX_APPLY_PER_DAY` − lamaran yang sudah
-   dikirim hari ini.
-4. Hanya **sebanyak sisa kuota** yang dilamar, diambil dari urutan teratas.
-   Kandidat di bawahnya tidak disentuh pada sesi itu.
-5. Perbandingannya ditampilkan lebih dulu:
+Contoh keluaran:
 
 ```
-Pengumpulan selesai: 63 lowongan lolos filter, diurutkan dari kecocokan tertinggi.
+RISET LOWONGAN — 14 kata kunci × 7 lokasi, tanpa batas halaman (sampai habis), urut tanggal terbaru.
+Riset selesai: 412 lowongan terbaca dari 14 kategori × 7 lokasi → 187 unik (225 duplikat dibuang).
+Penilaian selesai: 187 lowongan dinilai (posisi, lokasi, kualifikasi, pengalaman,
+pendidikan, keterampilan, tanggal, gaji) dan diurutkan dari kecocokan tertinggi.
 Kuota harian: 12 sudah dilamar hari ini, sisa 38 dari 50.
-63 kandidat bersaing untuk 38 slot — diambil 38 yang paling cocok.
+187 kandidat (dari seluruh kategori & lokasi) bersaing untuk 38 slot — diambil 38 yang paling cocok.
       Kandidat yang akan dilamar (dibandingkan dari 38)
 ┏━━━┳━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━┓
 ┃ # ┃ Skor ┃ Judul                 ┃ Perusahaan    ┃ Umur        ┃
 ┡━━━╇━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━┩
-│ 1 │   28 │ Staff PPIC            │ PT A          │ hari ini    │
-│ 2 │   25 │ Inventory Controller  │ PT B          │ 1 hari lalu │
+│ 1 │   42 │ Inventory Controller  │ PT A          │ hari ini    │
+│ 2 │   38 │ Staff PPIC            │ PT B          │ 1 hari lalu │
 └───┴──────┴───────────────────────┴───────────────┴─────────────┘
+            Rincian skor kandidat teratas
+┏━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━┳━━━━━━┳━━━━━━┳━━━━━━┳━━━━━━┳━━━━━━┳━━━━━┳━━━━┳━━━━━┓
+┃ Judul                ┃ Pos. ┃ Lok. ┃ Kual ┃ Peng ┃ Pend ┃ Kete ┃ Tgl ┃ Gj ┃ Tot ┃
+┡━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━╇━━━━━━╇━━━━━━╇━━━━━━╇━━━━━━╇━━━━━━╇━━━━━╇━━━━╇━━━━━┩
+│ Inventory Controller │   14 │    8 │    4 │    6 │    4 │    2 │   5 │  5 │  42 │
+└──────────────────────┴──────┴──────┴──────┴──────┴──────┴──────┴─────┴────┴─────┘
 ```
-
-Skor kecocokan dihitung dari: kata kunci `KEYWORDS` ada di **judul** (+10)
-atau di deskripsi (+3), gaji dicantumkan (+5), dan lowongan tayang hari ini
-(+5) atau kemarin (+3).
 
 Catatan: `MAX_APPLY_PER_DAY` adalah batas **per hari kalender** yang dihitung
 dari database, jadi menjalankan `run` dua kali dalam sehari tidak menambah
@@ -714,11 +743,14 @@ kuota — sisanya yang dipakai. Bila kuota habis, program berhenti dengan pesan
 `Kuota lamaran hari ini sudah habis` dan tidak mengirim apa pun.
 
 Ingin kembali melamar sambil mencari (lebih cepat, tanpa perbandingan)?
-`python cli.py set-env COLLECT_BEFORE_APPLY=false`.
+Itu hanya berlaku bila tidak ada batas harian:
+`python cli.py set-env COLLECT_BEFORE_APPLY=false MAX_APPLY_PER_DAY=0`.
 
-Aturan yang sama berlaku di Glints: `jalankan.bat glints run` juga mengumpulkan
-semua kandidat, mengurutkan dari kecocokan tertinggi, menampilkan tabel
-perbandingan, lalu hanya melamar sebanyak sisa kuota `MAX_APPLY_PER_DAY`.
+Aturan yang sama berlaku di Glints: `jalankan.bat glints run` juga meriset
+semua kartu (mengklik "Muat lebih banyak" sampai habis), menghapus duplikat,
+menilai dengan skor yang sama, menampilkan tabel perbandingan + rincian skor,
+lalu hanya melamar sebanyak sisa kuota `MAX_APPLY_PER_DAY` — memakai kuota
+yang sama dengan JobStreet karena keduanya menulis ke database yang sama.
 
 ### Glints (glints.com)
 

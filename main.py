@@ -1,4 +1,5 @@
 import time
+from typing import Optional
 
 from rich.console import Console
 from rich.panel import Panel
@@ -6,11 +7,16 @@ from rich.table import Table
 
 from config import config
 from database import db
-from job_filter import job_filter
+from job_filter import dedupe_jobs, job_filter
 from notifier import notifier
 from scraper import JobStreetBot
 
 console = Console()
+
+# Pengaman agar fase riset tanpa batas tidak berputar selamanya bila situs
+# terus mengembalikan halaman yang sama. JobStreet jarang melewati 20 halaman
+# untuk satu kata kunci.
+BATAS_HALAMAN_RISET = 40
 
 # Nama lokasi yang tidak dikenali JobStreet -> nama lain yang hasilnya sama.
 # "Jababeka" sering menghasilkan halaman kosong; Cikarang adalah kawasan
@@ -59,9 +65,20 @@ class AutoApplyEngine:
                 console.print("[bold red]Login belum selesai. Program berhenti.[/]")
                 return
 
-            if config.auto_apply and config.collect_before_apply:
-                # Semua kandidat dikumpulkan dulu, lalu dilamar berurutan
-                # mulai dari posting paling baru (lintas kata kunci & lokasi).
+            # Riset dulu (kumpulkan → nilai → peringkat → TOP 50) wajib
+            # dipakai bila ada batas harian: tanpa riset, "50 terbaik"
+            # tidak mungkin ditentukan. Bila batas harian 0, pengguna boleh
+            # memilih mode lama (lamar sambil mencari).
+            riset_dulu = config.auto_apply and (
+                config.collect_before_apply or config.max_apply_per_day > 0
+            )
+
+            if riset_dulu:
+                if not config.collect_before_apply:
+                    console.print(
+                        "[dim]Batas harian aktif → riset semua kandidat dulu "
+                        "agar yang dilamar benar-benar yang paling cocok.[/]"
+                    )
                 self._kumpulkan_lalu_lamar()
             else:
                 # Melamar sambil mencari, tetap dari posting terbaru.
@@ -241,14 +258,39 @@ class AutoApplyEngine:
 
         return False
 
-    def _cari_keyword(self, keyword: str, location: str = "") -> list:
-        """Cari & saring satu kata kunci (semua halaman)."""
-        terkumpul = []
+    def _cari_keyword(
+        self,
+        keyword: str,
+        location: str = "",
+        halaman_maks: Optional[int] = None,
+        cek_kuota: bool = True,
+    ) -> list:
+        """Cari & saring satu kata kunci.
 
-        for page in range(1, config.max_pages + 1):
-            if self._batas_harian_tercapai():
+        `halaman_maks`:
+          None  = pakai config.max_pages (mode biasa),
+          0     = tanpa batas: teruskan sampai halaman kosong / tidak ada
+                  lowongan baru (dipakai fase riset),
+          angka = sebanyak itu.
+        """
+        if halaman_maks is None:
+            halaman_maks = config.max_pages
+
+        terkumpul = []
+        page = 1
+
+        while halaman_maks == 0 or page <= halaman_maks:
+            if halaman_maks == 0 and page > BATAS_HALAMAN_RISET:
+                console.print(
+                    f"[dim]Batas pengaman {BATAS_HALAMAN_RISET} halaman "
+                    "tercapai untuk kata kunci ini.[/]"
+                )
+                break
+
+            if cek_kuota and self._batas_harian_tercapai():
                 return terkumpul
 
+            sebelum = len(self.seen_job_ids)
             eligible, terbaca = self._cari_dengan_alias(
                 keyword, page, location
             )
@@ -258,14 +300,15 @@ class AutoApplyEngine:
 
             # Hasil sudah diurutkan dari yang terbaru: begitu satu halaman
             # tidak memuat lowongan baru, halaman berikutnya pasti lebih lama.
-            if not eligible and page > 1 and config.sort_mode:
+            if page > 1 and len(self.seen_job_ids) == sebelum:
                 console.print(
                     "[dim]Halaman ini tidak memuat lowongan baru; "
-                    "berhenti karena hasil diurutkan dari yang terbaru.[/]"
+                    "pencarian kata kunci ini dihentikan.[/]"
                 )
                 break
 
             terkumpul.extend(eligible)
+            page += 1
 
         return terkumpul
 
@@ -414,8 +457,28 @@ class AutoApplyEngine:
                         if not self._lamar(job):
                             return
 
-    def _kumpulkan_lalu_lamar(self):
-        """Kumpulkan semua kandidat, urutkan dari posting terbaru, lalu lamar."""
+    def _riset_lowongan(self) -> list:
+        """Fase riset: kumpulkan sebanyak mungkin lowongan dari semua
+        kategori (kata kunci) dan semua lokasi yang ditentukan.
+
+        Riset TIDAK dibatasi 50. Batas 50 hanya berlaku saat mengirim
+        lamaran. Hasil gabungan dibersihkan dari duplikat.
+        """
+        kata_kunci = config.keywords_riset
+        halaman = config.research_max_pages
+        batas_jobs = config.research_max_jobs
+
+        console.print(
+            f"\n[bold blue]RISET LOWONGAN[/] — {len(kata_kunci)} kata kunci "
+            f"× {len(config.locations)} lokasi, "
+            + (
+                "tanpa batas halaman (sampai habis)"
+                if halaman == 0
+                else f"maksimal {halaman} halaman per kata kunci"
+            )
+            + ", urut tanggal terbaru."
+        )
+
         kandidat = []
         lokasi_mati = set()
 
@@ -427,7 +490,9 @@ class AutoApplyEngine:
             console.print(f"[bold blue]LOKASI: {location}[/]")
             console.print(f"[bold blue]{'#' * 60}[/]")
 
-            for keyword in config.keywords:
+            jumlah_lokasi = 0
+
+            for keyword in kata_kunci:
                 keyword = keyword.strip()
 
                 if not keyword:
@@ -442,10 +507,58 @@ class AutoApplyEngine:
                 )
                 console.print(f"{'=' * 60}")
 
-                kandidat.extend(self._cari_keyword(keyword, location=location))
+                hasil = self._cari_keyword(
+                    keyword,
+                    location=location,
+                    halaman_maks=halaman,
+                    cek_kuota=False,
+                )
+                kandidat.extend(hasil)
+                jumlah_lokasi += len(hasil)
 
-            if self.stop_requested:
+                if batas_jobs and len(kandidat) >= batas_jobs:
+                    # Potong tepat di batas: satu kata kunci bisa sekaligus
+                    # menambah banyak lowongan.
+                    kandidat = kandidat[:batas_jobs]
+                    console.print(
+                        f"[cyan]Batas riset RESEARCH_MAX_JOBS="
+                        f"{batas_jobs} tercapai — riset dihentikan.[/]"
+                    )
+                    break
+
+            # Lokasi yang tidak memberi hasil di beberapa kata kunci terakhir
+            # dilewati supaya riset tidak menghabiskan waktu di sana.
+            if self._catat_lokasi(location, jumlah_lokasi):
+                lokasi_mati.add(location)
+
+            if self.stop_requested or (batas_jobs and len(kandidat) >= batas_jobs):
                 break
+
+        unik = dedupe_jobs(kandidat)
+        dibuang = len(kandidat) - len(unik)
+
+        console.print(
+            f"\n[bold green]Riset selesai:[/] {len(kandidat)} lowongan "
+            f"terbaca dari {len(kata_kunci)} kategori × {len(config.locations)} "
+            f"lokasi → [bold]{len(unik)} unik[/] "
+            f"({dibuang} duplikat dibuang)."
+        )
+
+        if batas_jobs:
+            console.print(
+                f"[dim]Batas riset aktif: RESEARCH_MAX_JOBS={batas_jobs}.[/]"
+            )
+        else:
+            console.print(
+                "[dim]Riset tanpa batas 50 — batas 50 hanya untuk lamaran "
+                "yang dikirim hari ini.[/]"
+            )
+
+        return unik
+
+    def _kumpulkan_lalu_lamar(self):
+        """Riset sebanyak mungkin → dedup → skor → ranking → TOP 50 → lamar."""
+        kandidat = self._riset_lowongan()
 
         if not kandidat:
             console.print(
@@ -461,8 +574,10 @@ class AutoApplyEngine:
             "posting terbaru" if urut_terbaru else "kecocokan tertinggi"
         )
         console.print(
-            f"\n[bold green]Pengumpulan selesai: {len(kandidat)} lowongan "
-            f"lolos filter, diurutkan dari {keterangan_urut}.[/]"
+            f"\n[bold green]Penilaian selesai: {len(kandidat)} lowongan "
+            f"dinilai (posisi, lokasi, kualifikasi, pengalaman, pendidikan, "
+            f"keterampilan, tanggal, gaji) dan diurutkan dari "
+            f"{keterangan_urut}.[/]"
         )
 
         # Bandingkan dulu, baru lamar: ambil hanya yang terbaik sebanyak sisa
@@ -486,8 +601,9 @@ class AutoApplyEngine:
 
             if len(kandidat) > sisa:
                 console.print(
-                    f"[bold]{len(kandidat)} kandidat[/] bersaing untuk "
-                    f"[bold]{sisa} slot[/] — diambil {sisa} yang paling cocok."
+                    f"[bold]{len(kandidat)} kandidat[/] (dari seluruh "
+                    f"kategori & lokasi) bersaing untuk [bold]{sisa} slot[/] "
+                    f"— diambil {sisa} yang paling cocok."
                 )
                 kandidat = kandidat[:sisa]
 
@@ -496,6 +612,7 @@ class AutoApplyEngine:
             return
 
         self._tampilkan_perbandingan(kandidat)
+        self._tampilkan_rincian_skor(kandidat)
 
         for job in kandidat:
             if self.stop_requested:
@@ -513,6 +630,36 @@ class AutoApplyEngine:
 
             if not self._lamar(job):
                 return
+
+    @staticmethod
+    def _tampilkan_rincian_skor(kandidat: list, maksimal: int = 3):
+        """Tunjukkan dari dimensi mana skor kecocokan kandidat teratas berasal."""
+        if not kandidat:
+            return
+
+        table = Table(
+            title="Rincian skor kandidat teratas",
+            show_lines=False,
+        )
+        table.add_column("Judul", style="cyan", max_width=34)
+        for nama in ("Posisi", "Lokasi", "Kualifikasi", "Pengalaman",
+                     "Pendidikan", "Keterampilan", "Tanggal", "Gaji", "Total"):
+            table.add_column(nama, justify="right", style="dim")
+
+        for job in kandidat[:maksimal]:
+            rincian = job.get("_skor_rincian") or {}
+            table.add_row(
+                str(job.get("title") or "-")[:34],
+                *[
+                    str(rincian.get(kunci, 0))
+                    for kunci in ("posisi", "lokasi", "kualifikasi",
+                                  "pengalaman", "pendidikan", "keterampilan",
+                                  "tanggal", "gaji")
+                ],
+                f"[green]{job.get('_score', 0)}[/]",
+            )
+
+        console.print(table)
 
     @staticmethod
     def _tampilkan_perbandingan(kandidat: list, maksimal: int = 10):
@@ -597,6 +744,30 @@ class AutoApplyEngine:
             if config.max_age_days > 0 else "Tanpa batas umur",
         )
         table.add_row("Halaman per kata kunci", str(config.max_pages))
+        table.add_row(
+            "Riset lowongan",
+            (
+                "Tanpa batas halaman (sampai habis)"
+                if config.research_max_pages == 0
+                else f"Maksimal {config.research_max_pages} halaman/kata kunci"
+            )
+            + " — tidak dibatasi 50",
+        )
+        table.add_row(
+            "Kata kunci riset",
+            f"{len(config.keywords_riset)} kategori"
+            + (
+                " (dari RESEARCH_KEYWORDS)"
+                if config.research_keywords
+                else " (ikut KEYWORDS)"
+            ),
+        )
+        table.add_row(
+            "Batas hasil riset",
+            str(config.research_max_jobs)
+            if config.research_max_jobs > 0
+            else "Tanpa batas",
+        )
         table.add_row(
             "Urutan pelamaran",
             (
