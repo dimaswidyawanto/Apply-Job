@@ -3,6 +3,10 @@ rem Tarik pembaruan dari repo pengembangan (akun dimasw1997) ke repo Anda.
 rem Contoh: tarik.bat
 rem Remote & cabang bisa diganti lewat variabel lingkungan ARENA_REMOTE
 rem dan ARENA_CABANG.
+rem
+rem Catatan: berkas ini sengaja memakai akhir baris CRLF dan TANPA label
+rem goto. Batch berakhir LF + goto :label membuat cmd melompat ke tengah
+rem baris dan memunculkan galat seperti "'gabungan' is not recognized".
 setlocal
 cd /d "%~dp0"
 
@@ -35,25 +39,19 @@ if exist ".git\MERGE_HEAD" (
     git merge --abort
 )
 
-rem --- Simpan dulu perubahan lokal (mis. .github\copilot-instructions.md)
-rem     supaya penggabungan tidak ditolak "would be overwritten by merge".
-set "DISIMPAN="
-git diff --quiet
-if errorlevel 1 goto :simpan_lokal
-git diff --cached --quiet
-if errorlevel 1 goto :simpan_lokal
-goto :gabung
-
-:simpan_lokal
-echo [info] Menyimpan perubahan lokal sementara ^(git stash^)...
+rem --- Simpan dulu perubahan lokal supaya penggabungan tidak ditolak
+rem     dengan pesan "would be overwritten by merge".
+set "STASH_SEBELUM=0"
+for /f %%A in ('git stash list ^| find /c /v ""') do set "STASH_SEBELUM=%%A"
 git stash push -m "tarik-otomatis" >nul 2>&1
-if not errorlevel 1 set "DISIMPAN=1"
+set "STASH_SESUDAH=0"
+for /f %%A in ('git stash list ^| find /c /v ""') do set "STASH_SESUDAH=%%A"
+if %STASH_SESUDAH% GTR %STASH_SEBELUM% echo [info] Perubahan lokal disimpan sementara.
 
-:gabung
 echo [2/2] Menggabungkan %ARENA_REMOTE%/%ARENA_CABANG% ke cabang ini...
 git merge --no-edit %ARENA_REMOTE%/%ARENA_CABANG%
 if errorlevel 1 (
-    rem Riwayat berbeda (repo baru dibuat ulang) -> coba gabungkan tetap.
+    rem Riwayat berbeda, repo dibuat ulang: coba gabungkan tetap.
     git merge --no-edit --allow-unrelated-histories %ARENA_REMOTE%/%ARENA_CABANG%
 )
 if errorlevel 1 (
@@ -62,11 +60,11 @@ if errorlevel 1 (
     echo   git status
     echo   ... perbaiki file yang bertanda konflik ...
     echo   git add -A ^&^& git commit
-    if defined DISIMPAN echo Perubahan lokal Anda masih tersimpan: git stash pop
+    if %STASH_SESUDAH% GTR %STASH_SEBELUM% echo Perubahan lokal Anda tersimpan: git stash pop
     exit /b 1
 )
 
-if defined DISIMPAN (
+if %STASH_SESUDAH% GTR %STASH_SEBELUM% (
     git stash pop >nul 2>&1
     if errorlevel 1 (
         echo [PERHATIAN] Perubahan lokal belum bisa dikembalikan otomatis.

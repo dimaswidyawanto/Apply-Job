@@ -69,6 +69,12 @@ PowerShell/Command Prompt di folder itu, lalu:
 ```
 
 Di Command Prompt lama, `.\` boleh dihilangkan (`jalankan.bat run`).
+**Bila `tarik.bat` mencetak `'gabungan' is not recognized as an internal or
+external command`**, itu bug lama pada skrip: berkas batch berakhir baris LF
+sehingga `cmd.exe` melompat ke tengah baris. Sudah diperbaiki — semua `.bat`
+kini memakai CRLF dan `tarik.bat` tidak lagi memakai label `goto`. Cukup tarik
+versi baru sekali lagi.
+
 **Bila `tarik.bat` berhenti dengan “Your local changes to the following
 files would be overwritten by merge”**, artinya ada berkas yang kamu ubah
 sendiri (mis. `.github/copilot-instructions.md`). Versi baru `tarik.bat` sudah
