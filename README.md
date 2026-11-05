@@ -127,7 +127,7 @@ cp .env.example .env
 | `DELAY_BETWEEN_APPLY` | `3` | Jeda (detik) antar lowongan |
 | `MAX_PAGES` | `3` | Jumlah halaman per kata kunci untuk mode lama (`COLLECT_BEFORE_APPLY=false`) dan `cek-logo` |
 | `RESEARCH_KEYWORDS` | kosong | Kata kunci **khusus riset** (boleh lebih lebar dari `KEYWORDS`); kosong = ikut `KEYWORDS`. Semua kata kunci dicari di semua lokasi |
-| `RESEARCH_MAX_PAGES` | `0` | Halaman riset per kata kunci. `0` = **tanpa batas** (lanjut sampai halaman kosong / tidak ada lowongan baru) |
+| `RESEARCH_MAX_PAGES` | `5` | Halaman riset untuk **setiap kombinasi kata kunci × lokasi**: halaman 1–5 lalu berhenti. Maksimal **5** (batas tetap); `0` atau nilai di atas 5 tetap dipakai sebagai 5, boleh diturunkan |
 | `RESEARCH_MAX_JOBS` | `0` | Batas jumlah lowongan hasil riset (pengaman). `0` = tanpa batas — **riset tidak dibatasi 50** |
 | `SKILL_KEYWORDS` | inventory, sap, erp, excel, ppic, ... | Keterampilan yang dicari di deskripsi untuk skor kesesuaian keterampilan |
 | `HEADLESS_MODE` | `false` | `true` = Chrome tanpa jendela (tidak cocok untuk tinjau manual) |
@@ -173,9 +173,9 @@ python cli.py run --manual
 # Hanya lowongan 3 hari terakhir, 5 halaman per kata kunci (mode lama)
 python cli.py run --auto --max-age-days 3 --max-pages 5
 
-# Riset tanpa batas halaman (bawaan) atau dibatasi 10 halaman per kata kunci
-python cli.py run --auto --riset-pages 0
-python cli.py run --auto --riset-pages 10
+# Riset 5 halaman per kombinasi kata kunci x lokasi (bawaan) atau 2 halaman
+python cli.py run --auto --riset-pages 5
+python cli.py run --auto --riset-pages 2
 
 # Lokasi lain tanpa mengubah .env
 python cli.py run --auto --locations "Bandung,Jakarta,Tangerang,Jababeka"
@@ -678,8 +678,9 @@ python cli.py set-env MAX_APPLY_PER_DAY=100 AUTO_APPLY_MAX_PER_SESSION=50
 
 ### Riset sebanyak mungkin → nilai → peringkat → TOP 50 → apply
 
-**50 adalah batas lamaran per hari, bukan batas riset.** Alur yang dijalankan
-setiap `run`:
+**50 adalah batas lamaran per hari, bukan batas riset.** Riset dibatasi
+**halaman**, bukan jumlah lowongan: maksimal 5 halaman untuk setiap kombinasi
+kata kunci × lokasi. Alur yang dijalankan setiap `run`:
 
 ```
 Riset sebanyak mungkin → gabung semua hasil → hapus duplikat →
@@ -687,11 +688,15 @@ nilai kecocokan → peringkat → ambil TOP 50 → apply maksimal 50/hari
 ```
 
 1. **Riset.** Setiap kata kunci (`RESEARCH_KEYWORDS`, atau `KEYWORDS` bila
-   kosong) dicari di **setiap** lokasi (`LOCATIONS`). Halaman diteruskan
-   sampai situs tidak lagi memberi lowongan baru (`RESEARCH_MAX_PAGES=0`),
-   dengan `SORT_MODE=ListedDate` sehingga yang **paling baru** muncul lebih
-   dulu. Riset berhenti hanya bila halaman kosong, tidak ada lowongan baru,
-   atau `RESEARCH_MAX_JOBS` (opsional) tercapai.
+   kosong) dicari di **setiap** lokasi (`LOCATIONS`). Untuk setiap kombinasi
+   kata kunci × lokasi dibuka **halaman 1 → 5 berurutan, lalu berhenti** —
+   halaman 6 dan seterusnya tidak pernah dibuka, langsung lanjut ke kata
+   kunci/lokasi berikutnya. Batas 5 halaman berlaku **independen** untuk tiap
+   kombinasi dan tidak bisa dinaikkan (`RESEARCH_MAX_PAGES` hanya boleh
+   menurunkan). `SORT_MODE=ListedDate` membuat yang **paling baru** muncul
+   lebih dulu. Pencarian satu kombinasi berhenti lebih awal bila halamannya
+   kosong / tidak ada lowongan baru, atau bila `RESEARCH_MAX_JOBS` (opsional)
+   tercapai.
 2. **Gabung & hapus duplikat.** Hasil semua kategori dan lokasi digabung;
    lowongan yang sama (ID/URL sama, atau judul + perusahaan + lokasi sama)
    hanya dihitung sekali. Yang sudah pernah dilamar juga dilewati.
@@ -716,7 +721,7 @@ python cli.py run
 Contoh keluaran:
 
 ```
-RISET LOWONGAN — 14 kata kunci × 7 lokasi, tanpa batas halaman (sampai habis), urut tanggal terbaru.
+RISET LOWONGAN — 14 kata kunci × 7 lokasi, maksimal 5 halaman per kombinasi kata kunci & lokasi (batas tetap 5), urut tanggal terbaru.
 Riset selesai: 412 lowongan terbaca dari 14 kategori × 7 lokasi → 187 unik (225 duplikat dibuang).
 Penilaian selesai: 187 lowongan dinilai (posisi, lokasi, kualifikasi, pengalaman,
 pendidikan, keterampilan, tanggal, gaji) dan diurutkan dari kecocokan tertinggi.
@@ -747,7 +752,8 @@ Itu hanya berlaku bila tidak ada batas harian:
 `python cli.py set-env COLLECT_BEFORE_APPLY=false MAX_APPLY_PER_DAY=0`.
 
 Aturan yang sama berlaku di Glints: `jalankan.bat glints run` juga meriset
-semua kartu (mengklik "Muat lebih banyak" sampai habis), menghapus duplikat,
+semua kartu (mengklik "Muat lebih banyak" maksimal 5 kali per kata kunci),
+menghapus duplikat,
 menilai dengan skor yang sama, menampilkan tabel perbandingan + rincian skor,
 lalu hanya melamar sebanyak sisa kuota `MAX_APPLY_PER_DAY` — memakai kuota
 yang sama dengan JobStreet karena keduanya menulis ke database yang sama.

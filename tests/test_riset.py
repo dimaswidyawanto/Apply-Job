@@ -1,7 +1,8 @@
-"""Alur riset: riset sebanyak mungkin → gabung → dedup → skor → TOP 50.
+"""Alur riset: halaman 1–5 per kombinasi → gabung → dedup → skor → TOP 50.
 
-Pengguna meminta 50 hanya sebagai batas LAMARAN per hari; riset dan
-penilaian harus mencakup seluruh kategori (kata kunci) dan seluruh lokasi
+Pengguna meminta riset dibatasi **5 halaman untuk setiap kombinasi kata
+kunci × lokasi** (halaman 6 tidak pernah dibuka), sedangkan 50 hanya batas
+LAMARAN per hari. Penilaian mencakup seluruh kategori dan seluruh lokasi
 yang ditentukan. Berkas ini menguji alur tersebut di mesin JobStreet dan
 aturan skor yang dipakai bersama oleh JobStreet & Glints.
 """
@@ -58,7 +59,7 @@ def siapkan(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "keywords", ["inventory", "ppic"])
     monkeypatch.setattr(config, "research_keywords", [])
     monkeypatch.setattr(config, "max_pages", 1)
-    monkeypatch.setattr(config, "research_max_pages", 0)
+    monkeypatch.setattr(config, "research_max_pages", 5)
     monkeypatch.setattr(config, "research_max_jobs", 0)
     monkeypatch.setattr(config, "auto_apply", True)
     monkeypatch.setattr(config, "collect_before_apply", True)
@@ -80,25 +81,74 @@ def siapkan(tmp_path, monkeypatch):
     return mesin, database
 
 
-def test_riset_tanpa_batas_halaman(siapkan):
-    """RESEARCH_MAX_PAGES=0 -> halaman 2 & 3 ikut, walau MAX_PAGES=1."""
+def test_riset_halaman_1_sampai_5_lalu_berhenti(siapkan):
+    """Halaman 1–5 diproses; halaman 6 tidak pernah dibuka."""
     mesin, _ = siapkan
     mesin.bot = BotPalsu({
-        ("Bandung", "inventory", 1): [lowongan("A")],
-        ("Bandung", "inventory", 2): [lowongan("B", age_days=1)],
-        ("Bandung", "inventory", 3): [lowongan("C", age_days=2)],
-        ("Jakarta", "ppic", 1): [lowongan("D", title="PPIC Admin")],
+        ("Bandung", "inventory", 1): [lowongan("p1")],
+        ("Bandung", "inventory", 2): [lowongan("p2", age_days=1)],
+        ("Bandung", "inventory", 3): [lowongan("p3", age_days=2)],
+        ("Bandung", "inventory", 4): [lowongan("p4", age_days=3)],
+        ("Bandung", "inventory", 5): [lowongan("p5", age_days=4)],
+        # Kalau sistem salah lanjut ke halaman 6, P6 akan ikut dilamar.
+        ("Bandung", "inventory", 6): [lowongan("P6", age_days=5)],
     })
 
     mesin._kumpulkan_lalu_lamar()
 
-    assert sorted(mesin.bot.dilamar) == ["A", "B", "C", "D"]
-    # Halaman 4 diminta untuk memastikan riset berhenti saat halaman kosong,
-    # bukan karena MAX_PAGES=1.
-    assert ("Bandung", "inventory", 3) in mesin.bot.halaman_dicari
+    assert sorted(mesin.bot.dilamar) == ["p1", "p2", "p3", "p4", "p5"]
+    assert ("Bandung", "inventory", 6) not in mesin.bot.halaman_dicari
 
 
-def test_riset_dibatasi_research_max_pages(siapkan, monkeypatch):
+def test_batas_5_halaman_independen_per_kombinasi(siapkan):
+    """Setiap kata kunci × lokasi punya jatah 5 halaman sendiri."""
+    mesin, _ = siapkan
+    halaman = {}
+    for lokasi in ("Bandung", "Jakarta"):
+        for keyword in ("inventory", "ppic"):
+            for page in range(1, 6):
+                halaman[(lokasi, keyword, page)] = [
+                    lowongan(f"{lokasi[:1]}-{keyword}-{page}", age_days=page)
+                ]
+
+    mesin.bot = BotPalsu(halaman)
+
+    mesin._kumpulkan_lalu_lamar()
+
+    assert len(mesin.bot.dilamar) == 20
+    for lokasi in ("Bandung", "Jakarta"):
+        for keyword in ("inventory", "ppic"):
+            assert (lokasi, keyword, 5) in mesin.bot.halaman_dicari
+            assert (lokasi, keyword, 6) not in mesin.bot.halaman_dicari
+
+
+def test_permintaan_halaman_besar_tetap_dipotong_ke_5(siapkan):
+    """Meski diminta 20 halaman, halaman 6 tidak boleh dibuka."""
+    mesin, _ = siapkan
+    mesin.bot = BotPalsu({
+        ("Bandung", "inventory", page): [lowongan(f"p{page}", age_days=page)]
+        for page in range(1, 8)
+    })
+
+    hasil = mesin._cari_keyword("inventory", "Bandung", halaman_maks=20)
+
+    assert len(hasil) == 5
+    assert ("Bandung", "inventory", 6) not in mesin.bot.halaman_dicari
+
+
+def test_batas_halaman_riset_dari_config():
+    from config import batas_halaman_riset
+
+    assert batas_halaman_riset(0) == 5
+    assert batas_halaman_riset(20) == 5
+    assert batas_halaman_riset(3) == 3
+    assert batas_halaman_riset("2") == 2
+    assert batas_halaman_riset("bukan angka") == 5
+    assert batas_halaman_riset(-4) == 5
+
+
+def test_riset_boleh_dibatasi_lebih_kecil(siapkan, monkeypatch):
+    """RESEARCH_MAX_PAGES=1 -> hanya halaman 1 yang dibuka."""
     mesin, _ = siapkan
     monkeypatch.setattr(config, "research_max_pages", 1)
     mesin.bot = BotPalsu({
@@ -268,3 +318,31 @@ def test_duplikat_dihitung_untuk_laporan_riset(siapkan):
 
     assert mesin.duplikat_dilewati == 1
     assert mesin.bot.dilamar == ["X"]
+
+
+def test_glints_dibatasi_5_muat_per_kata_kunci(monkeypatch):
+    """Aturan Glints = JobStreet: maksimal 5 muat, tidak bisa dinaikkan."""
+    import glints as glints_module
+
+    monkeypatch.setattr(config, "research_max_pages", 0)
+
+    assert glints_module.BATAS_MUAT_GLINTS == 5
+    assert glints_module.halaman_per_kata_kunci(0) == 5
+    assert glints_module.halaman_per_kata_kunci(20) == 5
+    assert glints_module.halaman_per_kata_kunci(2) == 2
+
+    diminta = []
+
+    class BotGlintsPalsu:
+        def cari(self, keyword, nomor=0):
+            diminta.append(nomor)
+            return [lowongan(f"{keyword}-{nomor}")]
+
+    glints_module.kumpulkan_lowongan(
+        BotGlintsPalsu(),
+        ["inventory"],
+        glints_module.halaman_per_kata_kunci(0),
+    )
+
+    # 5 muat -> cari(nomor=4), bukan nomor 5 atau 19.
+    assert diminta == [4]

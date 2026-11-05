@@ -55,6 +55,24 @@ def _bool_setting(name: str, default: bool = False) -> bool:
 # Minimal satu halaman supaya perulangan pencarian tidak kosong.
 _MAX_PAGES = max(1, _int_setting("MAX_PAGES", 3))
 
+# Riset JobStreet (dan Glints): MAKSIMAL 5 halaman untuk setiap kombinasi
+# kata kunci × lokasi. Batas ini tidak bisa dinaikkan lewat .env — nilai 0
+# atau lebih dari 5 tetap dipakai sebagai 5. Boleh diturunkan (mis. 2).
+MAKS_HALAMAN_RISET = 5
+
+
+def batas_halaman_riset(nilai) -> int:
+    """Halaman riset per kombinasi kata kunci × lokasi: 1 sampai 5."""
+    try:
+        angka = int(nilai)
+    except (TypeError, ValueError):
+        return MAKS_HALAMAN_RISET
+
+    if angka <= 0:
+        return MAKS_HALAMAN_RISET
+
+    return min(MAKS_HALAMAN_RISET, angka)
+
 
 @dataclass
 class Config:
@@ -151,9 +169,11 @@ class Config:
     research_keywords: list[str] = field(default_factory=lambda: _list_setting(
         "RESEARCH_KEYWORDS", ""
     ))
-    # 0 = riset tanpa batas: teruskan ke halaman berikutnya sampai halaman
-    # kosong / tidak ada lowongan baru lagi.
-    research_max_pages: int = max(0, _int_setting("RESEARCH_MAX_PAGES", 0))
+    # Halaman riset per kombinasi kata kunci × lokasi. Maksimal 5 (batas
+    # tetap); 0 atau nilai di atas 5 otomatis dipakai sebagai 5.
+    research_max_pages: int = batas_halaman_riset(
+        _int_setting("RESEARCH_MAX_PAGES", MAKS_HALAMAN_RISET)
+    )
     # 0 = tanpa batas jumlah lowongan hasil riset (pengaman opsional).
     research_max_jobs: int = max(0, _int_setting("RESEARCH_MAX_JOBS", 0))
 

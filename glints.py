@@ -29,7 +29,7 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 
 from auto_apply import ApplyResult, AutoApplier
-from config import config
+from config import MAKS_HALAMAN_RISET, batas_halaman_riset, config
 from database import db
 from job_filter import JobFilter, dedupe_jobs, rentang_gaji
 from job_filter import job_filter as penyaring
@@ -37,9 +37,9 @@ from notifier import notifier
 
 console = Console()
 
-# Pengaman riset Glints tanpa batas: berapa kali tombol "Muat lebih banyak"
-# boleh diklik per kata kunci sebelum berhenti (tombolnya habis sendiri).
-BATAS_MUAT_GLINTS = 20
+# Sama seperti JobStreet: riset Glints berhenti setelah 5 kali muat
+# ("Muat lebih banyak") untuk setiap kata kunci.
+BATAS_MUAT_GLINTS = MAKS_HALAMAN_RISET
 
 
 class ChromeTertutup(RuntimeError):
@@ -238,19 +238,16 @@ def logo_kartu(kandidat, perusahaan: str = "") -> tuple:
 def halaman_per_kata_kunci(max_pages: int = 0) -> int:
     """Berapa kali daftar dimuat per kata kunci.
 
-    `max_pages` > 0 dari CLI dipakai apa adanya. Selain itu ikut
-    RESEARCH_MAX_PAGES; 0 = riset sampai habis (dibatasi BATAS_MUAT_GLINTS
-    sebagai pengaman, karena tombol "Muat lebih banyak" berhenti sendiri
-    saat lowongan sudah habis).
+    Maksimal 5 (BATAS_MUAT_GLINTS), sama seperti batas halaman riset
+    JobStreet. Nilai 0 atau lebih dari 5 tetap dipakai sebagai 5; nilai
+    lebih kecil dihormati.
     """
     if max_pages and max_pages > 0:
-        return max_pages
+        return batas_halaman_riset(max_pages)
 
-    riset = int(getattr(config, "research_max_pages", 0) or 0)
-    if riset > 0:
-        return riset
-
-    return BATAS_MUAT_GLINTS
+    return batas_halaman_riset(
+        getattr(config, "research_max_pages", MAKS_HALAMAN_RISET)
+    )
 
 
 def pilih_teratas(lowongan: List[Dict], batas: int = 0) -> List[Dict]:
@@ -826,17 +823,10 @@ def jalankan_glints(max_pages: int = 0, keywords: Optional[List[str]] = None,
         terlihat = set()
         duplikat = 0
 
-        batas_halaman = max_pages or int(
-            getattr(config, "research_max_pages", 0) or 0
-        )
         console.print(
             f"[bold blue]RISET GLINTS[/] — {len(kata_kunci)} kata kunci, "
-            + (
-                f"maksimal {halaman} muat per kata kunci"
-                if batas_halaman
-                else "tanpa batas sampai lowongan habis"
-            )
-            + ", urut 'Baru Ditambahkan'."
+            f"maksimal {halaman} muat per kata kunci "
+            f"(batas tetap {MAKS_HALAMAN_RISET}), urut 'Baru Ditambahkan'."
         )
 
         for keyword in kata_kunci:

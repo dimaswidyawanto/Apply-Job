@@ -5,7 +5,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from config import config
+from config import MAKS_HALAMAN_RISET, batas_halaman_riset, config
 from database import db
 from job_filter import dedupe_jobs, job_filter
 from notifier import notifier
@@ -13,10 +13,10 @@ from scraper import JobStreetBot
 
 console = Console()
 
-# Pengaman agar fase riset tanpa batas tidak berputar selamanya bila situs
-# terus mengembalikan halaman yang sama. JobStreet jarang melewati 20 halaman
-# untuk satu kata kunci.
-BATAS_HALAMAN_RISET = 40
+# Riset hanya sampai halaman 5 untuk setiap kombinasi kata kunci × lokasi
+# (lihat config.MAKS_HALAMAN_RISET). Halaman 6 dan seterusnya tidak pernah
+# dibuka — setelah halaman 5 selesai, lanjut ke kata kunci/lokasi berikutnya.
+BATAS_HALAMAN_RISET = MAKS_HALAMAN_RISET
 
 # Nama lokasi yang tidak dikenali JobStreet -> nama lain yang hasilnya sama.
 # "Jababeka" sering menghasilkan halaman kosong; Cikarang adalah kawasan
@@ -269,28 +269,20 @@ class AutoApplyEngine:
         halaman_maks: Optional[int] = None,
         cek_kuota: bool = True,
     ) -> list:
-        """Cari & saring satu kata kunci.
+        """Cari & saring satu kata kunci untuk satu lokasi.
 
-        `halaman_maks`:
-          None  = pakai config.max_pages (mode biasa),
-          0     = tanpa batas: teruskan sampai halaman kosong / tidak ada
-                  lowongan baru (dipakai fase riset),
-          angka = sebanyak itu.
+        Maksimal `MAKS_HALAMAN_RISET` (5) halaman: halaman 1 → 5 berurutan,
+        lalu berhenti. `halaman_maks` yang lebih besar atau 0 tetap dipakai
+        sebagai 5, jadi halaman 6 tidak pernah dibuka.
         """
         if halaman_maks is None:
             halaman_maks = config.max_pages
 
+        halaman_maks = batas_halaman_riset(halaman_maks)
+
         terkumpul = []
-        page = 1
 
-        while halaman_maks == 0 or page <= halaman_maks:
-            if halaman_maks == 0 and page > BATAS_HALAMAN_RISET:
-                console.print(
-                    f"[dim]Batas pengaman {BATAS_HALAMAN_RISET} halaman "
-                    "tercapai untuk kata kunci ini.[/]"
-                )
-                break
-
+        for page in range(1, halaman_maks + 1):
             if cek_kuota and self._batas_harian_tercapai():
                 return terkumpul
 
@@ -312,7 +304,6 @@ class AutoApplyEngine:
                 break
 
             terkumpul.extend(eligible)
-            page += 1
 
         return terkumpul
 
@@ -474,13 +465,9 @@ class AutoApplyEngine:
 
         console.print(
             f"\n[bold blue]RISET LOWONGAN[/] — {len(kata_kunci)} kata kunci "
-            f"× {len(config.locations)} lokasi, "
-            + (
-                "tanpa batas halaman (sampai habis)"
-                if halaman == 0
-                else f"maksimal {halaman} halaman per kata kunci"
-            )
-            + ", urut tanggal terbaru."
+            f"× {len(config.locations)} lokasi, maksimal {halaman} halaman "
+            f"per kombinasi kata kunci & lokasi "
+            f"(batas tetap {MAKS_HALAMAN_RISET}), urut tanggal terbaru."
         )
 
         kandidat = []
@@ -753,12 +740,9 @@ class AutoApplyEngine:
         table.add_row("Halaman per kata kunci", str(config.max_pages))
         table.add_row(
             "Riset lowongan",
-            (
-                "Tanpa batas halaman (sampai habis)"
-                if config.research_max_pages == 0
-                else f"Maksimal {config.research_max_pages} halaman/kata kunci"
-            )
-            + " — tidak dibatasi 50",
+            f"Maksimal {config.research_max_pages} halaman per kombinasi "
+            f"kata kunci & lokasi (batas tetap {MAKS_HALAMAN_RISET}) "
+            "— tidak dibatasi 50",
         )
         table.add_row(
             "Kata kunci riset",

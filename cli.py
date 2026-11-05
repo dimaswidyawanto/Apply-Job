@@ -5,7 +5,7 @@ import subprocess
 from rich.console import Console
 from rich.table import Table
 
-from config import config
+from config import MAKS_HALAMAN_RISET, batas_halaman_riset, config
 from database import db
 
 console = Console()
@@ -443,12 +443,9 @@ def show_config():
     table.add_row("Halaman per kata kunci", str(config.max_pages))
     table.add_row(
         "Riset lowongan",
-        (
-            "Tanpa batas halaman (sampai habis)"
-            if config.research_max_pages == 0
-            else f"Maksimal {config.research_max_pages} halaman/kata kunci"
-        )
-        + " — tidak dibatasi 50",
+        f"Maksimal {config.research_max_pages} halaman per kombinasi "
+        f"kata kunci & lokasi (batas tetap {MAKS_HALAMAN_RISET}) "
+        "— tidak dibatasi 50",
     )
     table.add_row(
         "Kata kunci riset",
@@ -615,8 +612,8 @@ if __name__ == "__main__":
         type=int,
         default=None,
         help=(
-            "Batas halaman fase riset per kata kunci "
-            "(0 = tanpa batas, bawaan RESEARCH_MAX_PAGES)"
+            "Halaman riset per kombinasi kata kunci & lokasi, "
+            f"maksimal {MAKS_HALAMAN_RISET} (bawaan RESEARCH_MAX_PAGES)"
         ),
     )
     run_parser.add_argument(
@@ -699,8 +696,8 @@ if __name__ == "__main__":
         type=int,
         default=0,
         help=(
-            "Muat per kata kunci (0 = riset sampai habis, ikut "
-            "RESEARCH_MAX_PAGES)"
+            "Muat per kata kunci, maksimal "
+            f"{MAKS_HALAMAN_RISET} (ikut RESEARCH_MAX_PAGES)"
         ),
     )
     glints_run.add_argument(
@@ -773,7 +770,7 @@ if __name__ == "__main__":
             config.max_pages = max(1, args.max_pages)
 
         if getattr(args, "riset_pages", None) is not None:
-            config.research_max_pages = max(0, args.riset_pages)
+            config.research_max_pages = batas_halaman_riset(args.riset_pages)
 
         if args.headless:
             config.headless = True
