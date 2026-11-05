@@ -78,7 +78,8 @@ def test_buka_chrome_pakai_profil_sementara_bila_profil_terkunci(
     )
 
     assert hasil == "driver-sementara"
-    assert len(dipanggil) == 3
+    # profil -> kunci dibersihkan -> profil cadangan -> profil sementara
+    assert len(dipanggil) == 4
     assert "user-data-dir" not in dipanggil[-1]
 
 
@@ -132,3 +133,51 @@ def test_perbaiki_chrome_tanpa_profil(monkeypatch, tmp_path, capsys):
 
     keluaran = capsys.readouterr().out.lower()
     assert "belum ada" in keluaran
+
+
+def test_buka_chrome_menempel_ke_chrome_yang_sudah_berjalan(monkeypatch):
+    """CHROME_DEBUG_PORT diisi -> bot menempel ke Chrome milik pengguna."""
+    tempel = []
+
+    monkeypatch.setattr(config, "chrome_debug_port", 9222)
+    monkeypatch.setattr(
+        browser_module,
+        "tempel_chrome",
+        lambda port: tempel.append(port) or "driver-tempel",
+    )
+    monkeypatch.setattr(
+        browser_module, "sembunyikan_otomasi", lambda driver: driver
+    )
+
+    hasil = browser_module.buka_chrome(use_profile=True, headless=False)
+
+    assert hasil == "driver-tempel"
+    assert tempel == [9222]
+
+
+def test_buka_chrome_memakai_profil_cadangan(monkeypatch, tmp_path):
+    """Profil tersimpan rusak -> dibuat profil baru yang tetap tersimpan."""
+    monkeypatch.setattr(config, "chrome_debug_port", 0)
+    profil = tmp_path / "chrome-profile"
+
+    dipanggil = []
+
+    def buka_palsu(options):
+        argumen = " ".join(options.arguments)
+        dipanggil.append(argumen)
+        if argumen.count("user-data-dir") and "-baru" not in argumen:
+            raise RuntimeError("session not created: Chrome instance exited")
+        return "driver-profil-baru"
+
+    monkeypatch.setattr(browser_module, "_buka", buka_palsu)
+    monkeypatch.setattr(
+        browser_module, "sembunyikan_otomasi", lambda driver: driver
+    )
+
+    hasil = browser_module.buka_chrome(
+        profile_dir=str(profil), use_profile=True, headless=False
+    )
+
+    assert hasil == "driver-profil-baru"
+    assert "-baru" in dipanggil[-1]
+    assert (tmp_path / "chrome-profile-baru").exists()

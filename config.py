@@ -212,6 +212,14 @@ class Config:
     max_pages: int = _MAX_PAGES
     headless: bool = _bool_setting("HEADLESS_MODE", False)
 
+    # Port debug Chrome yang sudah berjalan (dipakai untuk MENEMPEL ke
+    # Chrome yang Anda buka sendiri). Berguna untuk situs di balik
+    # Cloudflare ("Just a moment..."): Chrome yang dibuka manusia tidak
+    # dianggap bot. 0 = mati.
+    chrome_debug_port: int = max(0, _int_setting("CHROME_DEBUG_PORT", 0))
+    # Path chrome.exe bila tidak terpasang di lokasi bawaan.
+    chrome_binary: str = os.getenv("CHROME_BINARY", "").strip()
+
     # --- Sesi Chrome (agar tidak login ulang tiap kali) ---
     use_profile: bool = _bool_setting("USE_PROFILE", True)
     # Disimpan di folder pengguna, bukan di dalam proyek.

@@ -968,7 +968,32 @@ sementara, (4) tanpa mode headless. Bila semuanya gagal:
 
 Bila muncul peringatan “Chrome terbuka TANPA profil tersimpan”, itu tanda
 profil masih terkunci oleh Chrome lain: tutup semua Chrome, lalu jalankan
-lagi agar sesi login tersimpan kembali.
+lagi agar sesi login tersimpan kembali. Bila tetap gagal, bot otomatis
+memakai profil cadangan (`~/.dimastes/chrome-profile-baru`) yang tetap
+menyimpan sesi login.
+
+**Situs menampilkan “Just a moment...” (verifikasi Cloudflare).**
+Glints dilindungi Cloudflare, sehingga Chrome yang dijalankan otomatis bisa
+diminta verifikasi. Dua cara:
+
+1. Selesaikan verifikasinya di jendela Chrome yang bot buka, lalu jalankan
+   lagi (cookie verifikasi tersimpan di profil bila profil tersimpan dipakai).
+2. Paling stabil — pakai Chrome Anda sendiri, lalu bot menempel ke situ:
+
+```powershell
+# buka Chrome khusus bot (port debug 9222) + halaman Glints
+.\chrome-debug.bat
+# selesaikan "Just a moment..." di jendela itu (sekali saja)
+
+# suruh bot menempel, bukan membuka Chrome sendiri
+.\jalankan.bat set-env CHROME_DEBUG_PORT=9222
+.\jalankan.bat glints diagnosa --keyword "inventory staff"
+.\jalankan.bat glints run
+```
+
+Setelah selesai, kembalikan ke mode biasa dengan
+`set-env CHROME_DEBUG_PORT=0`. Jangan tutup jendela Chrome dari
+`chrome-debug.bat` selama bot berjalan.
 
 **Riwayat menampilkan posisi kosong.**
 Itu data lama dari versi sebelumnya yang menyimpan judul kosong. Jalankan

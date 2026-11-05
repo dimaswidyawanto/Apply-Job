@@ -72,6 +72,47 @@ def bersihkan_kunci_profil(profile: Path) -> List[str]:
     return dihapus
 
 
+def sembunyikan_otomasi(driver):
+    """Kurangi jejak otomatisasi (membantu situs di balik Cloudflare)."""
+    skrip = (
+        "Object.defineProperty(navigator, 'webdriver', {get: () => undefined});"
+        "Object.defineProperty(navigator, 'languages', "
+        "{get: () => ['id-ID', 'en-US', 'en']});"
+        "window.chrome = window.chrome || {runtime: {}};"
+    )
+
+    with contextlib.suppress(Exception):
+        driver.execute_cdp_cmd(
+            "Page.addScriptToEvaluateOnNewDocument", {"source": skrip}
+        )
+
+    versi = ""
+    with contextlib.suppress(Exception):
+        versi = str(driver.capabilities.get("browserVersion") or "").strip()
+
+    with contextlib.suppress(Exception):
+        driver.execute_cdp_cmd(
+            "Network.setUserAgentOverride",
+            {
+                "userAgent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    f"Chrome/{versi or '131.0.0.0'} Safari/537.36"
+                ),
+                "acceptLanguage": "id-ID,id;q=0.9,en;q=0.8",
+            },
+        )
+
+    return driver
+
+
+def tempel_chrome(port: int):
+    """Menempel ke Chrome yang sudah berjalan dengan port debug."""
+    options = Options()
+    options.debugger_address = f"127.0.0.1:{int(port)}"
+    return webdriver.Chrome(options=options)
+
+
 def _opsi(headless: bool, profile: Optional[Path]) -> Options:
     """Opsi Chrome yang dipakai semua percobaan."""
     options = Options()
@@ -82,6 +123,15 @@ def _opsi(headless: bool, profile: Optional[Path]) -> Options:
     options.add_argument("--disable-dev-shm-usage")
     # Port acak: menghindari bentrok bila ada Chrome lain di port debug.
     options.add_argument("--remote-debugging-port=0")
+    with contextlib.suppress(Exception):
+        options.add_experimental_option(
+            "excludeSwitches", ["enable-automation"]
+        )
+        options.add_experimental_option("useAutomationExtension", False)
+
+    if getattr(config, "chrome_binary", ""):
+        with contextlib.suppress(Exception):
+            options.binary_location = config.chrome_binary
 
     if profile is not None:
         with contextlib.suppress(Exception):
@@ -132,6 +182,9 @@ def _pesan_gagal(detail: str) -> str:
         "lagi — Selenium mengunduh driver yang cocok.\n"
         "  4. Pastikan antivirus/firewall tidak memblokir Chrome yang "
         "dijalankan program.\n"
+        "  5. Bila situs menampilkan 'Just a moment...' (Cloudflare): "
+        "jalankan chrome-debug.bat, selesaikan verifikasi di jendela itu, "
+        "lalu jalankan: python cli.py set-env CHROME_DEBUG_PORT=9222\n"
         f"Detail terakhir: {detail}"
     )
 
@@ -161,6 +214,14 @@ def buka_chrome(
         percobaan.append(
             ("profil tersimpan (kunci dibersihkan)", profil, mode_headless, True)
         )
+        percobaan.append(
+            (
+                "profil cadangan (baru, sesi login perlu diulang)",
+                Path(str(profil) + "-baru"),
+                mode_headless,
+                False,
+            )
+        )
         percobaan.append(("profil sementara", None, mode_headless, False))
     else:
         percobaan.append(("profil sementara", None, mode_headless, False))
@@ -169,6 +230,26 @@ def buka_chrome(
         percobaan.append(("tanpa mode headless", profil, False, True))
 
     galat_terakhir = "tidak diketahui"
+
+    # 0. Menempel ke Chrome yang sudah dibuka pengguna (paling ampuh untuk
+    #    situs di balik Cloudflare).
+    port = int(getattr(config, "chrome_debug_port", 0) or 0)
+    if port:
+        console.print(
+            f"[cyan]Menempel ke Chrome yang berjalan di port {port}...[/]"
+        )
+        try:
+            return sembunyikan_otomasi(tempel_chrome(port))
+        except Exception as exc:
+            console.print(
+                f"[yellow]Gagal menempel ke port {port}: "
+                f"{str(exc).splitlines()[0][:160]}[/]"
+            )
+            console.print(
+                "[yellow]Jalankan chrome-debug.bat lebih dulu (Chrome harus "
+                "sudah terbuka), atau set CHROME_DEBUG_PORT=0 untuk memakai "
+                "Chrome biasa.[/]"
+            )
 
     for nomor, (nama, path_profil, headless_ke, bersihkan) in enumerate(
         percobaan, start=1
@@ -195,12 +276,20 @@ def buka_chrome(
             console.print(f"[yellow]Gagal: {galat_terakhir}[/]")
             continue
 
+        driver = sembunyikan_otomasi(driver)
+
         if nama == "profil sementara":
             console.print(
                 "[yellow]Chrome terbuka TANPA profil tersimpan, jadi sesi "
                 "login tidak terbawa. Login sekali di jendela itu, lalu pada "
                 "sesi berikutnya tutup semua Chrome lebih dulu agar profil "
                 "tersimpan bisa dipakai.[/]"
+            )
+        elif nama.startswith("profil cadangan"):
+            console.print(
+                f"[yellow]Profil Chrome lama tidak bisa dipakai; sekarang "
+                f"memakai profil baru di {path_profil}. Login sekali di "
+                "jendela ini, sesi berikutnya akan tersimpan di profil itu.[/]"
             )
         else:
             console.print(f"[dim]Chrome siap memakai {nama}.[/]")

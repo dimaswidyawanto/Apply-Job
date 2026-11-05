@@ -85,6 +85,21 @@ TAUTAN_LOWONGAN = re.compile(
 # Tautan yang bukan lowongan (halaman pencarian/kategori).
 TAUTAN_BUKAN_LOWONGAN = ("/explore", "/search", "/job-location/", "/companies/")
 
+# Halaman verifikasi Cloudflare: "Just a moment..." / "Checking your browser".
+TANDA_CLOUDFLARE = (
+    "just a moment",
+    "checking your browser",
+    "verifikasi browser",
+    "verifying you are human",
+    "cf-challenge",
+    "cf_chl_opt",
+    "cloudflare",
+    "enable javascript and cookies to continue",
+)
+
+# Berapa detik menunggu verifikasi Cloudflare selesai sendiri.
+CLOUDFLARE_WAIT = 45
+
 # Teks tombol yang berarti "sudah pernah dilamar" pada kartu Glints.
 SUDAH_DILAMAR_TEXTS = (
     "sudah dilamar",
@@ -708,6 +723,11 @@ class GlintsBot:
         if "/login" in url or "/signup" in url:
             return False
 
+        # Halaman verifikasi Cloudflare tidak memuat menu login sama sekali;
+        # tanpa cek ini bot keliru menyimpulkan "sudah login".
+        if self.kena_cloudflare():
+            return False
+
         teks = self._teks_halaman()
         if not teks:
             return False
@@ -768,6 +788,43 @@ class GlintsBot:
 
         return hasil
 
+    def kena_cloudflare(self) -> bool:
+        """True bila halaman yang terbuka adalah verifikasi Cloudflare."""
+        judul = self._judul_halaman().lower()
+        teks = self._teks_halaman()
+
+        return any(
+            tanda in judul or tanda in teks for tanda in TANDA_CLOUDFLARE
+        )
+
+    def _tunggu_cloudflare(self, detik: int = CLOUDFLARE_WAIT) -> bool:
+        """Tunggu verifikasi Cloudflare lewat; True bila halaman sudah lolos."""
+        if not self.kena_cloudflare():
+            return True
+
+        console.print(
+            "[yellow]Halaman Glints sedang menampilkan verifikasi Cloudflare "
+            '("Just a moment...").[/]'
+        )
+
+        batas = time.time() + max(5, detik)
+        while time.time() < batas:
+            time.sleep(2)
+            if not self.kena_cloudflare() or self._tautan_kartu():
+                console.print("[green]Verifikasi selesai.[/]")
+                return True
+
+        console.print(
+            "[bold yellow]Verifikasi Cloudflare belum selesai. Pilihan:[/]\n"
+            "  1. Selesaikan centang/verifikasi di jendela Chrome yang "
+            "terbuka, lalu jalankan lagi.\n"
+            "  2. Pakai Chrome Anda sendiri (paling stabil): jalankan "
+            "chrome-debug.bat, selesaikan verifikasinya, lalu\n"
+            "     python cli.py set-env CHROME_DEBUG_PORT=9222 dan jalankan "
+            "lagi."
+        )
+        return False
+
     def _tunggu_kartu(self, detik: Optional[int] = None) -> int:
         """Tunggu sampai tautan lowongan muncul (SEARCH_WAIT detik)."""
         batas = time.time() + max(
@@ -819,9 +876,10 @@ class GlintsBot:
             "contoh_tautan": tautan[:8],
             "jumlah_kartu": len([k for k in kartu if k]),
             "meminta_login": "masuk" in teks and "lowongan" not in teks,
+            "cloudflare": self.kena_cloudflare(),
             "captcha": any(
                 tanda in teks
-                for tanda in ("captcha", "unusual traffic", "verifikasi")
+                for tanda in ("captcha", "unusual traffic")
             ),
             "berkas_html": "",
             "berkas_png": "",
@@ -854,10 +912,17 @@ class GlintsBot:
                 "[yellow]  Halaman meminta login: masuk dulu ke Glints di "
                 "jendela Chrome, lalu jalankan lagi.[/]"
             )
+        if info["cloudflare"]:
+            console.print(
+                "[yellow]  Halaman ini adalah verifikasi Cloudflare "
+                '("Just a moment..."). Selesaikan verifikasinya di jendela '
+                "Chrome, atau pakai Chrome Anda sendiri: jalankan "
+                "chrome-debug.bat lalu set CHROME_DEBUG_PORT=9222.[/]"
+            )
         if info["captcha"]:
             console.print(
-                "[yellow]  Halaman menampilkan captcha/verifikasi: buka "
-                "Chrome, selesaikan verifikasinya, lalu jalankan lagi.[/]"
+                "[yellow]  Halaman menampilkan captcha: selesaikan di "
+                "jendela Chrome, lalu jalankan lagi.[/]"
             )
         if info["berkas_html"]:
             console.print(f"  HTML        : {info['berkas_html']}")
@@ -875,6 +940,10 @@ class GlintsBot:
         for pola in kandidat:
             url = pola.format(keyword=quote_plus(keyword))
             self.driver.get(url)
+
+            if self.kena_cloudflare():
+                self._tunggu_cloudflare()
+
             jumlah = self._tunggu_kartu()
 
             if jumlah:
@@ -1344,7 +1413,8 @@ def diagnosa_glints(keyword: str = "") -> Dict:
         console.print(f"[cyan]Diagnosa Glints — kata kunci: '{kata}'[/]")
 
         berhasil = bot.buka_pencarian(kata)
-        info = bot.simpan_diagnosa("diagnosa", kata)
+        # buka_pencarian sudah menyimpan diagnosa saat gagal; jangan ulangi.
+        info = bot.diagnosa_terakhir or bot.simpan_diagnosa("diagnosa", kata)
 
         console.print(
             f"[cyan]Login Glints terdeteksi:[/] "
