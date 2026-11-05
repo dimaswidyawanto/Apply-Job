@@ -45,6 +45,9 @@ class AutoApplyEngine:
         self.alias_lokasi = {}
         self.gagal_lokasi = {}
         self._logo_diingatkan = False
+        # Duplikat yang muncul lagi dari kata kunci/lokasi lain (dihitung
+        # untuk laporan riset).
+        self.duplikat_dilewati = 0
 
     def run(self):
         self._print_banner()
@@ -136,6 +139,7 @@ class AutoApplyEngine:
                 continue
 
             if job_id in self.seen_job_ids:
+                self.duplikat_dilewati += 1
                 continue
 
             self.seen_job_ids.add(job_id)
@@ -535,10 +539,13 @@ class AutoApplyEngine:
                 break
 
         unik = dedupe_jobs(kandidat)
-        dibuang = len(kandidat) - len(unik)
+        # Duplikat = yang dilewati saat pembacaan (kata kunci/lokasi lain)
+        # + yang baru ketahuan setelah digabung.
+        dibuang = (len(kandidat) - len(unik)) + self.duplikat_dilewati
+        terbaca = len(kandidat) + self.duplikat_dilewati
 
         console.print(
-            f"\n[bold green]Riset selesai:[/] {len(kandidat)} lowongan "
+            f"\n[bold green]Riset selesai:[/] {terbaca} lowongan "
             f"terbaca dari {len(kata_kunci)} kategori × {len(config.locations)} "
             f"lokasi → [bold]{len(unik)} unik[/] "
             f"({dibuang} duplikat dibuang)."

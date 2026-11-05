@@ -253,3 +253,18 @@ def test_dedupe_jobs_menggabungkan_data_yang_kurang():
 
     assert len(hasil) == 1
     assert hasil[0]["salary"] == "Rp 7.000.000"
+
+
+def test_duplikat_dihitung_untuk_laporan_riset(siapkan):
+    """Duplikat yang muncul dari kata kunci/lokasi lain tetap dihitung."""
+    mesin, _ = siapkan
+    sama = lowongan("X")
+    mesin.bot = BotPalsu({
+        ("Bandung", "inventory", 1): [sama],
+        ("Jakarta", "ppic", 1): [dict(sama)],
+    })
+
+    mesin._kumpulkan_lalu_lamar()
+
+    assert mesin.duplikat_dilewati == 1
+    assert mesin.bot.dilamar == ["X"]

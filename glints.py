@@ -824,6 +824,7 @@ def jalankan_glints(max_pages: int = 0, keywords: Optional[List[str]] = None,
 
         lowongan: List[Dict] = []
         terlihat = set()
+        duplikat = 0
 
         batas_halaman = max_pages or int(
             getattr(config, "research_max_pages", 0) or 0
@@ -851,6 +852,7 @@ def jalankan_glints(max_pages: int = 0, keywords: Optional[List[str]] = None,
             baru = 0
             for job in kartu:
                 if job["job_id"] in terlihat:
+                    duplikat += 1
                     continue
                 terlihat.add(job["job_id"])
                 lowongan.append(job)
@@ -870,12 +872,13 @@ def jalankan_glints(max_pages: int = 0, keywords: Optional[List[str]] = None,
 
         sebelum_dedup = len(lowongan)
         lowongan = dedupe_jobs(lowongan)
-        dibuang = sebelum_dedup - len(lowongan)
+        dibuang = (sebelum_dedup - len(lowongan)) + duplikat
 
         laporan["dibaca"] = len(lowongan)
         console.print(
-            f"[bold green]Riset Glints selesai:[/] {sebelum_dedup} terbaca → "
-            f"{len(lowongan)} unik ({dibuang} duplikat dibuang)."
+            f"[bold green]Riset Glints selesai:[/] "
+            f"{sebelum_dedup + duplikat} terbaca → {len(lowongan)} unik "
+            f"({dibuang} duplikat dibuang)."
         )
 
         # --- Saring dulu semuanya, baru bandingkan dan pilih yang terbaik ---
