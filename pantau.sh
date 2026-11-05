@@ -25,8 +25,13 @@ echo "Kirim otomatis + tarik pembaruan otomatis (saat tidak ada perubahan lokal)
 echo
 
 while true; do
+    # Jejak hidup: berkas ini diperbarui tiap putaran.
+    date '+%Y-%m-%d %H:%M:%S' > .pantau-terakhir
+
     ADA=0
-    [ -n "$(git status --porcelain)" ] && ADA=1
+    # Berkas jejak hidup pemantau tidak dihitung sebagai perubahan.
+    PERUBAHAN="$(git status --porcelain | grep -v '\.pantau-terakhir' || true)"
+    [ -n "$PERUBAHAN" ] && ADA=1
 
     # Commit yang belum terkirim (mis. push gagal karena internet putus).
     BELUM="$(git rev-list --count '@{u}..HEAD' 2>/dev/null || echo 0)"

@@ -29,9 +29,13 @@ echo Kirim otomatis + tarik pembaruan otomatis (saat tidak ada perubahan lokal).
 echo.
 
 :pantau
+rem Jejak hidup: berkas ini diperbarui tiap putaran, untuk memastikan
+rem pemantau benar-benar berjalan.
+>"%~dp0.pantau-terakhir" echo %DATE% %TIME%
+
 set "ADA="
 set "BELUM=0"
-for /f "delims=" %%a in ('git status --porcelain 2^>nul') do set "ADA=1"
+for /f "delims=" %%a in ('git status --porcelain 2^>nul ^| findstr /v /c:".pantau-terakhir"') do set "ADA=1"
 
 rem Commit yang belum terkirim (mis. push gagal karena internet putus).
 for /f "delims=" %%c in ('git rev-list --count "@{u}..HEAD" 2^>nul') do set "BELUM=%%c"

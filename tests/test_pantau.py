@@ -38,7 +38,7 @@ def _siapkan(tmp_path):
     _git(tmp_path, "clone", "-q", str(remote), str(kerja))
     _git(kerja, "config", "user.email", "uji@contoh.id")
     _git(kerja, "config", "user.name", "Uji")
-    for nama in ("simpan.sh", "pantau.sh", "tarik.sh"):
+    for nama in ("simpan.sh", "pantau.sh", "tarik.sh", ".gitignore"):
         shutil.copy(AKAR / nama, kerja / nama)
         (kerja / nama).chmod(0o755)
     (kerja / "awal.txt").write_text("a\n", encoding="utf-8")
@@ -148,6 +148,9 @@ def test_menarik_perubahan_dari_github(tmp_path, monkeypatch):
 
     assert "commit baru di GitHub" in keluaran
     assert (kerja / "dari_github.txt").exists()
+    # Jejak hidup: berkas ini menandakan pemantau benar-benar berputar.
+    jejak = kerja / ".pantau-terakhir"
+    assert jejak.exists() and jejak.read_text(encoding="utf-8").strip()
 
 
 def test_tidak_menarik_saat_ada_perubahan_lokal(tmp_path, monkeypatch):

@@ -314,6 +314,21 @@ jendela**:
 
 Ingin aktif sekarang tanpa menunggu login: `wscript pantau-diam.vbs`.
 
+**Memeriksa pemantau benar-benar berjalan** (berguna bila folder terasa tidak
+ikut berubah):
+
+```powershell
+Get-Content .\.pantau-terakhir     # diperbarui tiap putaran (±1 menit)
+Get-Content .\pantau.log -Tail 15  # aktivitas terakhir
+Get-CimInstance Win32_Process -Filter "Name='wscript.exe' OR Name='cmd.exe'" |
+    Where-Object { $_.CommandLine -like '*pantau*' } |
+    Select-Object ProcessId, CommandLine
+```
+
+Kalau `.pantau-terakhir` tidak berubah dan daftar proses kosong, pemantau
+berhenti — jalankan lagi `wscript pantau-diam.vbs`. Berkas jejak ini tidak
+pernah ikut ke GitHub (ada di `.gitignore`).
+
 Cara manual (bila tidak ingin skrip): tekan `Win+R`, ketik `shell:startup`,
 lalu buat pintasan ke `pantau.bat`.
 
