@@ -159,8 +159,13 @@ class JobFilter:
 
         # JobStreet: hanya lamar lowongan yang kartunya menampilkan logo
         # perusahaan. Situs lain (mis. Glints) tidak mengisi has_logo, jadi
-        # lowongannya tidak ikut tertolak.
-        if config.require_company_logo and job.get("has_logo") is False:
+        # lowongannya tidak ikut tertolak. Indeed menandai "logo_diabaikan"
+        # karena kartunya memang tidak memuat logo perusahaan.
+        if (
+            config.require_company_logo
+            and not job.get("logo_diabaikan")
+            and job.get("has_logo") is False
+        ):
             return False, "Tanpa logo perusahaan"
 
         title_lower = title.lower()

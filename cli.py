@@ -29,6 +29,21 @@ def versi_kode() -> str:
     return "-"
 
 
+def lamar_semua_situs(situs: str = "", max_pages: int = 0, batas: int = 0,
+                      perbarui: bool = True):
+    """Satu perintah untuk JobStreet + Glints + Indeed (dipakai .bat)."""
+    from lamar_semua import jalankan as _jalankan
+
+    console.print(f"[cyan]Versi kode:[/] {versi_kode()}")
+    try:
+        _jalankan(
+            situs=situs, max_pages=max(0, max_pages),
+            batas=max(0, batas), perbarui=perbarui,
+        )
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Dihentikan oleh pengguna.[/]")
+
+
 def jalankan_indeed(max_pages: int = 0, keywords: str = "", batas: int = 0):
     """Riset & lamar lowongan Indeed (aturan sama dengan JobStreet)."""
     from indeed import jalankan_indeed as _jalankan
@@ -1001,6 +1016,26 @@ if __name__ == "__main__":
         "simulasi", help="Simulasi alur lamaran Glints (tanpa Chrome)"
     )
 
+    lamar_parser = subparsers.add_parser(
+        "lamar",
+        help="Sekali jalan: JobStreet, Glints, dan Indeed (untuk .bat)",
+    )
+    lamar_parser.add_argument(
+        "--situs", default="",
+        help="jobstreet,glints,indeed (bawaan: SITES di .env)",
+    )
+    lamar_parser.add_argument(
+        "--max-pages", type=int, default=0,
+        help="Halaman riset per kombinasi (0 = ikut .env)",
+    )
+    lamar_parser.add_argument(
+        "--limit", type=int, default=0, help="Batas lamaran sesi ini (0=tanpa batas)"
+    )
+    lamar_parser.add_argument(
+        "--tanpa-perbarui", action="store_true",
+        help="Jangan tarik pembaruan kode dari GitHub",
+    )
+
     indeed_parser = subparsers.add_parser(
         "indeed", help="Cari & lamar lowongan di Indeed"
     )
@@ -1151,6 +1186,10 @@ if __name__ == "__main__":
             simulasi_glints()
         else:
             glints_parser.print_help()
+    elif args.command == "lamar":
+        lamar_semua_situs(
+            args.situs, args.max_pages, args.limit, not args.tanpa_perbarui
+        )
     elif args.command == "indeed":
         if args.indeed_command == "run":
             jalankan_indeed(args.max_pages, args.keywords, args.limit)

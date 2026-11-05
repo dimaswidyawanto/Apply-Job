@@ -57,7 +57,12 @@ class AutoApplyEngine:
         self.waktu_halaman = 0.0
         self.jumlah_halaman = 0
 
-    def run(self):
+    def run(self, laporan_harian: bool = True):
+        """Jalankan sesi JobStreet.
+
+        `laporan_harian=False` dipakai peluncur satu klik agar laporan
+        Telegram dikirim sekali untuk semua situs, bukan per situs.
+        """
         self._print_banner()
         self._print_config()
 
@@ -107,10 +112,13 @@ class AutoApplyEngine:
             self.bot.close()
             self._print_results()
 
-            try:
-                notifier.send_daily_report(db.get_stats())
-            except Exception as exc:
-                console.print(f"[yellow]Laporan harian gagal dikirim: {exc}[/]")
+            if laporan_harian:
+                try:
+                    notifier.send_daily_report(db.get_stats())
+                except Exception as exc:
+                    console.print(
+                        f"[yellow]Laporan harian gagal dikirim: {exc}[/]"
+                    )
 
     def _satu_halaman(self, keyword: str, page: int, location: str = ""):
         """Cari & saring satu halaman.

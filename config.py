@@ -128,6 +128,11 @@ class Config:
     # JobStreet: lamar hanya lowongan yang kartunya menampilkan logo
     # perusahaan. Bawaan false agar perilaku lama tidak berubah.
     require_company_logo: bool = _bool_setting("REQUIRE_COMPANY_LOGO", False)
+    # Situs yang dijalankan oleh "Lamar Otomatis.bat" (urut: JobStreet, Glints,
+    # Indeed). Ubah jadi mis. "jobstreet,indeed" bila satu situs dilewati.
+    situs_aktif: str = ",".join(
+        _list_setting("SITES", "jobstreet,glints,indeed")
+    )
 
     # Bila ada kuesioner yang tidak bisa dijawab otomatis, beri kesempatan
     # mengisinya sendiri di jendela Chrome selama ini (detik). 0 = langsung

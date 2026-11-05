@@ -1320,7 +1320,7 @@ def tampilkan_konfigurasi_glints() -> None:
 
 
 def jalankan_glints(max_pages: int = 0, keywords: Optional[List[str]] = None,
-                    batas: int = 0) -> dict:
+                    batas: int = 0, laporan_harian: bool = True) -> dict:
     """Cari, saring, lalu lamar lowongan Glints secara otomatis."""
     kata_kunci = list(keywords) if keywords else config.keywords_riset
     halaman = halaman_per_kata_kunci(max_pages)
@@ -1584,10 +1584,12 @@ def jalankan_glints(max_pages: int = 0, keywords: Optional[List[str]] = None,
         bot.tutup()
 
         # Ringkasan harian ke Telegram, sama seperti sesi JobStreet.
-        try:
-            notifier.send_daily_report(db.get_stats())
-        except Exception as exc:
-            console.print(f"[yellow]Laporan harian gagal dikirim: {exc}[/]")
+        # Peluncur satu klik mematikan ini agar laporannya cukup satu.
+        if laporan_harian:
+            try:
+                notifier.send_daily_report(db.get_stats())
+            except Exception as exc:
+                console.print(f"[yellow]Laporan harian gagal dikirim: {exc}[/]")
 
     return laporan
 

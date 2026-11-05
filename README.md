@@ -123,6 +123,20 @@ chmod +x jalankan.sh
 Argumen apa pun diteruskan ke `cli.py`, misalnya
 `jalankan.bat history --limit 10` atau `jalankan.bat repair`.
 
+Ringkasnya, berkas yang bisa diklik:
+
+| Berkas | Gunanya |
+|---|---|
+| **`Lamar JobStreet.bat`** | satu klik: lamar otomatis **hanya di JobStreet** |
+| **`Lamar Glints.bat`** | satu klik: lamar otomatis **hanya di Glints** |
+| **`Lamar Indeed.bat`** | satu klik: lamar otomatis **hanya di Indeed** |
+| **`Lamar Otomatis.bat`** | satu klik: ketiganya berurutan (JobStreet → Glints → Indeed) |
+| `buat-pintasan.bat` | sekali jalan: menaruh keempat pintasan di Desktop |
+| `tarik.bat` | hanya menarik pembaruan kode |
+| `jalankan.bat` | menjalankan perintah CLI mana pun (mis. `jalankan.bat glints run`) |
+| `simpan.bat` | mengirim perubahan kode ke repo Anda |
+| `pantau.bat` | memantau repo dan menarik pembaruan otomatis |
+
 ## Instalasi manual
 
 ```bash
@@ -907,6 +921,55 @@ Dua perbedaan yang memang disengaja:
    (`countryCode=ID`), jadi hasilnya lebih luas lalu disaring dengan
    `LOCATIONS`. Aturan "semua lokasi tercakup" tetap terpenuhi.
 
+### Satu klik: berkas peluncur
+
+Ada empat berkas yang bisa diklik — **satu untuk tiap situs**, plus satu untuk
+semuanya:
+
+| Berkas | Yang dijalankan |
+|---|---|
+| `Lamar JobStreet.bat` | JobStreet saja |
+| `Lamar Glints.bat` | Glints saja |
+| `Lamar Indeed.bat` | Indeed saja |
+| `Lamar Otomatis.bat` | JobStreet → Glints → Indeed |
+
+Semuanya bekerja sama: klik dua kali berkasnya (atau pintasannya di Desktop).
+Setiap peluncur:
+
+1. menarik kode terbaru dari GitHub (`tarik.bat`),
+2. memasang dependensi hanya bila `requirements.txt` berubah,
+3. melamar di situs yang dituju,
+4. memakai **satu** kuota harian bersama — kalau jatah hari ini sudah habis,
+   sesi langsung berhenti dengan pesan kuota,
+5. mengirim laporan harian Telegram,
+6. tidak menutup jendela sebelum Anda melihat ringkasannya.
+
+```powershell
+# cukup klik dua kali, atau:
+.\Lamar JobStreet.bat
+.\Lamar Glints.bat
+.\Lamar Indeed.bat
+.\Lamar Otomatis.bat
+```
+
+Opsi bisa ditambahkan pada berkas mana pun:
+
+```powershell
+.\Lamar Indeed.bat --limit 10
+.\Lamar Indeed.bat --max-pages 2
+.\Lamar Otomatis.bat --situs jobstreet,indeed
+```
+
+Ingin ikon di Desktop? Jalankan sekali — keempat pintasan dibuat sekaligus:
+
+```powershell
+.\buat-pintasan.bat
+```
+
+Jalankan berurutan kapan saja; lowongan yang sudah dilamar tercatat sehingga
+tidak terkirim dua kali. Pada `Lamar Otomatis.bat`, satu situs gagal
+(mis. Cloudflare) tidak menghentikan situs lain.
+
 ### Indeed (id.indeed.com)
 
 Indeed memakai **aturan yang sama persis** dengan JobStreet:
@@ -917,7 +980,7 @@ Indeed memakai **aturan yang sama persis** dengan JobStreet:
 | Urutan | tanggal terbaru (`sort=date`) |
 | Dedupe | lintas kata kunci × lokasi |
 | Saringan | `JobFilter` yang sama (judul, lokasi, gaji `MIN_SALARY`, kualifikasi) |
-| Logo perusahaan | `REQUIRE_COMPANY_LOGO` (aturan deteksi yang sama) |
+| Logo perusahaan | **tidak dipakai** — kartu Indeed tidak memuat logo, jadi `REQUIRE_COMPANY_LOGO` hanya berlaku untuk JobStreet & Glints |
 | Skor & ranking | 8 dimensi, ranking global, ambil yang terbaik dulu |
 | Kuota harian | `kuota.py` — 50/hari, **dipakai bersama** JobStreet & Glints |
 | Batas per sesi | `AUTO_APPLY_MAX_PER_SESSION` |
@@ -929,6 +992,10 @@ Indeed memakai **aturan yang sama persis** dengan JobStreet:
 
 Lamaran Indeed yang dialihkan ke situs perusahaan (`Apply on company site`)
 dilewati sebagai *perlu manual* — sama seperti JobStreet.
+
+Catatan: Indeed tetap mencoba membaca logo perusahaan (untuk ditampilkan di
+daftar kandidat), tetapi hasilnya **tidak** dipakai menyaring lowongan. Logo
+hanya jadi syarat di JobStreet dan Glints.
 
 ```powershell
 .\jalankan.bat indeed run

@@ -125,14 +125,42 @@ def test_alasan_menolak_lokasi_di_luar_daftar(monkeypatch):
     assert "lokasi di luar daftar" in indeed_module.alasan_tidak_layak(job)
 
 
-def test_alasan_menolak_tanpa_logo(monkeypatch):
+def test_tanpa_logo_tetap_layak_di_indeed(monkeypatch):
+    """Kartu Indeed tidak memuat logo, jadi aturan wajib logo tidak dipakai."""
     monkeypatch.setattr(indeed_module, "db", DbPalsu())
     monkeypatch.setattr(config, "locations", ["Bandung"], raising=False)
     monkeypatch.setattr(config, "require_company_logo", True, raising=False)
+    monkeypatch.setattr(config, "min_salary", 0, raising=False)
+    monkeypatch.setattr(config, "require_keyword_match", False, raising=False)
 
     mentah = dict(KARTU_MENTAH, logo=[])
     job = rapikan_kartu(mentah)
-    assert "logo" in indeed_module.alasan_tidak_layak(job).lower()
+
+    assert job["has_logo"] is False
+    assert job["logo_diabaikan"] is True
+    assert indeed_module.alasan_tidak_layak(job) == ""
+
+
+def test_jobstreet_tetap_mewajibkan_logo():
+    """Penanda logo_diabaikan hanya dipakai Indeed; JobStreet tidak berubah."""
+    from job_filter import JobFilter
+
+    lama_logo = config.require_company_logo
+    lama_kata = config.require_keyword_match
+    config.require_company_logo = True
+    config.require_keyword_match = False
+    try:
+        job = {"job_id": "x1", "title": "Staff Gudang", "has_logo": False}
+        lolos, alasan = JobFilter().should_apply(job)
+        assert lolos is False
+        assert alasan == "Tanpa logo perusahaan"
+
+        job_indeed = dict(job, job_id="x2", logo_diabaikan=True)
+        lolos_indeed, _ = JobFilter().should_apply(job_indeed)
+        assert lolos_indeed is True
+    finally:
+        config.require_company_logo = lama_logo
+        config.require_keyword_match = lama_kata
 
 
 # --------------------------------------------------------------- melamar ----
@@ -251,3 +279,60 @@ def test_lowongan_sudah_dilamar_dilewati(monkeypatch):
 
     assert bot.dilamar == []
     assert laporan["sudah"] == 1
+
+
+# ------------------------------------------------------------- logo ----
+def test_logo_dari_cdn_tanpa_kata_logo_diterima():
+    """Logo Indeed sering dari CDN perusahaan, tanpa kata "logo" di URL."""
+    from indeed import logo_kartu_indeed
+
+    gambar = [{"src": "https://cdn.affinity.com/foto/abc123.png", "alt": ""}]
+    punya, _ = logo_kartu_indeed(gambar, "PT Contoh")
+    assert punya is True
+
+
+def test_gambar_placeholder_bukan_logo():
+    from indeed import logo_kartu_indeed
+
+    for src in (
+        "https://id.indeed.com/images/company-logo-placeholder.png",
+        "https://id.indeed.com/no-logo.png",
+        "data:image/gif;base64,R0lGOD",
+        "https://example.com/spacer.gif",
+    ):
+        punya, _ = logo_kartu_indeed([{"src": src, "alt": ""}], "PT Contoh")
+        assert punya is False, src
+
+
+def test_placeholder_lewat_class_juga_ditolak():
+    from indeed import logo_kartu_indeed
+
+    gambar = [{
+        "src": "https://cdn.example.com/x.png",
+        "alt": "",
+        "penanda": "companyLogo placeholder",
+    }]
+    punya, _ = logo_kartu_indeed(gambar, "PT Contoh")
+    assert punya is False
+
+
+def test_logo_dari_alt_nama_perusahaan():
+    from indeed import logo_kartu_indeed
+
+    punya, _ = logo_kartu_indeed(
+        [{"src": "", "alt": "Logo PT Contoh"}], "PT Contoh"
+    )
+    assert punya is True
+
+
+def test_tanpa_gambar_sama_sekali():
+    from indeed import logo_kartu_indeed
+
+    assert logo_kartu_indeed([], "PT Contoh")[0] is False
+    assert logo_kartu_indeed(None, "PT Contoh")[0] is False
+
+
+def test_rapikan_kartu_memakai_deteksi_logo_indeed():
+    mentah = dict(KARTU_MENTAH)
+    mentah["logo"] = [{"src": "https://cdn.affinity.com/foto/abc.png", "alt": ""}]
+    assert rapikan_kartu(mentah)["has_logo"] is True

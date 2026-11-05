@@ -35,7 +35,6 @@ from database import db
 from glints import (
     folder_debug,
     label_umur,
-    logo_kartu,
     lokasi_cocok,
     pilih_teratas,
     tampilkan_perbandingan,
@@ -135,9 +134,10 @@ for (const tautan of document.querySelectorAll("a[href*='jk=']")) {
     const logo = [];
     for (const img of wadah.querySelectorAll("img")) {
         logo.push({
-            src: img.getAttribute("src") || "",
+            src: img.getAttribute("src") || img.getAttribute("data-src") || "",
             alt: img.getAttribute("alt") || "",
-            penanda: img.getAttribute("data-testid") || ""
+            penanda: (img.getAttribute("data-testid") || "") + " " +
+                      (img.getAttribute("class") || "")
         });
     }
 
@@ -180,6 +180,61 @@ def id_dari_url(url: str) -> str:
     return cocok.group(1) if cocok else ""
 
 
+# Gambar pengganti di kartu Indeed (bukan logo perusahaan).
+_BUKAN_LOGO_INDEED = (
+    "placeholder",
+    "no-logo",
+    "nologo",
+    "no-logo",
+    "noimage",
+    "no-image",
+    "default-company",
+    "company-logo-default",
+    "spacer",
+    "pixel",
+    "1x1",
+    "blank",
+    "transparent",
+)
+
+
+def logo_kartu_indeed(kandidat, perusahaan: str = "") -> tuple:
+    """Apakah kartu Indeed menampilkan logo perusahaan.
+
+    Indeed hanya menampilkan gambar perusahaan bila logonya benar-benar ada;
+    selain itu ia memakai gambar pengganti (placeholder). Karena itu aturan
+    JobStreet yang menuntut kata "logo"/"brand" pada URL terlalu ketat di sini:
+    logo Indeed sering berasal dari CDN perusahaan tanpa kata "logo".
+    """
+    if not isinstance(kandidat, (list, tuple)) or not kandidat:
+        return False, "tidak ada gambar"
+
+    for item in kandidat:
+        if not isinstance(item, dict):
+            continue
+
+        src = str(item.get("src") or "").strip()
+        alt = str(item.get("alt") or "").strip()
+        penanda = str(item.get("penanda") or "").strip().lower()
+
+        if not src and not alt:
+            continue
+
+        gabungan = f"{src} {penanda}".lower()
+
+        # Data URI kecil = garis/pengisi, bukan logo.
+        if src.startswith("data:") and len(src) < 200:
+            continue
+
+        if any(tanda in gabungan for tanda in _BUKAN_LOGO_INDEED):
+            continue
+
+        if src.startswith("http") or alt:
+            return True, f"<img alt='{alt[:30]}'>"
+
+    return False, "gambar pengganti"
+
+
 def rapikan_kartu(data: Dict) -> Optional[Dict]:
     """Ubah hasil pembaca kartu menjadi dict lowongan; None bila tidak layak."""
     if not isinstance(data, dict):
@@ -193,11 +248,14 @@ def rapikan_kartu(data: Dict) -> Optional[Dict]:
 
     teks = " ".join(str(data.get("text") or "").split())
     perusahaan = " ".join(str(data.get("company") or "").split())
-    punya_logo, info_logo = logo_kartu(data.get("logo"), perusahaan)
+    punya_logo, info_logo = logo_kartu_indeed(data.get("logo"), perusahaan)
     umur = umur_dari_teks(teks.lower())
 
     return {
         "has_logo": punya_logo,
+        # Kartu Indeed tidak memuat logo perusahaan, jadi aturan "wajib logo"
+        # milik JobStreet tidak dipakai di situs ini.
+        "logo_diabaikan": True,
         "logo_src": info_logo,
         "job_id": f"indeed:{kunci}",
         "title": judul,
@@ -810,7 +868,7 @@ def tampilkan_konfigurasi() -> None:
         else "semua lokasi",
     )
     tabel.add_row(
-        "Wajib logo perusahaan", "ya" if config.require_company_logo else "tidak"
+        "Wajib logo perusahaan", "tidak (kartu Indeed tanpa logo)"
     )
     tabel.add_row("Urutan kandidat", getattr(config, "rank_by", "relevance"))
     tabel.add_row("Jeda antar lamaran", f"{config.delay_between_apply} detik")
@@ -822,7 +880,7 @@ def tampilkan_konfigurasi() -> None:
 
 
 def jalankan_indeed(max_pages: int = 0, keywords: Optional[List[str]] = None,
-                    batas: int = 0) -> dict:
+                    batas: int = 0, laporan_harian: bool = True) -> dict:
     """Riset → saring → peringkat → lamar di Indeed, aturan sama JobStreet."""
     kata_kunci = list(keywords) if keywords else config.keywords_riset
     halaman = batas_halaman_riset(max_pages)
@@ -859,7 +917,6 @@ def jalankan_indeed(max_pages: int = 0, keywords: Optional[List[str]] = None,
 
         layak: List[Dict] = []
         sudah = JobFilter()
-        tanpa_logo = 0
 
         for job in lowongan:
             if job.get("sudah_dilamar"):
@@ -882,20 +939,10 @@ def jalankan_indeed(max_pages: int = 0, keywords: Optional[List[str]] = None,
             alasan = alasan_tidak_layak(job, sudah)
             if alasan:
                 laporan["dilewati"] += 1
-                if "logo" in alasan.lower():
-                    tanpa_logo += 1
                 console.print(f"[dim]Lewati: {job['title']} — {alasan}[/]")
                 continue
 
             layak.append(job)
-
-        if config.require_company_logo and lowongan and tanpa_logo == len(lowongan):
-            console.print(
-                f"[yellow]Semua {tanpa_logo} kartu Indeed terbaca tanpa logo. "
-                "Bila di situs logonya terlihat, jalankan `python cli.py "
-                "indeed diagnosa` lalu kirimkan hasilnya agar deteksi logo "
-                "disesuaikan.[/]"
-            )
 
         if not layak:
             console.print("[yellow]Tidak ada lowongan Indeed yang lolos filter.[/]")
@@ -984,10 +1031,11 @@ def jalankan_indeed(max_pages: int = 0, keywords: Optional[List[str]] = None,
     finally:
         bot.tutup()
 
-        try:
-            notifier.send_daily_report(db.get_stats())
-        except Exception as exc:
-            console.print(f"[yellow]Laporan harian gagal dikirim: {exc}[/]")
+        if laporan_harian:
+            try:
+                notifier.send_daily_report(db.get_stats())
+            except Exception as exc:
+                console.print(f"[yellow]Laporan harian gagal dikirim: {exc}[/]")
 
     return laporan
 
@@ -1026,13 +1074,23 @@ def diagnosa_indeed(keyword: str = "", location: str = "") -> Dict:
     if not kata:
         kata = (config.keywords or ["inventory"])[0]
 
+    # Tanpa lokasi, Indeed menampilkan lowongan dari seluruh Indonesia dan
+    # hasilnya sering tidak nyambung dengan kata kunci. Pakai lokasi pertama
+    # di .env sebagai contoh yang wajar.
+    lokasi = (location or "").strip()
+    if not lokasi and config.locations:
+        lokasi = config.locations[0]
+
     bot = IndeedBot()
     info: Dict = {}
 
     try:
         bot.init_browser()
-        console.print(f"[cyan]Diagnosa Indeed — kata kunci: '{kata}'[/]")
-        berhasil = bot.buka_pencarian(kata, location)
+        console.print(
+            f"[cyan]Diagnosa Indeed — kata kunci: '{kata}'"
+            + (f" · lokasi: {lokasi}[/]" if lokasi else "[/]")
+        )
+        berhasil = bot.buka_pencarian(kata, lokasi)
         info = bot.diagnosa_terakhir or bot.simpan_diagnosa("diagnosa", kata)
 
         console.print(
@@ -1056,6 +1114,16 @@ def diagnosa_indeed(keyword: str = "", location: str = "") -> Dict:
                     f"{job['location'] or '-'} | {job['salary'] or '-'} | "
                     f"logo: {'ada' if job.get('has_logo') else 'tidak'}"
                 )
+
+            saringan = JobFilter()
+            cocok = sum(
+                1 for job in kartu if saringan.should_apply(job)[0]
+            )
+            berlogo = sum(1 for job in kartu if job.get("has_logo"))
+            console.print(
+                f"[dim]{cocok} dari {len(kartu)} kartu cocok dengan filter "
+                f"judul/gaji · {berlogo} kartu berlogo perusahaan.[/]"
+            )
             if not kartu:
                 console.print(
                     f"[yellow]Cara cadangan menemukan "
