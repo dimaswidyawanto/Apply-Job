@@ -69,6 +69,26 @@ PowerShell/Command Prompt di folder itu, lalu:
 ```
 
 Di Command Prompt lama, `.\` boleh dihilangkan (`jalankan.bat run`).
+**Bila `jalankan.bat` berhenti di “[2/3] Memasang dependensi…”** dengan
+traceback `pip` yang berakhir `KeyboardInterrupt`, penyebabnya biasanya Python
+**3.14/3.15** — pip versi itu sering macet saat memasang paket. Mulai versi ini
+`jalankan.bat`:
+
+* memilih Python 3.13 → 3.12 → 3.11 → 3.10 lebih dulu (bukan yang terbaru),
+* membuat ulang `.venv` yang dibuat Python 3.14+ (folder lama disimpan sebagai
+  `.venv-lama`),
+* memasang dependensi **sekali saja** — pemakaian berikutnya langsung jalan.
+  Paksa pasang ulang dengan `set PAKSA_PASANG=1`, atau lewati dengan
+  `set LEWATI_PASANG=1`.
+
+Jalan pintas bila masih bermasalah:
+
+```powershell
+Remove-Item -Recurse -Force .venv
+py -3.12 -m venv .venv
+.\jalankan.bat config        # sekali ini saja yang memasang dependensi
+```
+
 **Bila `tarik.bat` mencetak `'gabungan' is not recognized as an internal or
 external command`**, itu bug lama pada skrip: berkas batch berakhir baris LF
 sehingga `cmd.exe` melompat ke tengah baris. Sudah diperbaiki — semua `.bat`

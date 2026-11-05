@@ -62,3 +62,22 @@ def test_tarik_bat_menyimpan_perubahan_lokal():
 def test_cek_glints_memakai_venv_langsung():
     isi = (AKAR / "cek-glints.bat").read_text(encoding="utf-8")
     assert '.venv\\Scripts\\python.exe" cli.py glints cek' in isi
+
+
+def test_jalankan_memasang_dependensi_sekali_saja():
+    """pip tidak boleh dipasang ulang setiap perintah (dulu bikin macet)."""
+    isi = (AKAR / "jalankan.bat").read_text(encoding="utf-8")
+
+    assert ".deps-terpasang" in isi
+    assert "LEWATI_PASANG" in isi
+    assert "PAKSA_PASANG" in isi
+    # Python 3.14+ membuat pip macet; skrip harus memilih versi lain.
+    assert "3.12" in isi
+    assert "VENVMINOR" in isi
+
+
+def test_jalankan_sh_memasang_dependensi_sekali_saja():
+    isi = (AKAR / "jalankan.sh").read_text(encoding="utf-8")
+
+    assert ".deps-terpasang" in isi
+    assert "LEWATI_PASANG" in isi
