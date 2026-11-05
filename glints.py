@@ -22,13 +22,11 @@ from urllib.parse import quote_plus
 
 from rich.console import Console
 from rich.table import Table
-from selenium import webdriver
 from selenium.common.exceptions import WebDriverException
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 
 from auto_apply import ApplyResult, AutoApplier
+from browser import buka_chrome
 from config import MAKS_HALAMAN_RISET, batas_halaman_riset, config
 from database import db
 from job_filter import JobFilter, dedupe_jobs, rentang_gaji
@@ -687,42 +685,8 @@ class GlintsBot:
     # ------------------------------ browser ---------------------------
     def init_browser(self):
         console.print("[bold blue]Membuka Chrome untuk Glints...[/]")
-
-        options = Options()
-        options.add_argument("--window-size=1400,900")
-        options.add_argument("--disable-blink-features=AutomationControlled")
-
-        if config.use_profile:
-            profile_path = Path(config.profile_dir).expanduser()
-            with contextlib.suppress(Exception):
-                profile_path.mkdir(parents=True, exist_ok=True)
-                options.add_argument(f"--user-data-dir={profile_path}")
-                options.add_argument("--profile-directory=Default")
-
-        if config.headless:
-            options.add_argument("--headless=new")
-            options.add_argument("--disable-gpu")
-        else:
-            options.add_argument("--start-maximized")
-
-        try:
-            self.driver = webdriver.Chrome(options=options)
-        except Exception as pertama:
-            console.print(
-                f"[yellow]ChromeDriver otomatis gagal ({pertama}). "
-                "Mencoba webdriver-manager...[/]"
-            )
-            try:
-                from webdriver_manager.chrome import ChromeDriverManager
-
-                service = Service(ChromeDriverManager().install())
-                self.driver = webdriver.Chrome(service=service, options=options)
-            except Exception as kedua:
-                raise RuntimeError(
-                    "Chrome tidak bisa dibuka. Pastikan Google Chrome "
-                    "terpasang dan komputer tersambung internet, lalu jalankan "
-                    f"ulang. Detail: {kedua}"
-                ) from pertama
+        self.driver = buka_chrome(label="Glints")
+        console.print("[bold green]Chrome siap.[/]")
 
     def _teks_halaman(self) -> str:
         try:

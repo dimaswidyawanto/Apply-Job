@@ -951,6 +951,25 @@ Pastikan Google Chrome terpasang dan bukan versi portabel. Bila unduhan
 ChromeDriver otomatis gagal, program mencoba `webdriver-manager`; Anda juga
 bisa memasang ChromeDriver manual dan menaruhnya di `PATH`.
 
+**`session not created: Chrome failed to start ... DevToolsActivePort file
+doesn't exist`.**
+Profil Chrome masih dipakai proses Chrome lain atau profilnya rusak. Program
+sudah otomatis mencoba: (1) profil tersimpan, (2) profil tersimpan setelah
+berkas kunci sisa Chrome (`SingletonLock`, dll.) dibersihkan, (3) profil
+sementara, (4) tanpa mode headless. Bila semuanya gagal:
+
+```powershell
+# 1) tutup semua Chrome, lalu cek Task Manager (Ctrl+Shift+Esc) -> chrome.exe -> End task
+# 2) buat profil Chrome baru (sesi login lama tidak terbawa)
+.\jalankan.bat perbaiki-chrome
+# 3) jalankan lagi; login sekali di jendela yang terbuka
+.\jalankan.bat glints diagnosa --keyword "inventory staff"
+```
+
+Bila muncul peringatan “Chrome terbuka TANPA profil tersimpan”, itu tanda
+profil masih terkunci oleh Chrome lain: tutup semua Chrome, lalu jalankan
+lagi agar sesi login tersimpan kembali.
+
 **Riwayat menampilkan posisi kosong.**
 Itu data lama dari versi sebelumnya yang menyimpan judul kosong. Jalankan
 `python cli.py repair`; data lama tidak dihapus, hanya diisi teks pengganti.

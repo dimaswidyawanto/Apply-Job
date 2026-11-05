@@ -1,6 +1,8 @@
 import argparse
 import contextlib
 import subprocess
+import time
+from pathlib import Path
 
 from rich.console import Console
 from rich.table import Table
@@ -561,6 +563,45 @@ def show_applications(limit: int = 50):
     console.print(table)
 
 
+def perbaiki_chrome():
+    """Pindahkan profil Chrome bot ke folder cadangan (dibuat ulang bersih).
+
+    Dipakai saat Chrome gagal dibuka (`DevToolsActivePort file doesn't exist`)
+    karena profilnya terkunci atau rusak.
+    """
+    profil = Path(config.profile_dir).expanduser()
+
+    if not profil.exists():
+        console.print(
+            f"[yellow]Profil Chrome belum ada:[/] {profil}"
+        )
+        console.print(
+            "[dim]Jalankan `python cli.py run` seperti biasa; profil baru "
+            "akan dibuat otomatis.[/]"
+        )
+        return
+
+    cadangan = profil.with_name(
+        f"{profil.name}-lama-{time.strftime('%Y%m%d-%H%M%S')}"
+    )
+
+    try:
+        profil.rename(cadangan)
+    except Exception as exc:
+        console.print(f"[bold red]Gagal memindahkan profil:[/] {exc}")
+        console.print(
+            "[yellow]Tutup semua jendela Chrome (cek juga Task Manager) lalu "
+            "jalankan perintah ini lagi.[/]"
+        )
+        return
+
+    console.print(f"[green]Profil lama dipindahkan ke:[/] {cadangan}")
+    console.print(
+        "Mulai sekarang bot memakai profil Chrome baru. Sesi login lama tidak "
+        "terbawa — login sekali lagi saat menjalankan `run`."
+    )
+
+
 def repair_data():
     report = db.repair_data()
 
@@ -647,6 +688,10 @@ if __name__ == "__main__":
     subparsers.add_parser("stats", help="Tampilkan statistik")
     subparsers.add_parser("config", help="Tampilkan konfigurasi aktif")
     subparsers.add_parser("repair", help="Rapikan data lama di database")
+    subparsers.add_parser(
+        "perbaiki-chrome",
+        help="Buat ulang profil Chrome bila Chrome gagal dibuka",
+    )
     subparsers.add_parser(
         "simulasi",
         help="Uji alur lamaran dengan halaman palsu (tanpa Chrome)",
@@ -812,6 +857,8 @@ if __name__ == "__main__":
         show_config()
     elif args.command == "repair":
         repair_data()
+    elif args.command == "perbaiki-chrome":
+        perbaiki_chrome()
     elif args.command == "perbarui-env":
         perbarui_env()
     elif args.command == "simulasi":

@@ -7,23 +7,20 @@ agar pengguna meninjau dan mengirim lamaran sendiri di browser.
 import hashlib
 import re
 import time
-from pathlib import Path
 from typing import Dict, List, Optional
 from urllib.parse import urldefrag, urlencode, urljoin
 
 from rich.console import Console
-from selenium import webdriver
 from selenium.common.exceptions import (
     NoSuchElementException,
     TimeoutException,
 )
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
 from auto_apply import ApplyResult, AutoApplier
+from browser import buka_chrome
 from config import config
 from database import db
 
@@ -137,53 +134,7 @@ class JobStreetBot:
         """Membuka Chrome. Mode headless mengikuti HEADLESS_MODE di .env."""
         console.print("[bold blue]Membuka Chrome...[/]")
 
-        options = Options()
-        options.add_argument("--window-size=1400,900")
-        options.add_argument("--disable-blink-features=AutomationControlled")
-
-        # Profil tetap -> cookie login tersimpan, tidak perlu login tiap sesi.
-        if config.use_profile:
-            profile_path = Path(config.profile_dir).expanduser()
-
-            try:
-                profile_path.mkdir(parents=True, exist_ok=True)
-                options.add_argument(f"--user-data-dir={profile_path}")
-                options.add_argument("--profile-directory=Default")
-                console.print(f"[dim]Profil Chrome: {profile_path}[/]")
-            except Exception as exc:
-                console.print(
-                    f"[yellow]Profil Chrome tidak bisa dipakai ({exc}); "
-                    "memakai profil sementara.[/]"
-                )
-
-        if config.headless:
-            options.add_argument("--headless=new")
-            options.add_argument("--disable-gpu")
-        else:
-            options.add_argument("--start-maximized")
-
-        try:
-            # Selenium 4.6+ sudah punya Selenium Manager, jadi tidak wajib
-            # menyiapkan chromedriver secara manual.
-            self.driver = webdriver.Chrome(options=options)
-        except Exception as first_error:
-            console.print(
-                f"[yellow]ChromeDriver otomatis gagal ({first_error}). "
-                "Mencoba webdriver-manager...[/]"
-            )
-            try:
-                from webdriver_manager.chrome import ChromeDriverManager
-
-                service = Service(ChromeDriverManager().install())
-                self.driver = webdriver.Chrome(
-                    service=service, options=options
-                )
-            except Exception as second_error:
-                raise RuntimeError(
-                    "Chrome tidak bisa dibuka. Pastikan Google Chrome sudah "
-                    "terpasang, lalu jalankan ulang program. "
-                    f"Detail: {second_error}"
-                ) from first_error
+        self.driver = buka_chrome(label="JobStreet")
 
         detik = max(3, int(getattr(config, "search_wait", 20) or 20))
         self.wait = WebDriverWait(self.driver, detik)
