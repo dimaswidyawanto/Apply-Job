@@ -268,6 +268,32 @@ def pilih_teratas(lowongan: List[Dict], batas: int = 0) -> List[Dict]:
     return terurut
 
 
+def tampilkan_rincian_skor(kandidat: List[Dict], maksimal: int = 3):
+    """Rincian skor per dimensi (sama seperti tabel JobStreet)."""
+    if not kandidat:
+        return
+
+    table = Table(title="Rincian skor kandidat teratas (Glints)", show_lines=False)
+    table.add_column("Judul", style="cyan", max_width=30)
+    for nama in ("Posisi", "Lokasi", "Kualifikasi", "Pengalaman", "Pendidikan",
+                 "Keterampilan", "Tanggal", "Gaji", "Total"):
+        table.add_column(nama, justify="right", style="dim")
+
+    for job in kandidat[:maksimal]:
+        rincian = job.get("_skor_rincian") or {}
+        table.add_row(
+            str(job.get("title") or "-")[:30],
+            *[
+                str(rincian.get(kunci, 0))
+                for kunci in ("posisi", "lokasi", "kualifikasi", "pengalaman",
+                              "pendidikan", "keterampilan", "tanggal", "gaji")
+            ],
+            f"[green]{job.get('_score', 0)}[/]",
+        )
+
+    console.print(table)
+
+
 def tampilkan_perbandingan(kandidat: List[Dict], maksimal: int = 10):
     """Tabel kandidat teratas beserta skor kecocokannya (Glints)."""
     if not kandidat:
@@ -302,6 +328,53 @@ def tampilkan_perbandingan(kandidat: List[Dict], maksimal: int = 10):
         )
 
 
+# Teks umur lowongan yang biasa muncul di kartu Glints.
+_POLA_UMUR = (
+    (r"baru saja|hari ini|just posted|today", 0),
+    (r"(\d+)\s*menit|(\d+)\s*minute", 0),
+    (r"(\d+)\s*jam|(\d+)\s*hour", 0),
+    (r"(\d+)\s*hari|(\d+)\s*day", 1),
+    (r"(\d+)\s*minggu|(\d+)\s*week", 7),
+    (r"(\d+)\s*bulan|(\d+)\s*month", 30),
+)
+
+
+def umur_dari_teks(teks: str) -> Optional[int]:
+    """Umur lowongan (hari) dari teks kartu Glints; None bila tak terbaca.
+
+    Kartu Glints menulis hal seperti "3 hari lalu", "2 minggu lalu",
+    "Baru saja", atau "5 jam lalu".
+    """
+    isi = " ".join(str(teks or "").lower().split())
+    if not isi:
+        return None
+
+    for pola, faktor in _POLA_UMUR:
+        cocok = re.search(pola, isi)
+        if not cocok:
+            continue
+
+        if faktor == 0:
+            return 0
+
+        angka = next((g for g in cocok.groups() if g), None)
+        if angka is None:
+            return 0
+
+        return int(angka) * faktor
+
+    return None
+
+
+def label_umur(umur: Optional[int]) -> str:
+    """Teks tanggal publikasi untuk laporan & penyortiran."""
+    if umur is None:
+        return ""
+    if umur <= 0:
+        return "Hari ini"
+    return f"{umur} hari lalu"
+
+
 def rapikan_kartu(data: dict) -> Optional[Dict]:
     """Ubah hasil skrip kartu menjadi dict lowongan; None bila tidak layak."""
     if not isinstance(data, dict):
@@ -317,6 +390,7 @@ def rapikan_kartu(data: dict) -> Optional[Dict]:
     teks = " ".join(str(data.get("text") or "").split()).lower()
     perusahaan = " ".join(str(data.get("company") or "").split())
     punya_logo, info_logo = logo_kartu(data.get("logo"), perusahaan)
+    umur = umur_dari_teks(teks)
 
     return {
         "has_logo": punya_logo,
@@ -328,8 +402,8 @@ def rapikan_kartu(data: dict) -> Optional[Dict]:
         "salary": " ".join(str(data.get("salary") or "").split()),
         "description": " ".join(str(data.get("text") or "").split())[:800],
         "url": url,
-        "date_posted": "",
-        "age_days": None,
+        "date_posted": label_umur(umur),
+        "age_days": umur,
         "source": "glints",
         "sudah_dilamar": any(tanda in teks for tanda in SUDAH_DILAMAR_TEXTS),
         "khusus_aplikasi": bool(khusus_aplikasi(teks)),
@@ -734,7 +808,10 @@ class GlintsBot:
         if not self.buka_pencarian(keyword):
             return []
 
-        if halaman == 0 and config.prefer_newest:
+        # Urutkan dari yang paling baru setiap kali mencari, berapa pun
+        # jumlah "Muat lebih banyak"-nya (dulu hanya saat halaman == 0,
+        # sehingga riset 5 muat kehilangan urutan terbaru).
+        if config.prefer_newest:
             self.urutkan_terbaru()
 
         for _ in range(halaman):
@@ -829,6 +906,10 @@ def jalankan_glints(max_pages: int = 0, keywords: Optional[List[str]] = None,
             f"(batas tetap {MAKS_HALAMAN_RISET}), urut 'Baru Ditambahkan'."
         )
 
+        mulai_riset = time.monotonic()
+        total_kata_kunci = len(kata_kunci)
+        selesai_kata_kunci = 0
+
         for keyword in kata_kunci:
             console.print(
                 f"[cyan]Glints: '{keyword}' — muat sampai {halaman} kali[/]"
@@ -853,6 +934,19 @@ def jalankan_glints(max_pages: int = 0, keywords: Optional[List[str]] = None,
                     "[dim]Tidak ada lowongan baru untuk kata kunci ini.[/]"
                 )
 
+            selesai_kata_kunci += 1
+            lama_riset = time.monotonic() - mulai_riset
+            per_kata_kunci = lama_riset / max(1, selesai_kata_kunci)
+            sisa = per_kata_kunci * (
+                total_kata_kunci - selesai_kata_kunci
+            )
+            console.print(
+                f"[dim]Kemajuan riset Glints: {selesai_kata_kunci}/"
+                f"{total_kata_kunci} kata kunci, {len(lowongan)} lowongan, "
+                f"{lama_riset:.0f} detik berlalu — perkiraan sisa "
+                f"{sisa:.0f} detik.[/]"
+            )
+
             if batas_riset and len(lowongan) >= batas_riset:
                 console.print(
                     f"[cyan]Batas riset RESEARCH_MAX_JOBS={batas_riset} "
@@ -868,11 +962,13 @@ def jalankan_glints(max_pages: int = 0, keywords: Optional[List[str]] = None,
         console.print(
             f"[bold green]Riset Glints selesai:[/] "
             f"{sebelum_dedup + duplikat} terbaca → {len(lowongan)} unik "
-            f"({dibuang} duplikat dibuang)."
+            f"({dibuang} duplikat dibuang) dalam "
+            f"{time.monotonic() - mulai_riset:.0f} detik."
         )
 
         # --- Saring dulu semuanya, baru bandingkan dan pilih yang terbaik ---
         layak: List[Dict] = []
+        tanpa_logo = 0
 
         for job in lowongan:
             if job.get("khusus_aplikasi"):
@@ -907,10 +1003,22 @@ def jalankan_glints(max_pages: int = 0, keywords: Optional[List[str]] = None,
             lolos, alasan = bot.filters.should_apply(job)
             if not lolos:
                 laporan["dilewati"] += 1
+                if "logo" in str(alasan).lower():
+                    tanpa_logo += 1
                 console.print(f"[dim]Lewati: {job['title']} — {alasan}[/]")
                 continue
 
             layak.append(job)
+
+        # Peringatan penting: bila SEMUA kartu terbaca tanpa logo, kemungkinan
+        # besar deteksinya yang perlu disesuaikan, bukan lowongannya.
+        if config.require_company_logo and lowongan and tanpa_logo == len(lowongan):
+            console.print(
+                f"[yellow]Semua {tanpa_logo} kartu Glints terbaca tanpa logo. "
+                "Bila di situs logonya terlihat, jalankan "
+                "`python cli.py glints cari` lalu kirimkan tabelnya agar "
+                "deteksi logo Glints disesuaikan.[/]"
+            )
 
         if not layak:
             console.print("[yellow]Tidak ada lowongan Glints yang lolos filter.[/]")
@@ -942,6 +1050,7 @@ def jalankan_glints(max_pages: int = 0, keywords: Optional[List[str]] = None,
             )
 
         tampilkan_perbandingan(dipilih)
+        tampilkan_rincian_skor(dipilih)
 
         for job in dipilih:
             if batas and laporan["dilamar"] >= batas:
