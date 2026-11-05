@@ -69,6 +69,10 @@ PowerShell/Command Prompt di folder itu, lalu:
 ```
 
 Di Command Prompt lama, `.\` boleh dihilangkan (`jalankan.bat run`).
+Di **PowerShell** awalan `.\` wajib — kalau tidak, muncul
+`tarik.bat : The term 'tarik.bat' is not recognized...` karena PowerShell
+tidak menjalankan perintah dari folder aktif. Nama folder boleh memuat
+spasi (mis. `C:\Dimas\Lamar otomatis Jobstreet dan Glints`).
 
 **macOS / Linux**:
 
@@ -198,7 +202,7 @@ python cli.py perbarui-env
 python cli.py set-env MAX_APPLY_PER_DAY=0 AUTO_APPLY_MAX_PER_SESSION=0
 
 # 5d. Kirim perubahan ke GitHub dengan satu perintah
-simpan.bat              # Windows
+.\simpan.bat              # Windows
 ./simpan.sh             # macOS/Linux
 
 # 6. Uji alur lamaran dengan halaman palsu (tanpa Chrome, tanpa internet)
@@ -235,8 +239,8 @@ pun. Pindah dulu: `git checkout arena/4ab2b9fa-dimastes` lalu `git pull`.
 Untuk mengirim perubahan **dari PC ke GitHub** cukup satu klik:
 
 ```bash
-simpan.bat                        # Windows
-simpan.bat "Pesan commit sendiri" # dengan pesan sendiri
+.\simpan.bat                        # Windows
+.\simpan.bat "Pesan commit sendiri" # dengan pesan sendiri
 ./simpan.sh                       # macOS/Linux
 ```
 
@@ -292,8 +296,8 @@ Yours*/*Incoming* sesuai keinginan, lalu simpan.
 Kalau tidak ingin mengetik perintah, jalankan pemantau di latar belakang:
 
 ```bash
-pantau.bat          # Windows, periksa tiap 60 detik
-pantau.bat 30       # periksa tiap 30 detik
+.\pantau.bat          # Windows, periksa tiap 60 detik
+.\pantau.bat 30       # periksa tiap 30 detik
 ./pantau.sh         # macOS/Linux
 ```
 
@@ -375,7 +379,7 @@ Sejak itu `main` adalah salinan penuh di repo Anda, dan `simpan.bat` /
 dengan satu perintah; remote `arena` ditambahkan otomatis:
 
 ```bash
-tarik.bat        # Windows
+.\tarik.bat        # Windows
 ./tarik.sh       # macOS/Linux
 ```
 
