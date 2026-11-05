@@ -48,6 +48,13 @@ class AutoApplyEngine:
         # Duplikat yang muncul lagi dari kata kunci/lokasi lain (dihitung
         # untuk laporan riset).
         self.duplikat_dilewati = 0
+        # Pengukuran waktu fase riset (laporan kemajuan & perkiraan sisa).
+        self.riset_mulai = 0.0
+        self.riset_selesai = 0
+        self.riset_total = 0
+        self.durasi_riset = 0.0
+        self.waktu_halaman = 0.0
+        self.jumlah_halaman = 0
 
     def run(self):
         self._print_banner()
@@ -110,7 +117,18 @@ class AutoApplyEngine:
         Kembalikan (daftar lowongan siap dilamar, jumlah lowongan terbaca).
         Jumlah 0 berarti halaman itu tidak memuat hasil apa pun.
         """
+        mulai_halaman = time.monotonic()
         jobs = self.bot.search_jobs(keyword, page, location=location)
+        lama_halaman = time.monotonic() - mulai_halaman
+        self.waktu_halaman += lama_halaman
+        self.jumlah_halaman += 1
+
+        if lama_halaman >= 10:
+            console.print(
+                f"[dim]Halaman ini butuh {lama_halaman:.1f} detik "
+                "(situs lambat / kartu lama muncul).[/]"
+            )
+
         self._peringatkan_logo(jobs)
 
         if not jobs:
@@ -463,6 +481,12 @@ class AutoApplyEngine:
         halaman = config.research_max_pages
         batas_jobs = config.research_max_jobs
 
+        self.riset_mulai = time.monotonic()
+        self.riset_selesai = 0
+        self.riset_total = len(config.locations) * len(kata_kunci)
+        self.waktu_halaman = 0.0
+        self.jumlah_halaman = 0
+
         console.print(
             f"\n[bold blue]RISET LOWONGAN[/] — {len(kata_kunci)} kata kunci "
             f"× {len(config.locations)} lokasi, maksimal {halaman} halaman "
@@ -506,6 +530,8 @@ class AutoApplyEngine:
                 )
                 kandidat.extend(hasil)
                 jumlah_lokasi += len(hasil)
+                self.riset_selesai += 1
+                self._lapor_kemajuan(len(kandidat))
 
                 if batas_jobs and len(kandidat) >= batas_jobs:
                     # Potong tepat di batas: satu kata kunci bisa sekaligus
@@ -537,6 +563,17 @@ class AutoApplyEngine:
             f"lokasi → [bold]{len(unik)} unik[/] "
             f"({dibuang} duplikat dibuang)."
         )
+
+        self.durasi_riset = time.monotonic() - self.riset_mulai
+
+        if self.jumlah_halaman:
+            rata = self.waktu_halaman / self.jumlah_halaman
+            console.print(
+                f"[cyan]Waktu riset:[/] {self._durasi(self.durasi_riset)} "
+                f"untuk {self.jumlah_halaman} halaman "
+                f"(rata-rata {rata:.1f} detik/halaman, "
+                f"{self.riset_total} kombinasi kata kunci × lokasi)."
+            )
 
         if batas_jobs:
             console.print(
@@ -624,6 +661,36 @@ class AutoApplyEngine:
 
             if not self._lamar(job):
                 return
+
+    @staticmethod
+    def _durasi(detik: float) -> str:
+        """Ubah detik menjadi teks singkat: 45s, 5m 12s, 1j 02m 05s."""
+        total = max(0, int(detik))
+        jam, sisa = divmod(total, 3600)
+        menit, detik_ke = divmod(sisa, 60)
+
+        if jam:
+            return f"{jam}j {menit:02d}m {detik_ke:02d}s"
+        if menit:
+            return f"{menit}m {detik_ke:02d}s"
+        return f"{detik_ke}s"
+
+    def _lapor_kemajuan(self, terkumpul: int):
+        """Perkiraan sisa waktu riset setelah satu kombinasi selesai."""
+        if not self.riset_total or not self.riset_mulai:
+            return
+
+        lama = time.monotonic() - self.riset_mulai
+        per_kombinasi = lama / max(1, self.riset_selesai)
+        sisa_kombinasi = max(0, self.riset_total - self.riset_selesai)
+        sisa = per_kombinasi * sisa_kombinasi
+
+        console.print(
+            f"[dim]Kemajuan riset: {self.riset_selesai}/{self.riset_total} "
+            f"kombinasi, {terkumpul} lowongan terkumpul, "
+            f"{self._durasi(lama)} berlalu — perkiraan sisa "
+            f"{self._durasi(sisa)}.[/]"
+        )
 
     @staticmethod
     def _tampilkan_rincian_skor(kandidat: list, maksimal: int = 3):

@@ -346,3 +346,31 @@ def test_glints_dibatasi_5_muat_per_kata_kunci(monkeypatch):
 
     # 5 muat -> cari(nomor=4), bukan nomor 5 atau 19.
     assert diminta == [4]
+
+
+def test_pengukuran_waktu_dan_kemajuan_riset(siapkan):
+    """Riset mencatat jumlah kombinasi, halaman, dan durasinya."""
+    mesin, _ = siapkan
+    mesin.bot = BotPalsu({
+        ("Bandung", "inventory", 1): [lowongan("A")],
+    })
+
+    mesin._kumpulkan_lalu_lamar()
+
+    # 2 kata kunci × 2 lokasi.
+    assert mesin.riset_total == 4
+    assert mesin.riset_selesai == 4
+    assert mesin.jumlah_halaman >= 4
+    assert mesin.durasi_riset >= 0
+
+    assert mesin._durasi(0) == "0s"
+    assert mesin._durasi(65) == "1m 05s"
+    assert mesin._durasi(3725) == "1j 02m 05s"
+
+
+def test_search_wait_dipakai_untuk_menunggu_kartu():
+    """SEARCH_WAIT mempercepat halaman kosong (bawaan 12 detik)."""
+    from config import Config, batas_halaman_riset
+
+    assert Config().search_wait >= 3
+    assert batas_halaman_riset(Config().research_max_pages) == 5

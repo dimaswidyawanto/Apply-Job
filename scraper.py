@@ -185,7 +185,8 @@ class JobStreetBot:
                     f"Detail: {second_error}"
                 ) from first_error
 
-        self.wait = WebDriverWait(self.driver, 20)
+        detik = max(3, int(getattr(config, "search_wait", 20) or 20))
+        self.wait = WebDriverWait(self.driver, detik)
         console.print("[bold green]Chrome siap.[/]")
 
     def _has_session_cookie(self) -> bool:
@@ -369,6 +370,9 @@ class JobStreetBot:
                 f"[bold cyan]Mencari: {keyword} — {lokasi or 'semua lokasi'} "
                 f"— halaman {page}[/]"
             )
+            detik_tunggu = max(
+                3, int(getattr(config, "search_wait", 20) or 20)
+            )
             self.driver.get(url)
 
             try:
@@ -379,7 +383,7 @@ class JobStreetBot:
                 )
             except TimeoutException:
                 console.print(
-                    "[yellow]Kartu lowongan tidak muncul dalam 20 detik. "
+                    f"[yellow]Kartu lowongan tidak muncul dalam {detik_tunggu} detik. "
                     "Mungkin halaman masih memuat atau struktur website "
                     "berubah.[/]"
                 )

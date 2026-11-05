@@ -129,6 +129,7 @@ cp .env.example .env
 | `RESEARCH_KEYWORDS` | kosong | Kata kunci **khusus riset** (boleh lebih lebar dari `KEYWORDS`); kosong = ikut `KEYWORDS`. Semua kata kunci dicari di semua lokasi |
 | `RESEARCH_MAX_PAGES` | `5` | Halaman riset untuk **setiap kombinasi kata kunci × lokasi**: halaman 1–5 lalu berhenti. Maksimal **5** (batas tetap); `0` atau nilai di atas 5 tetap dipakai sebagai 5, boleh diturunkan |
 | `RESEARCH_MAX_JOBS` | `0` | Batas jumlah lowongan hasil riset (pengaman). `0` = tanpa batas — **riset tidak dibatasi 50** |
+| `SEARCH_WAIT` | `12` | Detik menunggu kartu lowongan muncul sebelum halaman dianggap kosong. Makin kecil makin cepat, tetapi halaman yang sangat lambat bisa terlewat (3–20) |
 | `SKILL_KEYWORDS` | inventory, sap, erp, excel, ppic, ... | Keterampilan yang dicari di deskripsi untuk skor kesesuaian keterampilan |
 | `HEADLESS_MODE` | `false` | `true` = Chrome tanpa jendela (tidak cocok untuk tinjau manual) |
 | `TELEGRAM_BOT_TOKEN` | kosong | Opsional, untuk notifikasi |
@@ -741,6 +742,38 @@ Kuota harian: 12 sudah dilamar hari ini, sisa 38 dari 50.
 │ Inventory Controller │   14 │    8 │    4 │    6 │    4 │    2 │   5 │  5 │  42 │
 └──────────────────────┴──────┴──────┴──────┴──────┴──────┴──────┴─────┴────┴─────┘
 ```
+
+### Berapa lama risetnya, dan cara mempercepat
+
+Waktu riset = **jumlah kombinasi × halaman × biaya per halaman**:
+
+- Jumlah kombinasi = jumlah kata kunci × jumlah lokasi. Bawaannya 14 × 7 = **98 kombinasi**, masing-masing maksimal **5 halaman** → maksimal **490 pemuatan halaman**.
+- Biaya satu halaman: buka URL + tunggu kartu muncul (`SEARCH_WAIT`, bawaan 12 detik bila kosong) + 1 detik + pembacaan kartu. Normalnya **4–12 detik** per halaman, jadi sesi penuh biasanya **35–80 menit**.
+- Kombinasi yang tidak punya lowongan tetap memakan ±12 detik per halaman (halaman 1 saja, lalu berhenti).
+- Fase lamaran menambah: jeda `DELAY_BETWEEN_APPLY` (3 detik) × 50 lamaran, waktu formulir (`AUTO_APPLY_STEP_TIMEOUT` 3 detik per langkah), dan `AUTO_ANSWER_WAIT` (20 detik) setiap kali ada kuesioner yang harus Anda isi sendiri.
+
+Selama riset, kemajuannya dicetak setelah setiap kombinasi sehingga kelihatan sisa waktunya:
+
+```
+Kemajuan riset: 12/98 kombinasi, 87 lowongan terkumpul, 6m 20s berlalu — perkiraan sisa 41m 05s.
+```
+
+Di akhir riset muncul ringkasan biaya per halaman, untuk mengetahui apakah yang lambat itu situsnya atau jumlah halamannya:
+
+```
+Waktu riset: 42m 18s untuk 392 halaman (rata-rata 6,5 detik/halaman, 98 kombinasi kata kunci × lokasi).
+```
+
+Cara mempercepat (pilih sesuai kebutuhan):
+
+| Cara | Efek |
+| --- | --- |
+| `.\jalankan.bat run --riset-pages 3` | 5 → 3 halaman per kombinasi: **−40%** waktu riset |
+| Persempit `RESEARCH_KEYWORDS` (mis. 6 kata kunci inti) | 98 → 42 kombinasi: **−55%**, dan karena ada deduplikasi, lowongan unik yang didapat biasanya tidak banyak berkurang |
+| `.\jalankan.bat set-env SEARCH_WAIT=8` | Memotong waktu tunggu halaman kosong 12 → 8 detik |
+| `.\jalankan.bat set-env HEADLESS_MODE=true` | Chrome tanpa jendela; lebih ringan, cocok untuk sesi panjang |
+| `.\jalankan.bat set-env AUTO_ANSWER_WAIT=10` | Memotong waktu tunggu kuesioner per lowongan (20 → 10 detik) |
+| `.\jalankan.bat set-env DELAY_BETWEEN_APPLY=2` | Menghemat ±50 detik untuk 50 lamaran |
 
 Catatan: `MAX_APPLY_PER_DAY` adalah batas **per hari kalender** yang dihitung
 dari database, jadi menjalankan `run` dua kali dalam sehari tidak menambah

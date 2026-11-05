@@ -162,6 +162,10 @@ class Config:
     # karena tanpa riset tidak ada yang bisa dibandingkan.
     collect_before_apply: bool = _bool_setting("COLLECT_BEFORE_APPLY", True)
 
+    # Detik menunggu kartu lowongan muncul sebelum halaman dianggap kosong.
+    # Makin kecil makin cepat, tetapi halaman yang lambat bisa terlewat.
+    search_wait: int = max(3, _int_setting("SEARCH_WAIT", 12))
+
     # --- Riset lowongan (tidak dibatasi 50) ---
     # Kata kunci yang dipakai HANYA untuk riset/pencarian. Kosong = pakai
     # KEYWORDS. Daftar ini bisa lebih lebar dari KEYWORDS supaya seluruh
