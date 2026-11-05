@@ -266,6 +266,9 @@ class Config:
     auto_answer_questions: bool = _bool_setting(
         "AUTO_ANSWER_QUESTIONS", True
     )
+    # Ingat jawaban yang pernah diisi pengguna dan pakai lagi otomatis pada
+    # lamaran berikutnya (skill, pilihan ganda, dropdown, kolom teks).
+    ingat_jawaban: bool = _bool_setting("INGAT_JAWABAN", True)
     # Target gaji dalam rupiah/juta, mis. "5000000" atau "5". Kosong = tidak
     # dijawab otomatis (pertanyaan gaji membuat lowongan dilewati).
     expected_salary: str = os.getenv("EXPECTED_SALARY", "").strip()

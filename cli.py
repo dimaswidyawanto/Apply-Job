@@ -29,6 +29,68 @@ def versi_kode() -> str:
     return "-"
 
 
+def kelola_jawaban(hapus: str = "", reset: bool = False,
+                   isi: str = ""):
+    """Lihat, tambah, atau hapus ingatan jawaban formulir."""
+    import jawaban as memori
+
+    if reset:
+        jumlah = memori.lupakan_semua()
+        console.print(f"[yellow]{jumlah} jawaban dihapus dari ingatan.[/]")
+        return
+
+    if hapus:
+        if memori.lupakan(hapus):
+            console.print(f"[green]Dihapus dari ingatan:[/] {hapus}")
+        else:
+            console.print(f"[yellow]Tidak ditemukan di ingatan:[/] {hapus}")
+        return
+
+    if isi:
+        if "=" not in isi:
+            console.print(
+                '[red]Format: jawaban --isi "pertanyaan=jawaban"[/]'
+            )
+            return
+        pertanyaan, nilai = isi.split("=", 1)
+        if memori.ingat(pertanyaan.strip(), nilai.strip(), sumber="manual"):
+            console.print(
+                f"[green]Disimpan:[/] {pertanyaan.strip()} = {nilai.strip()}"
+            )
+        else:
+            console.print("[red]Gagal menyimpan jawaban (kosong?).[/]")
+        return
+
+    daftar = memori.daftar()
+
+    if not daftar:
+        console.print(
+            "[yellow]Ingatan jawaban masih kosong.[/] Isi formulir sekali "
+            "saat melamar; isian Anda akan diingat otomatis."
+        )
+        return
+
+    tabel = Table(title=f"Ingatan jawaban formulir ({len(daftar)})")
+    tabel.add_column("Pertanyaan", style="cyan", overflow="fold")
+    tabel.add_column("Jawaban", overflow="fold")
+    tabel.add_column("Sumber", justify="center")
+    tabel.add_column("Dipakai", justify="right")
+
+    for baris in daftar:
+        tabel.add_row(
+            str(baris.get("pertanyaan") or "")[:60],
+            str(baris.get("jawaban") or "")[:40],
+            str(baris.get("sumber") or "-"),
+            str(baris.get("dipakai") or 0),
+        )
+
+    console.print(tabel)
+    console.print(
+        '[dim]Hapus satu: jawaban --hapus "teks pertanyaan" · '
+        "kosongkan: jawaban --reset[/]"
+    )
+
+
 def show_stats():
     stats = db.get_stats()
     table = Table(title="Statistik")
@@ -848,6 +910,19 @@ if __name__ == "__main__":
         "simulasi", help="Simulasi alur lamaran Glints (tanpa Chrome)"
     )
 
+    jawab_parser = subparsers.add_parser(
+        "jawaban", help="Lihat/ubah ingatan jawaban formulir lamaran"
+    )
+    jawab_parser.add_argument(
+        "--hapus", default="", help="Hapus satu jawaban (teks pertanyaan)"
+    )
+    jawab_parser.add_argument(
+        "--reset", action="store_true", help="Kosongkan semua ingatan jawaban"
+    )
+    jawab_parser.add_argument(
+        "--isi", default="", help='Tambah manual: "pertanyaan=jawaban"'
+    )
+
     bl_parser = subparsers.add_parser("blacklist", help="Blacklist company")
     bl_parser.add_argument("company", help="Nama company")
     bl_parser.add_argument("--reason", default="", help="Alasan")
@@ -935,6 +1010,8 @@ if __name__ == "__main__":
             simulasi_glints()
         else:
             glints_parser.print_help()
+    elif args.command == "jawaban":
+        kelola_jawaban(args.hapus, args.reset, args.isi)
     elif args.command == "blacklist":
         blacklist_company(args.company, args.reason)
     else:

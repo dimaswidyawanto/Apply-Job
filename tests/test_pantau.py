@@ -49,8 +49,16 @@ def _siapkan(tmp_path):
 
 
 def _jalankan_pantau(kerja, detik=2, tunggu=7):
+    # Tes harus mandiri: arahkan "remote pengembangan" ke repo sementara,
+    # supaya pantau.sh tidak menarik repo GitHub yang sebenarnya (itu membuat
+    # @{u}..HEAD berisi puluhan commit dan tes gagal secara acak).
+    env = dict(os.environ)
+    env.setdefault("ARENA_URL", str(kerja.parent / "remote.git"))
+    env.setdefault("ARENA_REMOTE", "arena-uji")
+    env.setdefault("ARENA_CABANG", "main")
+
     proses = subprocess.Popen(
-        ["./pantau.sh", str(detik)], cwd=kerja,
+        ["./pantau.sh", str(detik)], cwd=kerja, env=env,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
     )
     time.sleep(tunggu)

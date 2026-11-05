@@ -3,6 +3,7 @@
 import sqlite3
 import threading
 from contextlib import contextmanager, suppress
+from typing import Optional
 
 from config import config
 
@@ -107,6 +108,17 @@ class Database:
                     added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
 
+                CREATE TABLE IF NOT EXISTS form_answers (
+                    kunci TEXT PRIMARY KEY,
+                    pertanyaan TEXT NOT NULL,
+                    jawaban TEXT NOT NULL,
+                    jenis TEXT DEFAULT '',
+                    sumber TEXT DEFAULT 'pengguna',
+                    dipakai INTEGER DEFAULT 0,
+                    dibuat TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    diubah TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_applications_job_id
                     ON applications (job_id);
                 CREATE INDEX IF NOT EXISTS idx_applications_status
@@ -148,6 +160,84 @@ class Database:
                 conn.execute(
                     f"ALTER TABLE jobs ADD COLUMN {column} {definition}"
                 )
+
+    # ------------------------------------------------------------------
+    # Ingatan jawaban formulir
+    # ------------------------------------------------------------------
+    def simpan_jawaban(self, kunci: str, pertanyaan: str, jawaban: str,
+                       jenis: str = "", sumber: str = "pengguna") -> bool:
+        """Simpan satu jawaban formulir; jawaban lama untuk kunci itu ditimpa."""
+        kunci = str(kunci or "").strip()
+        jawaban = str(jawaban or "").strip()
+
+        if not kunci or not jawaban:
+            return False
+
+        with self._get_conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO form_answers
+                    (kunci, pertanyaan, jawaban, jenis, sumber, dipakai)
+                VALUES (?, ?, ?, ?, ?, 0)
+                ON CONFLICT(kunci) DO UPDATE SET
+                    jawaban = excluded.jawaban,
+                    pertanyaan = excluded.pertanyaan,
+                    jenis = excluded.jenis,
+                    sumber = excluded.sumber,
+                    diubah = CURRENT_TIMESTAMP
+                """,
+                (kunci, str(pertanyaan or kunci).strip(), jawaban, jenis, sumber),
+            )
+        return True
+
+    def cari_jawaban(self, kunci: str) -> Optional[dict]:
+        """Ambil satu jawaban berdasarkan kuncinya (None bila belum ada)."""
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM form_answers WHERE kunci = ?",
+                (str(kunci or "").strip(),),
+            ).fetchone()
+
+        return dict(row) if row else None
+
+    def daftar_jawaban(self) -> list:
+        """Semua jawaban yang tersimpan, terbaru diubah lebih dulu."""
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM form_answers ORDER BY diubah DESC, kunci ASC"
+            ).fetchall()
+
+        return [dict(row) for row in rows]
+
+    def hitung_jawaban(self) -> int:
+        with self._get_conn() as conn:
+            return conn.execute(
+                "SELECT COUNT(*) AS jumlah FROM form_answers"
+            ).fetchone()["jumlah"]
+
+    def tandai_jawaban_dipakai(self, kunci: str) -> None:
+        with self._get_conn() as conn:
+            conn.execute(
+                """
+                UPDATE form_answers
+                SET dipakai = dipakai + 1, diubah = diubah
+                WHERE kunci = ?
+                """,
+                (str(kunci or "").strip(),),
+            )
+
+    def hapus_jawaban(self, kunci: str) -> bool:
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "DELETE FROM form_answers WHERE kunci = ?",
+                (str(kunci or "").strip(),),
+            )
+            return cur.rowcount > 0
+
+    def reset_jawaban(self) -> int:
+        with self._get_conn() as conn:
+            cur = conn.execute("DELETE FROM form_answers")
+            return cur.rowcount
 
     # ------------------------------------------------------------------
     # Lowongan

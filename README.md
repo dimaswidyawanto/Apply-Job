@@ -176,6 +176,7 @@ cp .env.example .env
 | `YEARS_EXPERIENCE` | `3` | Total pengalaman kerja (tahun) untuk pertanyaan pengalaman |
 | `EXPERIENCE_ROLES` | inventory, ppic, gudang, purchasing, ... | Bidang pengalaman Anda; di luar daftar ini dijawab 0 tahun |
 | `AUTO_ANSWER_YES` | `true` | Jawab **Ya** untuk pertanyaan ya/tidak seputar kesediaan/pengalaman |
+| `INGAT_JAWABAN` | `true` | Ingat isian yang Anda lakukan sendiri dan pakai lagi otomatis di lamaran berikutnya |
 | `EDUCATION_LEVEL` | `S1` | Jenjang pendidikan untuk pertanyaan kualifikasi |
 | `AUTO_APPLY_SUBMIT_TIMEOUT` | `20` | Batas detik khusus halaman **Review and submit** (mengirim lamaran) |
 | `AUTO_APPLY_DEBUG` | `true` | Simpan HTML + screenshot halaman yang tak dikenali ke folder `debug/` |
@@ -642,6 +643,41 @@ python cli.py set-env AUTO_ANSWER_WAIT=0     # kembali ke perilaku lama: langsun
 Tips: jalankan tanpa `HEADLESS_MODE` (bawaan) supaya jendela Chrome terlihat
 dan bisa Anda isi. Di mode headless tidak ada yang bisa diklik, jadi biarkan
 `AUTO_ANSWER_WAIT=0`.
+
+### Ingatan jawaban: sekali diisi, selamanya otomatis
+
+Setiap isian yang **Anda** lakukan sendiri di formulir dicatat, lalu dipakai
+otomatis pada lamaran berikutnya. Jadi kuesioner berulang seperti ini:
+
+> *Seberapa mahir kamu dengan keahlian berikut ini?* — Manajemen Rantai
+> Pasokan, Microsoft Excel, Manajemen Persediaan
+> (Tidak Berpengalaman / Dasar / Menengah / Ahli)
+
+cukup Anda jawab **sekali**. Lamaran Glints/JobStreet berikutnya terisi sendiri,
+dan bot hanya berhenti bertanya untuk pertanyaan yang benar-benar baru.
+
+Yang dicatat: pilihan ganda (radio), dropdown, dan kolom teks — termasuk kolom
+gaji, tahun pengalaman, dan pendidikan bila Anda mengubahnya.
+
+Yang **tidak** dicatat: tebakan bot sendiri. Bila bot memilih "Dasar" lalu Anda
+mengubahnya menjadi "Ahli", yang diingat adalah "Ahli" (keadaan akhir formulir).
+
+Kelola ingatannya:
+
+```bash
+python cli.py jawaban                                  # lihat semua
+python cli.py jawaban --isi "Microsoft Excel=Ahli"     # isi manual
+python cli.py jawaban --hapus "Microsoft Excel"        # hapus satu
+python cli.py jawaban --reset                          # kosongkan
+```
+
+Matikan fitur ini dengan `python cli.py set-env INGAT_JAWABAN=false` bila ingin
+bot kembali menebak dari aturan bawaan setiap kali.
+
+Pencocokan pertanyaan tidak peka huruf besar/kecil, spasi ganda, atau tanda
+baca, dan masih mengenali pertanyaan yang berubah sedikit (kemiripan teks
+≥ 86%). Pertanyaan berbeda tetap dianggap berbeda — "Manajemen Rantai Pasokan"
+tidak akan memakai jawaban "Manajemen Persediaan".
 
 ### Isian lamaran otomatis
 
