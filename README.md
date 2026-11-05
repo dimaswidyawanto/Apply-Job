@@ -972,6 +972,19 @@ lagi agar sesi login tersimpan kembali. Bila tetap gagal, bot otomatis
 memakai profil cadangan (`~/.dimastes/chrome-profile-baru`) yang tetap
 menyimpan sesi login.
 
+**Cek cepat: apakah Glints sudah berfungsi?**
+Satu perintah memeriksa semuanya berurutan — baca kartu → saring kandidat
+(logo & duplikat) → simulasi alur lamaran → catatan database:
+
+```powershell
+.\cek-glints.bat          # aman: hanya membaca, tidak melamar
+.\cek-glints.bat 3        # ikut mengirim maksimal 3 lamaran uji (minta konfirmasi)
+```
+
+Setara dengan `jalankan.bat glints cek --lamar 3`. Setiap tahap ditandai
+`OK` / `GAGAL` beserta alasannya, dan perintah berhenti dengan kode keluar 1
+bila ada tahap gagal sehingga bisa dipakai di skrip.
+
 **Situs menampilkan “Just a moment...” (verifikasi Cloudflare).**
 Glints dilindungi Cloudflare, sehingga Chrome yang dijalankan otomatis bisa
 diminta verifikasi. Dua cara:

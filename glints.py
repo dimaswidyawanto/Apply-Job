@@ -1565,3 +1565,210 @@ def uji_glints(url: str) -> ApplyResult:
         return bot.lamar(job)
     finally:
         bot.tutup()
+
+
+# ----------------------------------------------------------------------
+# Periksa kesehatan Glints (satu perintah, berurutan)
+# ----------------------------------------------------------------------
+def _setuju_lamar(jumlah: int, kandidat: List[Dict]) -> bool:
+    """Tanya sekali sebelum mengirim lamaran sungguhan saat `glints cek`."""
+    console.print(
+        f"[bold]Uji kirim {jumlah} lamaran SUNGGUHAN ke Glints.[/] "
+        "Lamaran ini tercatat di akun Anda."
+    )
+    for job in kandidat[:jumlah]:
+        console.print(
+            f"  - {str(job.get('title') or '')[:45]} | "
+            f"{job.get('company') or '-'}"
+        )
+    try:
+        jawab = input("Lanjutkan? [y/N] ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        return False
+    return jawab in {"y", "ya", "yes", "yup"}
+
+
+def cek_glints(keyword: str = "", max_pages: int = 1, lamar: int = 0,
+               ya: bool = False) -> bool:
+    """Periksa Glints berurutan: baca kartu → saring → simulasi → (opsional) lamar.
+
+    Mengembalikan True bila semua tahap yang dijalankan lulus. Pengiriman
+    lamaran hanya terjadi bila `lamar` > 0 dan pengguna menyetujuinya.
+    """
+    kata = (keyword or "").strip()
+    if not kata:
+        kata = (config.keywords_riset or ["inventory"])[0]
+    halaman = max(1, min(int(max_pages or 1), MAKS_HALAMAN_RISET))
+    tahap: List[tuple] = []
+
+    def catat(nama: str, lulus: bool, keterangan: str) -> None:
+        tahap.append((nama, bool(lulus), keterangan))
+        warna = "green" if lulus else "red"
+        console.print(
+            f"[{warna}]{'OK' if lulus else 'GAGAL'}[/] {nama} — {keterangan}"
+        )
+
+    kandidat: List[Dict] = []
+    cloudflare = False
+
+    console.print(
+        f"[bold blue]PERIKSA GLINTS[/] — kata kunci '{kata}', "
+        f"muat sampai {halaman} kali"
+    )
+
+    # ---------- Tahap 1 & 2: buka pencarian, baca kartu, saring ----------
+    bot = GlintsBot()
+    try:
+        bot.init_browser()
+    except Exception as exc:
+        catat("1. Baca kartu", False, f"Chrome gagal dibuka: {exc}")
+        catat("2. Saring kandidat", False, "dilewati (Chrome gagal dibuka)")
+    else:
+        try:
+            bot.buka_pencarian(kata)
+            judul = (bot.driver.title or "").strip()
+            cloudflare = bot.kena_cloudflare()
+
+            if cloudflare:
+                catat(
+                    "1. Baca kartu", False,
+                    "halaman verifikasi Cloudflare — jalankan chrome-debug.bat "
+                    "lalu set-env CHROME_DEBUG_PORT=9222",
+                )
+            else:
+                mentah = bot._kartu_mentah()
+                kartu = [j for j in (rapikan_kartu(m) for m in mentah) if j]
+                cadangan = 0 if kartu else len(bot._kartu_fallback())
+                berlogo = sum(1 for j in kartu if j.get("has_logo"))
+                if len(kartu) >= 5:
+                    catat(
+                        "1. Baca kartu", True,
+                        f"{len(kartu)} kartu ({berlogo} berlogo) · "
+                        f"judul '{judul[:40]}'",
+                    )
+                elif cadangan >= 5:
+                    catat(
+                        "1. Baca kartu", True,
+                        f"pembaca utama 0 kartu, cadangan {cadangan} tautan",
+                    )
+                else:
+                    catat(
+                        "1. Baca kartu", False,
+                        f"hanya {len(kartu)} kartu / {cadangan} tautan cadangan",
+                    )
+
+                if not bot.sudah_login():
+                    console.print(
+                        "[yellow]Catatan: login Glints belum terdeteksi — "
+                        "lamaran bisa gagal. Jalankan login dulu.[/]"
+                    )
+        except ChromeTertutup as exc:
+            catat("1. Baca kartu", False, f"Chrome tertutup: {exc}")
+        except Exception as exc:
+            catat("1. Baca kartu", False, f"galat: {exc}")
+
+        if cloudflare:
+            catat("2. Saring kandidat", False, "dilewati (Cloudflare)")
+        else:
+            try:
+                lowongan = kumpulkan_lowongan(bot, [kata], halaman)
+                kandidat = pilih_kandidat(lowongan, batas=10)
+                if not lowongan:
+                    catat("2. Saring kandidat", False, "0 lowongan terkumpul")
+                elif not kandidat:
+                    catat(
+                        "2. Saring kandidat", False,
+                        f"{len(lowongan)} terbaca, 0 lolos saringan",
+                    )
+                else:
+                    tanpa_logo = sum(
+                        1 for j in kandidat if not j.get("has_logo")
+                    )
+                    url = [str(j.get("url") or "") for j in kandidat]
+                    dobel = len(url) - len(set(url))
+                    catatan = (
+                        f"{len(kandidat)} kandidat · "
+                        f"{len(kandidat) - tanpa_logo} berlogo · {dobel} duplikat"
+                    )
+                    if tanpa_logo:
+                        catatan += f" · {tanpa_logo} tanpa logo"
+                    catat(
+                        "2. Saring kandidat",
+                        tanpa_logo == 0 and dobel == 0,
+                        catatan,
+                    )
+            except Exception as exc:
+                catat("2. Saring kandidat", False, f"galat: {exc}")
+    finally:
+        bot.tutup()
+
+    # ---------- Tahap 3: simulasi alur lamaran (tanpa Chrome) ----------
+    try:
+        import simulasi_glints
+
+        catat(
+            "3. Simulasi alur lamaran",
+            bool(simulasi_glints.jalankan()),
+            "semua skenario sesuai harapan",
+        )
+    except Exception as exc:
+        catat("3. Simulasi alur lamaran", False, f"galat: {exc}")
+
+    # ---------- Tahap 4 & 5: kirim lamaran uji (opsional) ----------
+    tujuan = max(0, int(lamar or 0))
+    if tujuan <= 0:
+        console.print(
+            "[dim]Tahap kirim lamaran dilewati. Tambahkan "
+            "--lamar 3 untuk menguji pengiriman sungguhan.[/]"
+        )
+    elif ya or _setuju_lamar(tujuan, kandidat):
+        try:
+            laporan = jalankan_glints(
+                max_pages=1, keywords=[kata], batas=tujuan
+            )
+            terkirim = int(laporan.get("dilamar", 0))
+            sudah = int(laporan.get("sudah", 0))
+            catat(
+                "4. Kirim lamaran uji",
+                terkirim > 0 or sudah > 0,
+                f"{terkirim} terkirim · {sudah} sudah pernah · "
+                f"{int(laporan.get('gagal', 0))} gagal · "
+                f"{int(laporan.get('perlu_manual', 0))} perlu manual",
+            )
+        except Exception as exc:
+            catat("4. Kirim lamaran uji", False, f"galat: {exc}")
+    else:
+        console.print("[yellow]Uji kirim lamaran dibatalkan.[/]")
+
+    # ---------- Tahap 6: catatan database ----------
+    try:
+        statistik = db.get_stats()
+        catat(
+            "5. Catatan database", True,
+            f"hari ini {db.get_today_apply_count()} lamaran · "
+            f"total dilamar {statistik.get('total_applied', '?')}",
+        )
+    except Exception as exc:
+        catat("5. Catatan database", False, f"galat: {exc}")
+
+    gagal = [nama for nama, lulus, _ in tahap if not lulus]
+    print()
+    if gagal:
+        console.print(
+            f"[bold red]{len(gagal)} tahap gagal:[/] " + ", ".join(gagal)
+        )
+        if cloudflare:
+            console.print(
+                "[yellow]Langkah berikut:[/] jalankan chrome-debug.bat, "
+                "selesaikan verifikasi, lalu set-env CHROME_DEBUG_PORT=9222 "
+                "dan ulangi glints cek."
+            )
+        else:
+            console.print(
+                "[yellow]Langkah berikut:[/] jalankan glints diagnosa, lalu "
+                "kirim berkas debug/ terbaru."
+            )
+        return False
+
+    console.print("[bold green]Semua tahap yang dijalankan lulus.[/] Glints siap.")
+    return True

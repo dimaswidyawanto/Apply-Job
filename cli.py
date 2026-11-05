@@ -304,6 +304,28 @@ def uji_glints_otomatis(keywords: str = "", max_pages: int = 1):
         )
 
 
+def cek_glints_cli(keyword: str = "", max_pages: int = 1, lamar: int = 0,
+                   ya: bool = False):
+    """Periksa Glints berurutan: baca kartu, saring, simulasi, lalu (opsional) lamar."""
+    from glints import cek_glints
+
+    console.print(f"[cyan]Versi kode:[/] {versi_kode()}")
+    try:
+        lulus = cek_glints(
+            keyword=keyword, max_pages=max(1, max_pages),
+            lamar=max(0, lamar), ya=ya,
+        )
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Dihentikan oleh pengguna.[/]")
+        return
+    except Exception as exc:
+        console.print(f"[bold red]Pemeriksaan Glints gagal:[/] {exc}")
+        return
+
+    if not lulus:
+        raise SystemExit(1)
+
+
 def simulasi_glints():
     """Simulasi alur lamaran Glints tanpa Chrome."""
     from simulasi_glints import jalankan
@@ -802,6 +824,26 @@ if __name__ == "__main__":
         help="Kata kunci yang diuji (default: kata kunci pertama di .env)",
     )
 
+    glints_cek = glints_sub.add_parser(
+        "cek",
+        help="Periksa Glints berurutan: baca kartu, saring, simulasi, lamar",
+    )
+    glints_cek.add_argument(
+        "--keyword", default="", help="Kata kunci uji (default: .env)"
+    )
+    glints_cek.add_argument(
+        "--max-pages", type=int, default=1, help="Muat per kata kunci (1)"
+    )
+    glints_cek.add_argument(
+        "--lamar",
+        type=int,
+        default=0,
+        help="Uji kirim N lamaran sungguhan (0 = tidak melamar)",
+    )
+    glints_cek.add_argument(
+        "--ya", action="store_true", help="Lewati konfirmasi sebelum melamar"
+    )
+
     glints_sub.add_parser(
         "simulasi", help="Simulasi alur lamaran Glints (tanpa Chrome)"
     )
@@ -885,6 +927,10 @@ if __name__ == "__main__":
             )
         elif args.glints_command == "diagnosa":
             diagnosa_glints_cli(args.keyword)
+        elif args.glints_command == "cek":
+            cek_glints_cli(
+                args.keyword, args.max_pages, args.lamar, args.ya
+            )
         elif args.glints_command == "simulasi":
             simulasi_glints()
         else:
