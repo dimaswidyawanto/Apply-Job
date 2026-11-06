@@ -167,7 +167,7 @@ cp .env.example .env
 | Variabel | Default | Keterangan |
 | --- | --- | --- |
 | `KEYWORDS` | 14 kata kunci (inventory, PPIC, gudang, purchasing, ...) | Kata kunci pencarian di JobStreet, dipisah koma |
-| `LOCATIONS` | kosong | Daftar lokasi dipisah koma, mis. `Bandung,Jakarta,Tangerang` |
+| `LOCATIONS` | `Bandung,Jakarta,Tangerang` | Daftar lokasi dipisah koma. Contoh lengkap 7 kota: `Bandung,Jakarta,Tangerang,Bekasi,Karawang,Bogor,Cikarang` (semua kombinasi dicari) |
 | `LOCATION` | `Bandung` | Dipakai hanya bila `LOCATIONS` kosong |
 | `ALLOW_REMOTE` | `false` | `true` = lowongan "Remote" juga diterima saat `STRICT_LOCATION` aktif |
 | `REQUIRE_KEYWORD_MATCH` | `true` | Hanya lamar lowongan yang judulnya cocok dengan minat |
@@ -182,6 +182,8 @@ cp .env.example .env
 | `REQUIRE_COMPANY_LOGO` | `true` | Wajib logo/gambar di **JobStreet & Glints**; Indeed dikecualikan karena kartunya tidak memuat logo |
 | `MAX_APPLY_PER_DAY` | `50` | Batas **lamaran yang dikirim** per hari. Bawaan **50** sesuai aturan (boleh diubah lewat `.env`); `0` = tanpa batas. Riset & penilaian tetap tanpa batas |
 | `DELAY_BETWEEN_APPLY` | `3` | Jeda (detik) antar lowongan |
+| `MAKS_ULANG` | `2` | Auto recovery: berapa kali lowongan yang gagal karena sebab **sementara** (timeout, internet putus, Chrome lambat) dicoba ulang sebelum dicatat `failed`. `0` = tanpa ulang, maksimum `5`. Kesalahan permanen (mis. login habis) tidak pernah diulang |
+| `JEDA_ULANG` | `3` | Jeda (detik) sebelum mencoba ulang lowongan yang gagal sementara |
 | `MAX_PAGES` | `3` | Jumlah halaman per kata kunci untuk mode lama (`COLLECT_BEFORE_APPLY=false`) dan `cek-logo` |
 | `RESEARCH_KEYWORDS` | kosong | Kata kunci **khusus riset** (boleh lebih lebar dari `KEYWORDS`); kosong = ikut `KEYWORDS`. Semua kata kunci dicari di semua lokasi |
 | `RESEARCH_MAX_PAGES` | `5` | Halaman riset untuk **setiap kombinasi kata kunci × lokasi**: halaman 1–5 lalu berhenti. Maksimal **5** (batas tetap); `0` atau nilai di atas 5 tetap dipakai sebagai 5, boleh diturunkan |
@@ -948,7 +950,8 @@ dan lowongan yang hanya bisa dilamar lewat aplikasi Glints (ditandai
 
 Dashboard lokal di <http://127.0.0.1:8765> menampilkan kuota harian, jumlah
 lowongan tersimpan, sebaran status antrean, statistik per lokasi dan per
-kategori, serta log aktivitas yang menyegarkan diri setiap 2 detik. Tombolnya
+kategori, **ringkasan sesi terakhir** (lamaran, gagal, duplikat), serta log
+aktivitas yang menyegarkan diri setiap 2 detik. Tombolnya
 benar-benar bekerja:
 
 | Tombol | Yang terjadi |
@@ -1036,6 +1039,12 @@ URL) dan kata kunci yang menemukannya, jadi Anda bisa melihat kata kunci mana
 yang benar-benar menghasilkan lamaran dan mana yang hanya menghasilkan
 lowongan yang lalu ditolak. Sarannya tetap hanya anjuran — tidak ada aturan
 yang diubah otomatis.
+
+Setiap sesi menyimpan ringkasannya sendiri ke tabel `sesi` (ditemukan, baru,
+duplikat, dilamar, gagal, berapa kali diulang, durasi). Karena tersimpan di
+database, angka ini tidak hilang saat jendela ditutup — laporan memuat bagian
+**Sesi terakhir** dan **rasio duplikat**, dan bila duplikat ≥ 30% laporan
+menyarankan mengurangi kata kunci yang tumpang tindih.
 
 Laporan harian juga tersimpan sendiri setiap kali sesi `lamar` selesai. Untuk
 laporan otomatis tiap hari tanpa membuka aplikasi, tambahkan Task Scheduler

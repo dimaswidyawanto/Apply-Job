@@ -175,6 +175,20 @@ class Database:
                     diubah TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
 
+                CREATE TABLE IF NOT EXISTS sesi (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    mulai TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    selesai TIMESTAMP,
+                    situs TEXT DEFAULT '',
+                    ditemukan INTEGER DEFAULT 0,
+                    baru INTEGER DEFAULT 0,
+                    duplikat INTEGER DEFAULT 0,
+                    dilamar INTEGER DEFAULT 0,
+                    gagal INTEGER DEFAULT 0,
+                    diulang INTEGER DEFAULT 0,
+                    durasi REAL DEFAULT 0
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_applications_job_id
                     ON applications (job_id);
                 CREATE INDEX IF NOT EXISTS idx_applications_status
@@ -226,6 +240,18 @@ class Database:
             if column not in job_columns:
                 conn.execute(
                     f"ALTER TABLE jobs ADD COLUMN {column} {definition}"
+                )
+
+        # Indeks untuk kolom yang sering disaring/dikelompokkan. Dibuat di
+        # sini karena kolomnya baru ada setelah migrasi di atas.
+        for indeks, kolom in (
+            ("idx_jobs_status", "status_antrean"),
+            ("idx_jobs_sumber", "sumber"),
+            ("idx_jobs_kata_kunci", "kata_kunci"),
+        ):
+            with contextlib.suppress(Exception):
+                conn.execute(
+                    f"CREATE INDEX IF NOT EXISTS {indeks} ON jobs ({kolom})"
                 )
 
         # Lowongan dari database lama belum punya status antrean; isi
@@ -422,6 +448,74 @@ class Database:
             ).fetchall()
 
         return [dict(item) for item in baris]
+
+    def catat_sesi(self, situs: str = "", ditemukan: int = 0,
+                   baru: int = 0, duplikat: int = 0, dilamar: int = 0,
+                   gagal: int = 0, diulang: int = 0,
+                   durasi: float = 0.0) -> int:
+        """Simpan ringkasan satu sesi (evaluasi berkala pasal 12.4)."""
+        with self._get_conn() as conn:
+            kursor = conn.execute(
+                """
+                INSERT INTO sesi (
+                    selesai, situs, ditemukan, baru, duplikat,
+                    dilamar, gagal, diulang, durasi
+                )
+                VALUES (CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(situs or ""),
+                    int(ditemukan or 0),
+                    int(baru or 0),
+                    int(duplikat or 0),
+                    int(dilamar or 0),
+                    int(gagal or 0),
+                    int(diulang or 0),
+                    float(durasi or 0),
+                ),
+            )
+            return int(kursor.lastrowid or 0)
+
+    def sesi_terakhir(self, batas: int = 5) -> list[dict]:
+        """Ringkasan beberapa sesi terakhir (terbaru dulu)."""
+        with self._get_conn() as conn:
+            baris = conn.execute(
+                """
+                SELECT selesai, situs, ditemukan, baru, duplikat,
+                       dilamar, gagal, diulang, durasi
+                  FROM sesi
+                 ORDER BY id DESC
+                 LIMIT ?
+                """,
+                (max(1, int(batas)),),
+            ).fetchall()
+
+        return [dict(item) for item in baris]
+
+    def statistik_sesi(self) -> dict:
+        """Angka gabungan semua sesi: jumlah, rasio duplikat, total diulang."""
+        with self._get_conn() as conn:
+            baris = conn.execute(
+                """
+                SELECT COUNT(*) AS jumlah,
+                       COALESCE(SUM(ditemukan), 0) AS ditemukan,
+                       COALESCE(SUM(duplikat), 0) AS duplikat,
+                       COALESCE(SUM(dilamar), 0) AS dilamar,
+                       COALESCE(SUM(diulang), 0) AS diulang,
+                       COALESCE(AVG(durasi), 0) AS rata_durasi
+                  FROM sesi
+                """
+            ).fetchone()
+
+        data = dict(baris)
+        ditemukan = int(data.get("ditemukan") or 0)
+        duplikat = int(data.get("duplikat") or 0)
+
+        data["rasio_duplikat"] = (
+            round(100 * duplikat / (ditemukan + duplikat), 1) if ditemukan else 0.0
+        )
+        data["rata_durasi"] = round(float(data.get("rata_durasi") or 0), 1)
+        return data
 
     def statistik_sumber(self, batas: int = 10) -> list[dict]:
         """Jumlah lowongan & lamaran per situs (master prompt pasal 12.4)."""

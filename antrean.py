@@ -71,6 +71,86 @@ def status_gagal(teks: str) -> str:
     return "expired" if kedaluwarsa(teks) else "failed"
 
 
+# Pesan galat yang biasanya hanya SEMENTARA (master prompt pasal 10.1).
+KATA_SEMENTARA = (
+    "timeout",
+    "timed out",
+    "err_internet_disconnected",
+    "err_name_not_resolved",
+    "err_connection",
+    "chrome not reachable",
+    "chrome failed to start",
+    "connection reset",
+    "connection aborted",
+    "connection refused",
+    "remote end closed",
+    "stale element",
+    "net::err",
+    "temporarily",
+    "something has gone wrong",
+    "502",
+    "503",
+    "504",
+    "webdriver",
+)
+
+
+def sementara(galat: str) -> bool:
+    """True bila galat pantas dicoba ulang (bukan kesalahan permanen)."""
+    teks = str(galat or "").lower()
+    return any(kata in teks for kata in KATA_SEMENTARA)
+
+
+def maks_ulang() -> int:
+    """Berapa kali kegagalan sementara diulang (0 = tidak diulang)."""
+    from config import config as _config
+
+    return max(0, min(5, int(getattr(_config, "maks_ulang", 2) or 0)))
+
+
+def jeda_ulang() -> int:
+    """Jeda (detik) sebelum mencoba lagi."""
+    from config import config as _config
+
+    return max(0, int(getattr(_config, "jeda_ulang", 3) or 0))
+
+
+def ulang_berbatas(fungsi, judul: str = "", pemeriksa=None):
+    """Panggil `fungsi`, ulangi hanya bila galatnya sementara.
+
+    Kembalikan (hasil, galat_akhir, jumlah_ulang). `galat_akhir` None berarti
+    berhasil. `pemeriksa` dipanggil sebelum tiap percobaan (mis. kendali sesi).
+    """
+    import time
+
+    import log_aktivitas
+
+    batas = maks_ulang()
+    ulang = 0
+
+    while True:
+        if pemeriksa:
+            pemeriksa()
+
+        try:
+            return fungsi(), None, ulang
+        except KeyboardInterrupt:
+            raise
+        except Exception as galat:  # noqa: BLE001 (semua galat dicatat)
+            pesan = str(galat) or galat.__class__.__name__
+
+            if ulang >= batas or not sementara(pesan):
+                return None, galat, ulang
+
+            ulang += 1
+            log_aktivitas.catat(
+                f"Ulang {ulang}/{batas}: {judul or 'lowongan'} — {pesan[:160]}",
+                "warning",
+            )
+            if jeda_ulang():
+                time.sleep(jeda_ulang())
+
+
 def klaim(job_id: str) -> bool:
     """Ambil hak memproses satu lowongan (idempotensi, pasal 4.3 & 10.3).
 

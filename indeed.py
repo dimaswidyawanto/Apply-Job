@@ -611,16 +611,36 @@ class IndeedBot:
             f"\n[bold magenta]{title}[/] [cyan](otomatis)[/]"
         )
 
-        try:
-            hasil = IndeedApplier(self.driver).apply(job)
-        except WebDriverException as exc:
-            if "chrome" in str(exc).lower() and "closed" in str(exc).lower():
-                raise
-            self._catat(job_id, "error", f"Galat browser: {exc}")
-            return ApplyResult(False, "error", f"Galat browser: {exc}")
-        except Exception as exc:
-            self._catat(job_id, "error", f"Galat tak terduga: {exc}")
-            return ApplyResult(False, "error", f"Galat tak terduga: {exc}")
+        ulang = 0
+
+        while True:
+            try:
+                hasil = IndeedApplier(self.driver).apply(job)
+            except WebDriverException as exc:
+                if "chrome" in str(exc).lower() and "closed" in str(exc).lower():
+                    raise
+                self._catat(job_id, "error", f"Galat browser: {exc}")
+                return ApplyResult(False, "error", f"Galat browser: {exc}")
+            except Exception as exc:
+                self._catat(job_id, "error", f"Galat tak terduga: {exc}")
+                return ApplyResult(False, "error", f"Galat tak terduga: {exc}")
+
+            # Auto recovery yang sama dengan JobStreet & Glints.
+            if (
+                hasil.status == "error"
+                and antrean.sementara(hasil.reason)
+                and ulang < antrean.maks_ulang()
+            ):
+                ulang += 1
+                log_aktivitas.catat(
+                    f"Ulang {ulang}/{antrean.maks_ulang()} (Indeed): "
+                    f"{title} — {(hasil.reason or '')[:140]}",
+                    "warning",
+                )
+                if antrean.jeda_ulang():
+                    time.sleep(antrean.jeda_ulang())
+                continue
+            break
 
         if hasil.status == "applied":
             self._catat(job_id, "applied", hasil.reason or "Dikirim otomatis")

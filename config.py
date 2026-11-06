@@ -250,6 +250,12 @@ class Config:
     # 0 = tanpa batas harian.
     max_apply_per_day: int = max(0, _int_setting("MAX_APPLY_PER_DAY", 5))
     delay_between_apply: int = _int_setting("DELAY_BETWEEN_APPLY", 3)
+
+    # Auto recovery (master prompt pasal 10): kegagalan SEMENTARA (timeout,
+    # internet putus, browser mati) diulang beberapa kali sebelum menyerah.
+    # 0 = tanpa ulang.
+    maks_ulang: int = max(0, min(5, _int_setting("MAKS_ULANG", 2)))
+    jeda_ulang: int = max(0, _int_setting("JEDA_ULANG", 3))
     max_pages: int = _MAX_PAGES
     headless: bool = _bool_setting("HEADLESS_MODE", False)
 
@@ -364,6 +370,10 @@ class Config:
 
         if not self.location and self.locations:
             self.location = self.locations[0]
+
+        # Auto recovery: batasi nilai agar tidak ekstrem (0..5 ulangan).
+        self.maks_ulang = max(0, min(5, int(self.maks_ulang or 0)))
+        self.jeda_ulang = max(0, int(self.jeda_ulang or 0))
 
         # PRIORITAS_LOKASI kosong -> pakai urutan LOCATIONS (lokasi pertama
         # paling diprioritaskan). Duplikat dibuang tanpa mengubah urutan.

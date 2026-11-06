@@ -39,6 +39,8 @@ def ringkasan() -> Dict:
         "per_lokasi": db.statistik_lokasi(10),
         "per_kategori": db.statistik_kategori(10),
         "per_sumber": db.statistik_sumber(10),
+        "sesi_terakhir": db.sesi_terakhir(3),
+        "statistik_sesi": db.statistik_sesi(),
         "per_kata_kunci": db.statistik_kata_kunci(12),
         "alasan_tersering": db.alasan_tersering(8),
         "tingkat_berhasil": (
@@ -54,6 +56,7 @@ def teks_markdown(data: Optional[Dict] = None) -> str:
     """Laporan dalam bentuk teks Markdown (untuk berkas harian)."""
     data = data or ringkasan()
     hari = date.today().isoformat()
+    rasio_duplikat = (data.get("statistik_sesi") or {}).get("rasio_duplikat", 0)
 
     baris = [
         f"# Laporan Lamar Otomatis — {hari}",
@@ -66,6 +69,7 @@ def teks_markdown(data: Optional[Dict] = None) -> str:
         "- Sisa kuota: "
         + ("tanpa batas" if data["sisa_kuota"] is None else str(data["sisa_kuota"])),
         f"- Tingkat berhasil: {data['tingkat_berhasil']}%",
+        f"- Rasio duplikat (semua sesi): {rasio_duplikat}%",
         "",
         "## Status antrean",
         "",
@@ -127,6 +131,21 @@ def teks_markdown(data: Optional[Dict] = None) -> str:
         ]
         baris += [
             f"| {i['alasan']} | {i['jumlah']} |" for i in data["alasan_tersering"]
+        ]
+
+    sesi = data.get("sesi_terakhir") or []
+    if sesi:
+        baris += [
+            "",
+            "## Sesi terakhir",
+            "",
+            "| Selesai | Situs | Lowongan | Dilamar | Gagal | Duplikat |",
+            "|---|---|---|---|---|---|",
+        ]
+        baris += [
+            f"| {s['selesai']} | {s['situs']} | {s['ditemukan']} | "
+            f"{s['dilamar']} | {s['gagal']} | {s['duplikat']} |"
+            for s in sesi
         ]
 
     saran_saran = saran(data)
@@ -213,6 +232,14 @@ def saran(data: Dict) -> List[str]:
                 + ", ".join(tanpa_lamaran)
                 + ". Periksa apakah situs itu masih memuat logo/gaji."
             )
+
+    rasio = (data.get("statistik_sesi") or {}).get("rasio_duplikat", 0)
+    if rasio >= 30:
+        hasil.append(
+            f"Rasio duplikat {rasio}% — banyak lowongan sama ditemukan dari "
+            "kombinasi berbeda. Pertimbangkan mengurangi kata kunci yang "
+            "tumpang tindih."
+        )
 
     if data.get("tingkat_berhasil", 0) and data["tingkat_berhasil"] < 80:
         hasil.append(

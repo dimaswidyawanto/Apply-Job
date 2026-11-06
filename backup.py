@@ -68,6 +68,28 @@ def buat(path_db: Optional[str] = None,
     return sasaran
 
 
+def pastikan_harian(path_db: Optional[str] = None,
+                    path_folder: Optional[str | Path] = None) -> Optional[Path]:
+    """Buat backup bila hari ini (WIB) belum ada; None bila sudah ada.
+
+    Dipanggil di awal sesi supaya data aman tanpa perlu diingat pengguna
+    (master prompt pasal 13). Kegagalan backup tidak boleh menghentikan sesi.
+    """
+    hari_ini = datetime.now().strftime("%Y-%m-%d")
+
+    try:
+        for item in daftar(path_folder):
+            if str(item.get("waktu", "")).startswith(hari_ini):
+                return None
+    except Exception:
+        pass
+
+    try:
+        return buat(path_db, path_folder)
+    except Exception:
+        return None
+
+
 def _bersihkan(tujuan: Path) -> None:
     """Sisakan MAKS_SIMPAN backup terbaru saja."""
     berkas = sorted(tujuan.glob(f"{AWALAN}-*.db"))

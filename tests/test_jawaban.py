@@ -280,3 +280,41 @@ def test_apply_merekam_jawaban_walau_hasil_gagal(monkeypatch):
 
     assert hasil.status == "login_required" or not hasil.applied
     assert dipanggil["n"] == 1
+
+
+def test_pertanyaan_persetujuan_wajib_dikonfirmasi():
+    """Pasal 8.4: persetujuan/hukum tidak boleh dijawab dari ingatan."""
+    for pertanyaan in (
+        "Saya menyetujui pernyataan ini",
+        "Pernyataan di atas benar dan dapat dipertanggungjawabkan",
+        "Saya bersedia ditempatkan di luar kota",
+        "Bebas narkoba?",
+        "I agree to the terms and conditions",
+        "Setuju dengan syarat dan ketentuan",
+    ):
+        assert jawaban.perlu_konfirmasi(pertanyaan), pertanyaan
+
+
+def test_pertanyaan_biasa_tetap_dijawab_otomatis():
+    for pertanyaan in (
+        "Nama Lengkap",
+        "Full Name",
+        "Apakah kamu bersedia bekerja dalam shift?",
+        "Berapa gaji yang diharapkan?",
+    ):
+        assert not jawaban.perlu_konfirmasi(pertanyaan), pertanyaan
+
+
+def test_cari_tidak_mengembalikan_jawaban_untuk_persetujuan(monkeypatch):
+    class DatabaseIsi:
+        def cari_jawaban(self, kunci):
+            return {
+                "jawaban": "Ya",
+                "pertanyaan": "Saya menyetujui pernyataan ini",
+                "jenis": "radio",
+                "dipakai": 1,
+            }
+
+    monkeypatch.setattr(jawaban, "db", DatabaseIsi())
+
+    assert jawaban.cari("Saya menyetujui pernyataan ini") is None

@@ -22,6 +22,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import Select
 
 import jawaban
+import log_aktivitas
 from config import config
 
 console = Console()
@@ -1099,6 +1100,19 @@ class AutoApplier:
                     opsi.append(label)
 
             pertanyaan = self._pertanyaan(element_grup[0], opsi)
+
+            # Pasal 8.4: persetujuan/hukum wajib dikonfirmasi pengguna.
+            if jawaban.perlu_konfirmasi(pertanyaan):
+                console.print(
+                    f"[yellow]   perlu konfirmasi Anda:[/] {pertanyaan[:70]}"
+                )
+                log_aktivitas.catat(
+                    f"Perlu konfirmasi (persetujuan/hukum): {pertanyaan[:120]}",
+                    "warning",
+                )
+                gagal.append(pertanyaan or "pertanyaan persetujuan")
+                continue
+
             pilihan, dari_ingatan = self._dari_ingatan(pertanyaan, opsi)
 
             if not pilihan:
@@ -1144,6 +1158,18 @@ class AutoApplier:
 
                 pertanyaan = self._pertanyaan(element)
                 jenis = klasifikasi_pertanyaan(pertanyaan)
+
+                if jawaban.perlu_konfirmasi(pertanyaan):
+                    console.print(
+                        f"[yellow]   perlu konfirmasi Anda:[/] {pertanyaan[:70]}"
+                    )
+                    log_aktivitas.catat(
+                        "Perlu konfirmasi (persetujuan/hukum): "
+                        f"{pertanyaan[:120]}",
+                        "warning",
+                    )
+                    gagal.append(pertanyaan)
+                    continue
 
                 nilai = jawaban.cari(pertanyaan) or ""
 

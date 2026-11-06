@@ -166,6 +166,48 @@ def _mirip_kunci(pertanyaan: str, kunci_tersimpan: str) -> float:
     return max(skor, skor_padanan)
 
 
+# Pertanyaan persetujuan/hukum tidak boleh diisi otomatis — sekalipun pernah
+# dijawab (master prompt pasal 8.4). Bot wajib berhenti dan meminta Anda.
+# Pertanyaan yang WAJIB dijawab pengguna sendiri (master prompt pasal 8.4).
+# Hanya pernyataan/persetujuan/hukum — pertanyaan kesediaan biasa
+# ("bersedia kerja shift?") tetap boleh dijawab otomatis.
+POLA_KONFIRMASI = (
+    r"\bsaya setuju\b",
+    r"\bi agree\b",
+    r"\bsetuju dengan\b",
+    r"\bmenyetujui pernyataan\b",
+    r"\bpernyataan (ini|di atas|tersebut)\b",
+    r"\bpersetujuan\b",
+    r"\bsaya bersedia\b",
+    r"\bperjanjian\b",
+    r"\bkesepakatan\b",
+    r"\bkontrak\b",
+    r"\bdata pribadi\b",
+    r"\bkerahasiaan\b",
+    r"\bprivasi\b",
+    r"\bsanksi\b",
+    r"\bhukum\b",
+    r"\blegal\b",
+    r"\bterms\b",
+    r"\bconditions\b",
+    r"\bprivacy\b",
+    r"\bconsent\b",
+    r"\bagree\b",
+    r"\bdeclaration\b",
+    r"\bdeclare\b",
+    r"\bbackground check\b",
+    r"\bbebas narkoba\b",
+    r"\bnarkoba\b",
+)
+
+_konfirmasi = re.compile("|".join(POLA_KONFIRMASI), re.IGNORECASE)
+
+
+def perlu_konfirmasi(pertanyaan: str) -> bool:
+    """True bila pertanyaan menyangkut persetujuan/hukum (wajib ditanyakan)."""
+    return bool(_konfirmasi.search(str(pertanyaan or "")))
+
+
 def _aktif() -> bool:
     return bool(getattr(config, "ingat_jawaban", True))
 
@@ -182,6 +224,11 @@ def cari(pertanyaan: str) -> Optional[str]:
 
     kunci = kunci_pertanyaan(pertanyaan)
     if not kunci:
+        return None
+
+    # Pasal 8.4: pertanyaan persetujuan/hukum wajib dikonfirmasi pengguna,
+    # tidak boleh diisi otomatis walau sudah pernah dijawab.
+    if perlu_konfirmasi(pertanyaan):
         return None
 
     tersimpan = db.cari_jawaban(kunci)

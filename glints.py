@@ -1101,18 +1101,39 @@ class GlintsBot:
         title = (job.get("title") or "").strip()
         console.print(f"\n[bold magenta]{title}[/] [cyan](otomatis)[/]")
 
-        try:
-            hasil = GlintsApplier(self.driver).apply(job)
-        except WebDriverException as exc:
-            if chrome_mati(str(exc)):
-                raise ChromeTertutup(
-                    "Jendela Chrome tertutup saat program berjalan"
-                ) from exc
-            self._catat(job_id, "error", f"Galat browser: {exc}")
-            return ApplyResult(False, "error", f"Galat browser: {exc}")
-        except Exception as exc:  # jaring pengaman: jangan hentikan sesi
-            self._catat(job_id, "error", f"Galat tak terduga: {exc}")
-            return ApplyResult(False, "error", f"Galat tak terduga: {exc}")
+        ulang = 0
+
+        while True:
+            try:
+                hasil = GlintsApplier(self.driver).apply(job)
+            except WebDriverException as exc:
+                if chrome_mati(str(exc)):
+                    raise ChromeTertutup(
+                        "Jendela Chrome tertutup saat program berjalan"
+                    ) from exc
+                self._catat(job_id, "error", f"Galat browser: {exc}")
+                return ApplyResult(False, "error", f"Galat browser: {exc}")
+            except Exception as exc:  # jaring pengaman: jangan hentikan sesi
+                self._catat(job_id, "error", f"Galat tak terduga: {exc}")
+                return ApplyResult(False, "error", f"Galat tak terduga: {exc}")
+
+            # Auto recovery yang sama dengan JobStreet: galat sementara
+            # (timeout/jaringan) diulang berbatas.
+            if (
+                hasil.status == "error"
+                and antrean.sementara(hasil.reason)
+                and ulang < antrean.maks_ulang()
+            ):
+                ulang += 1
+                log_aktivitas.catat(
+                    f"Ulang {ulang}/{antrean.maks_ulang()} (Glints): "
+                    f"{title} — {(hasil.reason or '')[:140]}",
+                    "warning",
+                )
+                if antrean.jeda_ulang():
+                    time.sleep(antrean.jeda_ulang())
+                continue
+            break
 
         # apply() menelan galat browser menjadi ApplyResult; ubah lagi menjadi
         # ChromeTertutup supaya sesi berhenti rapi, bukan mencetak traceback.

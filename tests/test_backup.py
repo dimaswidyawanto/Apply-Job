@@ -1,5 +1,7 @@
 """Backup & pemulihan database (master prompt pasal 12)."""
 
+from pathlib import Path
+
 import pytest
 
 import backup
@@ -119,3 +121,18 @@ def test_backup_lama_dipangkas(db_berisi, tmp_path, monkeypatch):
         backup.buat(str(jalur), folder)
 
     assert len(backup.daftar(folder)) == 2
+
+
+def test_backup_harian_hanya_sekali(db_berisi, tmp_path):
+    _, jalur = db_berisi
+    folder = tmp_path / "backups"
+
+    pertama = backup.pastikan_harian(str(jalur), folder)
+
+    assert pertama is not None and Path(pertama).exists()
+    assert backup.pastikan_harian(str(jalur), folder) is None
+    assert len(backup.daftar(folder)) == 1
+
+
+def test_backup_harian_aman_bila_database_belum_ada(tmp_path):
+    assert backup.pastikan_harian(str(tmp_path / "tidak-ada.db"), tmp_path) is None

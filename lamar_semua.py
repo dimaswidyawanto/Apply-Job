@@ -16,6 +16,7 @@ import argparse
 import contextlib
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Dict, List
 
@@ -200,6 +201,15 @@ def jalankan(
 ) -> Dict[str, Dict]:
     """Jalankan seluruh situs terpilih dan kembalikan hasil per situs."""
     console.print("[bold cyan]Lamar otomatis — JobStreet · Glints · Indeed[/]")
+    mulai_sesi = time.monotonic()
+
+    # Backup harian otomatis (pasal 13) — cukup sekali per hari.
+    with contextlib.suppress(Exception):
+        import backup as backup_modul
+
+        berkas_backup = backup_modul.pastikan_harian()
+        if berkas_backup:
+            console.print(f"[dim]Backup harian: {berkas_backup}[/]")
 
     if perbarui:
         berhasil, pesan = perbarui_kode()
@@ -248,6 +258,20 @@ def jalankan(
     terkirim = sum(data.get("dilamar", 0) for data in hasil.values())
     console.print(f"[bold green]Total terkirim sesi ini: {terkirim}[/]")
     console.print(f"[bold]{kuota.ringkasan()}[/]")
+
+    # Ringkasan sesi gabungan semua situs (evaluasi berkala pasal 12.4).
+    with contextlib.suppress(Exception):
+        db.catat_sesi(
+            situs=",".join(sorted(hasil)) or "semua",
+            ditemukan=sum(int(d.get("dibaca", 0) or 0) for d in hasil.values()),
+            baru=sum(int(d.get("baru", 0) or 0) for d in hasil.values()),
+            duplikat=sum(
+                int(d.get("duplikat", 0) or 0) for d in hasil.values()
+            ),
+            dilamar=terkirim,
+            gagal=len(dilewati),
+            durasi=time.monotonic() - mulai_sesi,
+        )
 
     # Satu laporan harian untuk semua situs.
     try:

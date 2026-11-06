@@ -215,6 +215,20 @@ diperbaiki, semuanya dengan tes:
 | `MAX_APPLY_PER_DAY=0` di template | aturan "maks 50/hari" tidak berlaku untuk pemasangan baru | template memakai 50 (batas tetap, tetap bisa diubah lewat `.env`) |
 | `submit_texts` didefinisikan dua kali di `glints.py` | definisi pertama mati, membingungkan saat dirawat | definisi mati dihapus (perilaku tidak berubah) |
 
+**Revisi 10/10 — tiga celah terakhir ditutup:**
+
+| Celah | Sebelum | Sesudah |
+|---|---|---|
+| Persetujuan/hukum dijawab dari ingatan | bot bisa mencentang "saya setuju" atas nama Anda | `jawaban.perlu_konfirmasi()` memblokir pernyataan/persetujuan/privasi/narkoba/background check di jalur teks **dan** radio; lowongan dikembalikan ke daftar manual + catatan di log |
+| Galat sementara langsung membuang lowongan | satu timeout = lowongan dicatat `failed` | `antrean.ulang_berbatas()` + `perlu_konfirmasi`-independen: timeout/jaringan/Chrome diulang `MAKS_ULANG` (bawaan 2) dengan jeda `JEDA_ULANG`; kesalahan permanen (login habis) tidak diulang. Berlaku di JobStreet, Glints, dan Indeed |
+| Statistik sesi hilang saat program ditutup | hanya tampil di terminal | tabel `sesi` di database (ditemukan, baru, duplikat, dilamar, gagal, diulang, durasi) → laporan memuat **Sesi terakhir** + rasio duplikat dan saran bila ≥ 30%; dashboard punya panel **Sesi terakhir** |
+
+Tambahan kecil pada revisi ini: indeks `jobs(status_antrean/sumber/kata_kunci)`
+untuk filter yang makin sering dipakai, backup harian otomatis di awal sesi
+(`backup.pastikan_harian()`, sekali per hari), template `LOCATIONS` berisi 7 kota
+sesuai pasal lokasi, dan `tests/conftest.py` yang mengarahkan database tes ke
+berkas sementara sehingga **menjalankan tes tidak pernah mengubah data Anda**.
+
 **Batas yang perlu diketahui (jujur):**
 - Uji browser nyata (Selenium) tetap hanya bisa di PC Anda; semua tes di sini
   memakai bot/driver palsu.

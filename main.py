@@ -1,3 +1,4 @@
+import contextlib
 import time
 from typing import Optional
 
@@ -44,6 +45,7 @@ class AutoApplyEngine:
             "manual": 0,
             "skipped": 0,
             "errors": 0,
+            "retry": 0,
         }
         self.manual_jobs = []
         self.stop_requested = False
@@ -69,6 +71,7 @@ class AutoApplyEngine:
         """
         self._print_banner()
         self._print_config()
+        self.mulai_sesi = time.monotonic()
 
         if not config.auto_apply:
             console.print(
@@ -399,22 +402,27 @@ class AutoApplyEngine:
             self.session_stats["already"] += 1
             return True
 
-        try:
-            # Mode otomatis: bot mengirim lamaran sendiri.
-            # Mode manual: halaman dibuka untuk Anda tinjau.
-            hasil = self.bot.apply_job(job)
+        # Auto recovery (pasal 10): galat sementara diulang berbatas, lalu
+        # lanjut ke lowongan berikutnya tanpa menghentikan sesi.
+        hasil, galat, jumlah_ulang = antrean.ulang_berbatas(
+            lambda: self.bot.apply_job(job),
+            judul=title,
+            pemeriksa=kendali.periksa,
+        )
 
-        except KeyboardInterrupt:
-            raise
+        if jumlah_ulang:
+            self.session_stats["retry"] = (
+                self.session_stats.get("retry", 0) + jumlah_ulang
+            )
 
-        except Exception as exc:
+        if galat is not None:
+            pesan = str(galat) or galat.__class__.__name__
             console.print(
-                f"[bold red]Error saat memproses lowongan "
-                f"'{title}': {exc}[/]"
+                f"[bold red]Error saat memproses lowongan '{title}': {pesan}[/]"
             )
             self.session_stats["errors"] += 1
-            antrean.selesai(job.get("job_id", ""), "failed", str(exc)[:200])
-            log_aktivitas.catat(f"Gagal: {title} — {exc}", "error")
+            antrean.selesai(job.get("job_id", ""), "failed", pesan[:200])
+            log_aktivitas.catat(f"Gagal: {title} — {pesan}", "error")
             return True
 
         if hasil.status == "login_required":
@@ -975,6 +983,26 @@ class AutoApplyEngine:
                     f"  • {job.get('title')} — {job.get('company', '')}"
                 )
                 console.print(f"    {job.get('url')}  [dim]({reason})[/]")
+
+        self._catat_sesi()
+
+    def _catat_sesi(self) -> None:
+        """Simpan ringkasan sesi untuk evaluasi berkala (pasal 12.4)."""
+        mulai = getattr(self, "mulai_sesi", None)
+        if mulai is None:
+            return
+
+        with contextlib.suppress(Exception):
+            db.catat_sesi(
+                situs="jobstreet",
+                ditemukan=self.session_stats["found"],
+                baru=self.session_stats["new"],
+                duplikat=self.duplikat_dilewati,
+                dilamar=self.session_stats["applied"],
+                gagal=self.session_stats["errors"],
+                diulang=self.session_stats.get("retry", 0),
+                durasi=time.monotonic() - mulai,
+            )
 
 
 def main():

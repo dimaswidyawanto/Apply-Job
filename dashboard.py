@@ -67,6 +67,9 @@ def status() -> dict:
             "mulai": _ANAK.get("mulai") or None,
         },
         "ringkasan": data,
+        "per_sumber": data.get("per_sumber", []),
+        "sesi_terakhir": data.get("sesi_terakhir", []),
+        "statistik_sesi": data.get("statistik_sesi", {}),
         "konfigurasi": {
             "MIN_SALARY": config.min_salary,
             "MAX_APPLY_PER_DAY": config.max_apply_per_day,
@@ -285,6 +288,7 @@ label{font-size:12px;color:#94a3b8;display:block;margin-bottom:2px}
   <section><h2>Per kata kunci</h2><table id="katakunci"></table></section>
   <section><h2>Per sumber</h2><table id="sumber"></table></section>
   <section><h2>Aktivitas</h2><pre id="log"></pre></section>
+  <section><h2>Sesi terakhir</h2><table id="sesi"></table></section>
   <section><h2>Riwayat lamaran</h2><table id="riwayat"></table></section>
   <section><h2>Detail lowongan</h2>
     <input id="jid" placeholder="job_id, mis. 88112233">
@@ -321,6 +325,7 @@ async function segarkan(){
   tabel('kategori',g.per_kategori,['kategori','jumlah','dilamar']);
   tabel('katakunci',g.per_kata_kunci||[],['kata_kunci','jumlah','dilamar']);
   tabel('sumber',g.per_sumber||[],['sumber','jumlah','dilamar']);
+  tabel('sesi',g.sesi_terakhir||[],['selesai','situs','dilamar','gagal','duplikat']);
   document.getElementById('log').textContent=d.log.join(NL)||'(belum ada aktivitas)';
   isiKonfigurasi(d.konfigurasi);
  }catch(e){document.getElementById('pesan').textContent='Gagal memuat: '+e}
