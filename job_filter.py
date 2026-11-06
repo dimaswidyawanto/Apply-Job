@@ -376,12 +376,20 @@ class JobFilter:
             prefer_newest = config.prefer_newest and bool(config.sort_mode)
 
         scored_jobs = []
+        pakai_cv = _skor_cv_aktif()
 
         for job in jobs:
             rincian = self.score_breakdown(job)
             job["_skor_rincian"] = rincian
             job["_score"] = sum(rincian.values())
+
+            if pakai_cv:
+                # Skor 6 parameter berbobot (0-100) menjadi prioritas utama.
+                _skor_cv_modul().terapkan(job)
+
             scored_jobs.append(job)
+
+        skor_cv = lambda item: item.get("_skor_cv", -1)  # noqa: E731
 
         if prefer_newest:
             # Lowongan tanpa info umur ditaruh paling akhir.
@@ -389,6 +397,7 @@ class JobFilter:
                 key=lambda item: (
                     item.get("age_days") is None,
                     item.get("age_days") or 0,
+                    -skor_cv(item),
                     -item["_score"],
                 )
             )
@@ -396,6 +405,7 @@ class JobFilter:
             # Kecocokan tertinggi dulu; bila skornya sama, yang paling baru.
             scored_jobs.sort(
                 key=lambda item: (
+                    -skor_cv(item),
                     -item["_score"],
                     item.get("age_days") is None,
                     item.get("age_days") or 0,
@@ -517,6 +527,20 @@ class JobFilter:
                 rincian["gaji"] += SKOR_GAJI_LAYAK
 
         return rincian
+
+
+def _skor_cv_modul():
+    """Modul skor CV (impor malas: modul itu membaca config saat dipakai)."""
+    import skor_cv
+
+    return skor_cv
+
+
+def _skor_cv_aktif() -> bool:
+    try:
+        return _skor_cv_modul().aktif()
+    except Exception:
+        return False
 
 
 def _angka_rupiah(teks: str) -> int:

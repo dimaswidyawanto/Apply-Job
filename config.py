@@ -133,6 +133,12 @@ class Config:
     # Wajib logo/gambar perusahaan untuk JobStreet & Glints (pasal 6.1).
     # Indeed dikecualikan karena kartunya tidak memuat logo.
     require_company_logo: bool = _bool_setting("REQUIRE_COMPANY_LOGO", True)
+    # Berkas CV untuk mesin skor kecocokan (pasal 6.3). Mendukung .pdf (butuh
+    # pypdf), .docx, .txt, dan .md.
+    cv_path: str = os.getenv("CV_PATH", "").strip()
+    # Skor minimum 0-100 agar lowongan boleh masuk antrean apply (pasal 7.2).
+    # 0 = tanpa batas skor; syarat wajib tetap berlaku apa pun nilainya.
+    min_skor_cv: int = _int_setting("MIN_SKOR_CV", 0)
     # Situs yang dijalankan oleh "Lamar Otomatis.bat" (urut: JobStreet, Glints,
     # Indeed). Ubah jadi mis. "jobstreet,indeed" bila satu situs dilewati.
     situs_aktif: str = ",".join(

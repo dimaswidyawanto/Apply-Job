@@ -9,6 +9,7 @@ import antrean
 import kendali
 import kuota
 import log_aktivitas
+import skor_cv
 from config import MAKS_HALAMAN_RISET, batas_halaman_riset, config
 from database import db
 from job_filter import dedupe_jobs, job_filter
@@ -224,6 +225,18 @@ class AutoApplyEngine:
                 self.session_stats["skipped"] += 1
 
         eligible_jobs = job_filter.rank_jobs(eligible_jobs)
+
+        # Pasal 7.3: batas MIN_SKOR_CV ikut menentukan antrean apply.
+        eligible_jobs, dibuang = skor_cv.saring_minimal(
+            eligible_jobs, skor_sudah=True
+        )
+        for job in dibuang:
+            antrean.tandai_hasil(
+                job.get("job_id", ""),
+                f"Skor CV {job.get('_skor_cv')} di bawah batas "
+                f"{config.min_skor_cv}",
+            )
+            self.session_stats["skipped"] += 1
 
         console.print(
             f"{len(eligible_jobs)} dari {len(new_jobs)} "
@@ -631,6 +644,14 @@ class AutoApplyEngine:
         # Urutkan: kecocokan tertinggi dulu (bawaan) atau posting terbaru.
         urut_terbaru = config.rank_by == "newest"
         kandidat = job_filter.rank_jobs(kandidat, prefer_newest=urut_terbaru)
+
+        kandidat, dibuang = skor_cv.saring_minimal(kandidat, skor_sudah=True)
+        for job in dibuang:
+            antrean.tandai_hasil(
+                job.get("job_id", ""),
+                f"Skor CV {job.get('_skor_cv')} di bawah batas "
+                f"{config.min_skor_cv}",
+            )
 
         keterangan_urut = (
             "posting terbaru" if urut_terbaru else "kecocokan tertinggi"

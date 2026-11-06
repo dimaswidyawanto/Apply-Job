@@ -29,6 +29,7 @@ import antrean
 import kendali
 import kuota
 import log_aktivitas
+import skor_cv
 from auto_apply import ApplyResult, AutoApplier
 from browser import buka_chrome, tutup_chrome
 from config import MAKS_HALAMAN_RISET, batas_halaman_riset, config
@@ -306,10 +307,18 @@ def pilih_teratas(lowongan: List[Dict], batas: int = 0) -> List[Dict]:
     urut_terbaru = getattr(config, "rank_by", "relevance") == "newest"
     terurut = penyaring.rank_jobs(lowongan, prefer_newest=urut_terbaru)
 
-    if batas and batas > 0:
-        return terurut[:batas]
+    # Pasal 7.3: hanya kandidat yang memenuhi MIN_SKOR_CV masuk antrean apply.
+    lolos, dibuang = skor_cv.saring_minimal(terurut, skor_sudah=True)
+    for job in dibuang:
+        antrean.tandai_hasil(
+            job.get("job_id", ""),
+            f"Skor CV {job.get('_skor_cv')} di bawah batas {config.min_skor_cv}",
+        )
 
-    return terurut
+    if batas and batas > 0:
+        return lolos[:batas]
+
+    return lolos
 
 
 def tampilkan_rincian_skor(kandidat: List[Dict], maksimal: int = 3,
