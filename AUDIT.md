@@ -205,6 +205,16 @@ dan semua fase dikerjakan berurutan.
   jaringan ke tiga situs, lalu memberi saran (folder OneDrive, antivirus,
   ukuran database).
 
+**Hasil audit menyeluruh (revisi ini):** empat cacat nyata ditemukan dan
+diperbaiki, semuanya dengan tes:
+
+| Temuan | Dampak bila dibiarkan | Perbaikan |
+|---|---|---|
+| `DB_PATH=` kosong/relatif di `.env` | SQLite membuat database sementara → riwayat lamaran seolah hilang | `Config` selalu menjadikan path absolut; kosong → `jobstreet_auto.db` di folder proyek |
+| Database lama: `status_antrean` NULL | total status di dashboard tidak sama dengan jumlah lowongan | migrasi mengisi `found` untuk baris lama |
+| `MAX_APPLY_PER_DAY=0` di template | aturan "maks 50/hari" tidak berlaku untuk pemasangan baru | template memakai 50 (batas tetap, tetap bisa diubah lewat `.env`) |
+| `submit_texts` didefinisikan dua kali di `glints.py` | definisi pertama mati, membingungkan saat dirawat | definisi mati dihapus (perilaku tidak berubah) |
+
 **Batas yang perlu diketahui (jujur):**
 - Uji browser nyata (Selenium) tetap hanya bisa di PC Anda; semua tes di sini
   memakai bot/driver palsu.

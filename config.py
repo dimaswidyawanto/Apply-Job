@@ -346,6 +346,17 @@ class Config:
         return list(self.research_keywords or self.keywords)
 
     def __post_init__(self):
+        # DB_PATH kosong/relatif bisa membuat data "hilang": SQLite dengan
+        # path kosong membuat database sementara, dan path relatif bergantung
+        # folder tempat perintah dijalankan. Selalu jadikan absolut.
+        jalur_db = str(self.db_path or "").strip()
+        if not jalur_db:
+            jalur_db = str(BASE_DIR / "jobstreet_auto.db")
+        jalur = Path(jalur_db).expanduser()
+        if not jalur.is_absolute():
+            jalur = BASE_DIR / jalur
+        self.db_path = str(jalur)
+
         # LOCATIONS kosong -> pakai LOCATION tunggal.
         self.locations = [loc for loc in self.locations if loc.strip()]
         if not self.locations:

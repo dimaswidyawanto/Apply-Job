@@ -51,6 +51,7 @@ def _git(*argumen: str, timeout: int = 240) -> subprocess.CompletedProcess:
         capture_output=True,
         text=True,
         timeout=timeout,
+        check=False,
     )
 
 

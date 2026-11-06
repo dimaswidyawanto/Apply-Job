@@ -135,3 +135,35 @@ def test_blacklist(database):
     assert database.is_blacklisted("PT Contoh") is True
     assert database.is_blacklisted("PT Lain") is False
     assert database.is_blacklisted("") is False
+
+
+def test_migrasi_mengisi_status_dan_sumber(tmp_path):
+    """Database lama tanpa kolom baru tetap terbaca dengan status 'found'."""
+    import sqlite3
+
+    from database import Database
+
+    jalur = tmp_path / "lama.db"
+    conn = sqlite3.connect(str(jalur))
+    conn.executescript(
+        """
+        CREATE TABLE jobs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_id TEXT UNIQUE NOT NULL,
+            title TEXT NOT NULL,
+            url TEXT NOT NULL
+        );
+        INSERT INTO jobs (job_id, title, url)
+        VALUES ('old-1', 'Inventory Staff', 'https://id.jobstreet.com/job/1');
+        """
+    )
+    conn.commit()
+    conn.close()
+
+    basis = Database(str(jalur))
+    job = basis.get_job("old-1")
+
+    assert job["status_antrean"] == "found"
+    assert job["sumber"] == "jobstreet"
+    assert basis.hitung_status_antrean()["found"] == 1
+    assert sum(basis.hitung_status_antrean().values()) == 1

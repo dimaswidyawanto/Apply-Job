@@ -1,5 +1,6 @@
 """Akses database SQLite untuk lowongan, lamaran, dan blacklist."""
 
+import contextlib
 import sqlite3
 import threading
 from contextlib import contextmanager, suppress
@@ -226,6 +227,14 @@ class Database:
                 conn.execute(
                     f"ALTER TABLE jobs ADD COLUMN {column} {definition}"
                 )
+
+        # Lowongan dari database lama belum punya status antrean; isi
+        # 'found' agar hitungan status di dashboard/laporan tetap konsisten.
+        with contextlib.suppress(Exception):
+            conn.execute(
+                "UPDATE jobs SET status_antrean = 'found' "
+                "WHERE status_antrean IS NULL OR TRIM(status_antrean) = ''"
+            )
 
         # Isi `sumber` untuk lowongan lama (dibaca dari URL masing-masing),
         # supaya laporan per sumber tidak kosong setelah pembaruan.

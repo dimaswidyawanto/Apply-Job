@@ -180,7 +180,7 @@ cp .env.example .env
 | `EXCLUDE_KEYWORDS` | `principal,director,head,senior,lead` | Kata yang membuat judul otomatis ditolak |
 | `STRICT_LOCATION` | `false` | `true` = tolak lowongan yang lokasinya di luar `LOCATION` |
 | `REQUIRE_COMPANY_LOGO` | `true` | Wajib logo/gambar di **JobStreet & Glints**; Indeed dikecualikan karena kartunya tidak memuat logo |
-| `MAX_APPLY_PER_DAY` | `0` | Batas **lamaran yang dikirim** per hari (mis. `50`); `0` = tanpa batas. Riset & penilaian tetap tanpa batas |
+| `MAX_APPLY_PER_DAY` | `50` | Batas **lamaran yang dikirim** per hari. Bawaan **50** sesuai aturan (boleh diubah lewat `.env`); `0` = tanpa batas. Riset & penilaian tetap tanpa batas |
 | `DELAY_BETWEEN_APPLY` | `3` | Jeda (detik) antar lowongan |
 | `MAX_PAGES` | `3` | Jumlah halaman per kata kunci untuk mode lama (`COLLECT_BEFORE_APPLY=false`) dan `cek-logo` |
 | `RESEARCH_KEYWORDS` | kosong | Kata kunci **khusus riset** (boleh lebih lebar dari `KEYWORDS`); kosong = ikut `KEYWORDS`. Semua kata kunci dicari di semua lokasi |
@@ -764,7 +764,7 @@ meninjau sendiri.
 5. Di akhir sesi muncul daftar lowongan yang dilewati beserta alasannya —
    hanya informasi, tidak perlu Anda kerjakan.
 
-Batas pengaman: `MAX_APPLY_PER_DAY` (harian, bawaan **0** = tanpa batas),
+Batas pengaman: `MAX_APPLY_PER_DAY` (harian, bawaan **50**; `0` = tanpa batas),
 `AUTO_APPLY_MAX_PER_SESSION` (per sesi, bawaan **0** = tanpa batas), dan
 `DELAY_BETWEEN_APPLY` (jeda antar lamaran, tetap **3** detik agar tidak
 terlihat seperti bot).

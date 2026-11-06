@@ -21,6 +21,7 @@ def versi_kode() -> str:
             capture_output=True,
             text=True,
             timeout=5,
+            check=False,
         )
         if hasil.returncode == 0:
             return hasil.stdout.strip() or "-"

@@ -520,14 +520,6 @@ class GlintsApplier(AutoApplier):
         "button[data-testid='submit-application']",
         "button[type='submit']",
     )
-    submit_texts = (
-        "lamar sekarang",
-        "kirim lamaran",
-        "kirim aplikasi",
-        "submit application",
-        "apply now",
-    )
-
     continue_selectors = ("button[data-testid='continue-application']",)
     continue_texts = (
         "lanjutkan",
