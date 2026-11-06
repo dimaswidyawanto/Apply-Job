@@ -164,3 +164,15 @@ def test_pembuat_pintasan_mencakup_semua_peluncur():
                  "Lamar Otomatis"):
         assert nama in isi
     assert "CreateShortcut" in isi
+
+
+def test_dashboard_bat_ada():
+    jalur = AKAR / "Dashboard.bat"
+    assert jalur.exists()
+
+    mentah = jalur.read_bytes()
+    assert mentah.count(b"\r\n") == mentah.count(b"\n")
+
+    isi = mentah.decode("utf-8")
+    assert "jalankan.bat dashboard" in isi
+    assert not any(b.strip().lower().startswith("goto") for b in isi.splitlines())

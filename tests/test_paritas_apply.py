@@ -25,7 +25,8 @@ def _job(**ubah):
         "salary": "Rp 6-7jt",
         "description": "",
         "url": "https://glints.com/id/opportunities/jobs/staff-gudang/1111",
-        "has_logo": False,
+        # Bawaan: kartu berlogo. Kasus tanpa logo diuji khusus di bawah.
+        "has_logo": True,
         "sudah_dilamar": False,
         "khusus_aplikasi": False,
     }
@@ -117,19 +118,26 @@ def test_gaji_minimal_glints_tidak_lagi_dipakai(monkeypatch):
     }
 
 
-def test_logo_bukan_alasan_skip_di_tiga_situs(monkeypatch):
-    """Ada/tidaknya gambar perusahaan tidak pernah menggagalkan lowongan."""
+def test_aturan_logo_jobstreet_dan_glints_sama(monkeypatch):
+    """Logo wajib di JobStreet & Glints; Indeed dikecualikan (pasal 6.1)."""
     monkeypatch.setattr(config, "require_company_logo", True, raising=False)
     monkeypatch.setattr(config, "require_keyword_match", False, raising=False)
     monkeypatch.setattr(config, "strict_location", False, raising=False)
     monkeypatch.setattr(config, "min_salary", 0, raising=False)
 
-    for gambar in (False, True, None):
-        job = _job(has_logo=gambar)
-        assert _alasan_semua(job) == {
-            "jobstreet": "", "glints": "", "indeed": "",
-        }
-        assert job_filter.job_filter.should_apply(job)[0] is True
+    tanpa_gambar = _job(has_logo=False)
+    hasil = _alasan_semua(tanpa_gambar)
+    assert "logo" in hasil["jobstreet"].lower()
+    assert "logo" in hasil["glints"].lower()
+
+    # Kartu Indeed asli membawa penanda logo_diabaikan dari rapikan_kartu().
+    kartu_indeed = dict(tanpa_gambar, logo_diabaikan=True)
+    assert indeed.alasan_tidak_layak(kartu_indeed) == ""
+
+    berlogo = _job(has_logo=True)
+    assert _alasan_semua(berlogo) == {
+        "jobstreet": "", "glints": "", "indeed": "",
+    }
 
 
 def test_khusus_aplikasi_glints_bukan_alasan_tolak(monkeypatch):
@@ -142,9 +150,9 @@ def test_khusus_aplikasi_glints_bukan_alasan_tolak(monkeypatch):
 
 
 # ------------------------------------------------- riset & peringkat ------
-def test_batas_halaman_riset_sama_lima():
-    for nilai in (1, 5, 99):
-        harapan = min(nilai, 5)
+def test_batas_halaman_riset_sama_tiga():
+    for nilai in (1, 3, 99):
+        harapan = min(nilai, 3)
         assert glints.halaman_per_kata_kunci(nilai) == harapan
         assert indeed.batas_halaman_riset(nilai) == harapan
 

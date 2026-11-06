@@ -69,7 +69,6 @@ def test_alasan_tidak_layak(ubah, potongan):
         {"khusus_aplikasi": True},          # ditangani sebagai "perlu manual"
         {"salary": "Rp 2-3jt"},             # gaji tidak lagi jadi syarat Glints
         {"location": "Surabaya, Jawa Timur"},
-        {"has_logo": False},                # logo tidak pernah menyaring
     ],
 )
 def test_tidak_ada_syarat_tambahan_khusus_glints(ubah):

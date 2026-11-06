@@ -67,11 +67,23 @@ def make_job(**overrides):
     return job
 
 
-def test_tanpa_logo_tetap_layak_walau_aturan_aktif(filter_baru, monkeypatch):
-    """Gambar/logo perusahaan tidak pernah menjadi alasan melewati lowongan."""
+def test_tanpa_logo_ditolak_saat_aturan_aktif(filter_baru, monkeypatch):
+    """Logo wajib di JobStreet & Glints (pasal 6.1)."""
     monkeypatch.setattr(config, "require_company_logo", True)
 
     layak, alasan = filter_baru.should_apply(make_job(has_logo=False))
+    assert layak is False
+    assert "logo" in alasan.lower()
+
+
+def test_indeed_tanpa_logo_tetap_layak(filter_baru, monkeypatch):
+    """Indeed dikecualikan: kartunya memang tidak memuat logo."""
+    monkeypatch.setattr(config, "require_company_logo", True)
+
+    job = make_job(has_logo=False)
+    job["logo_diabaikan"] = True
+
+    layak, alasan = filter_baru.should_apply(job)
     assert layak is True, alasan
 
 

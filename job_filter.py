@@ -175,9 +175,18 @@ class JobFilter:
             if dikecualikan:
                 return False, f"Perusahaan di-blacklist: {dikecualikan}"
 
-        # Logo/gambar perusahaan TIDAK dipakai menyaring di situs mana pun.
-        # JobStreet, Glints, dan Indeed memakai aturan yang sama: ada gambar
-        # atau tidak, lowongan tetap diproses. `has_logo` hanya untuk tampilan.
+        # Logo/gambar perusahaan (pasal 6.1): WAJIB di JobStreet & Glints.
+        # Indeed menandai `logo_diabaikan` karena kartunya tidak memuat logo,
+        # jadi lowongan Indeed tidak ikut tertolak.
+        if config.require_company_logo and not job.get("logo_diabaikan"):
+            if job.get("has_logo") is False:
+                return False, "Tanpa logo perusahaan"
+            if "has_logo" in job and job["has_logo"] is None:
+                # Pasal 6.1: bila validitas gambar tidak dapat dipastikan,
+                # lowongan masuk REVIEW_REQUIRED dan tidak langsung dilamar.
+                # Field yang tidak ada sama sekali (sumber lama) tidak dihitung
+                # "tidak pasti" agar lowongan lama tidak ikut tertahan.
+                return False, "Logo tidak dapat dipastikan"
 
         title_lower = title.lower()
 
@@ -367,12 +376,20 @@ class JobFilter:
             prefer_newest = config.prefer_newest and bool(config.sort_mode)
 
         scored_jobs = []
+        pakai_cv = _skor_cv_aktif()
 
         for job in jobs:
             rincian = self.score_breakdown(job)
             job["_skor_rincian"] = rincian
             job["_score"] = sum(rincian.values())
+
+            if pakai_cv:
+                # Skor 6 parameter berbobot (0-100) menjadi prioritas utama.
+                _skor_cv_modul().terapkan(job)
+
             scored_jobs.append(job)
+
+        skor_cv = lambda item: item.get("_skor_cv", -1)  # noqa: E731
 
         if prefer_newest:
             # Lowongan tanpa info umur ditaruh paling akhir.
@@ -380,6 +397,7 @@ class JobFilter:
                 key=lambda item: (
                     item.get("age_days") is None,
                     item.get("age_days") or 0,
+                    -skor_cv(item),
                     -item["_score"],
                 )
             )
@@ -387,6 +405,7 @@ class JobFilter:
             # Kecocokan tertinggi dulu; bila skornya sama, yang paling baru.
             scored_jobs.sort(
                 key=lambda item: (
+                    -skor_cv(item),
                     -item["_score"],
                     item.get("age_days") is None,
                     item.get("age_days") or 0,
@@ -510,6 +529,20 @@ class JobFilter:
         return rincian
 
 
+def _skor_cv_modul():
+    """Modul skor CV (impor malas: modul itu membaca config saat dipakai)."""
+    import skor_cv
+
+    return skor_cv
+
+
+def _skor_cv_aktif() -> bool:
+    try:
+        return _skor_cv_modul().aktif()
+    except Exception:
+        return False
+
+
 def _angka_rupiah(teks: str) -> int:
     """Ubah "5000000" / "5jt" / "Rp 5.000.000" menjadi angka rupiah."""
     teks = str(teks or "").strip().lower()
@@ -565,6 +598,28 @@ def kunci_duplikat(job: Dict) -> str:
     return f"isi:{judul}|{perusahaan}|{lokasi}"
 
 
+def kunci_isi(job: Dict) -> str:
+    """Kunci isi lowongan (judul + perusahaan + lokasi), lintas situs."""
+    judul = normalisasi_judul(job.get("title"))
+    perusahaan = normalisasi_perusahaan(job.get("company"))
+    lokasi = " ".join(str(job.get("location") or "").lower().split())
+
+    if not judul or not perusahaan:
+        return ""
+
+    return f"{judul}|{perusahaan}|{lokasi}"
+
+
+def _situs(job: Dict) -> str:
+    """Nama situs dari URL lowongan ("" bila tidak diketahui)."""
+    url = str(job.get("url") or "").strip().lower()
+    if not url:
+        return ""
+    tanpa_skema = url.split("://", 1)[-1]
+    host = tanpa_skema.split("/", 1)[0].split(":", 1)[0]
+    return host[4:] if host.startswith("www.") else host
+
+
 def dedupe_jobs(jobs: List[Dict]) -> List[Dict]:
     """Buang lowongan duplikat dari gabungan semua kategori & lokasi.
 
@@ -574,14 +629,27 @@ def dedupe_jobs(jobs: List[Dict]) -> List[Dict]:
     """
     unik: List[Dict] = []
     terlihat: Dict[str, Dict] = {}
+    terlihat_isi: Dict[str, Dict] = {}
 
     for job in jobs:
         if not isinstance(job, dict):
             continue
 
         kunci = kunci_duplikat(job)
-        if kunci in terlihat:
-            asli = terlihat[kunci]
+        # Lowongan yang sama bisa muncul di lebih dari satu situs dengan URL
+        # berbeda. Kunci kedua (judul + perusahaan + lokasi) menangkapnya
+        # tanpa bergantung pada id/url masing-masing situs.
+        isi = kunci_isi(job)
+
+        # Kunci isi hanya dipakai untuk lowongan dari situs BERBEDA: dua
+        # lowongan berjudul sama di situs yang sama bisa jadi dua kesempatan
+        # berbeda (cabang lain / repost), jadi tidak digabung.
+        asli = terlihat.get(kunci)
+        if asli is None and isi:
+            tercatat = terlihat_isi.get(isi)
+            if tercatat is not None and _situs(tercatat) != _situs(job):
+                asli = tercatat
+        if asli is not None:
             for medan in ("company", "location", "salary", "description",
                           "date_posted", "url"):
                 if not asli.get(medan) and job.get(medan):
@@ -589,6 +657,8 @@ def dedupe_jobs(jobs: List[Dict]) -> List[Dict]:
             continue
 
         terlihat[kunci] = job
+        if isi and isi not in terlihat_isi:
+            terlihat_isi[isi] = job
         unik.append(job)
 
     return unik

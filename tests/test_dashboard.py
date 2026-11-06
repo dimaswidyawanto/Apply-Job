@@ -1,0 +1,168 @@
+"""Dashboard: data nyata dari database + kontrol yang benar-benar bekerja."""
+
+import json
+import threading
+import urllib.error
+import urllib.request
+
+import pytest
+
+import dashboard
+import kendali
+import laporan
+from database import Database
+
+
+@pytest.fixture
+def siap(monkeypatch, tmp_path):
+    basis = Database(str(tmp_path / "dash.db"))
+    monkeypatch.setattr(dashboard, "db", basis)
+    monkeypatch.setattr(laporan, "db", basis)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(dashboard.log_aktivitas, "FOLDER", tmp_path / "logs")
+    return basis
+
+
+@pytest.fixture
+def server(siap):
+    srv = dashboard.buat_server(0, "127.0.0.1")
+    utas = threading.Thread(target=srv.serve_forever, daemon=True)
+    utas.start()
+    yield srv, f"http://127.0.0.1:{srv.server_port}"
+    srv.shutdown()
+    srv.server_close()
+
+
+def _get(url):
+    with urllib.request.urlopen(url, timeout=5) as jawab:
+        return json.loads(jawab.read().decode("utf-8"))
+
+
+def _post(url):
+    permintaan = urllib.request.Request(url, method="POST")
+    try:
+        with urllib.request.urlopen(permintaan, timeout=5) as jawab:
+            return jawab.status, json.loads(jawab.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        return exc.code, json.loads(exc.read().decode("utf-8"))
+
+
+# ---------------------------------------------------------------- status ---
+def test_api_status_berisi_angka_nyata(server, siap):
+    siap.add_job({
+        "job_id": "indeed:1", "title": "Inventory Staff",
+        "company": "PT A", "location": "Bandung",
+        "url": "https://x/1", "has_logo": True,
+    })
+    _, dasar = server
+
+    data = _get(f"{dasar}/api/status")
+
+    assert data["ringkasan"]["lowongan_tersimpan"] == 1
+    assert data["ringkasan"]["status_antrean"]["found"] == 1
+    assert data["kuota"]["batas"] is not None
+    assert data["sesi"]["berjalan"] is False
+
+
+def test_halaman_dashboard_bisa_dibuka(server):
+    _, dasar = server
+
+    with urllib.request.urlopen(f"{dasar}/", timeout=5) as jawab:
+        isi = jawab.read().decode("utf-8")
+
+    assert "Dashboard Lamar Otomatis" in isi
+    assert "api/status" in isi
+
+
+# ---------------------------------------------------------------- kontrol --
+def test_pause_dan_lanjut_menulis_perintah(server):
+    _, dasar = server
+
+    kode, hasil = _post(f"{dasar}/api/aksi?aksi=pause")
+    assert kode == 200 and hasil["ok"] is True
+    assert kendali.baca(".") == "jeda"
+
+    kode, _ = _post(f"{dasar}/api/aksi?aksi=lanjut")
+    assert kode == 200
+    assert kendali.baca(".") == "lanjut"
+
+
+def test_stop_menulis_perintah_stop(server):
+    _, dasar = server
+
+    _post(f"{dasar}/api/aksi?aksi=stop")
+
+    assert kendali.baca(".") == "stop"
+
+
+def test_clear_butuh_konfirmasi(server, siap):
+    siap.add_job({
+        "job_id": "indeed:2", "title": "Stok", "company": "PT B",
+        "location": "Bandung", "url": "https://x/2", "has_logo": True,
+    })
+    _, dasar = server
+
+    kode, hasil = _post(f"{dasar}/api/aksi?aksi=clear")
+    assert kode == 400 and hasil["ok"] is False
+    assert siap.get_job("indeed:2") is not None
+
+    kode, hasil = _post(f"{dasar}/api/aksi?aksi=clear&konfirmasi=1")
+    assert kode == 200 and hasil["ok"] is True
+    assert siap.get_job("indeed:2") is None
+
+
+def test_clear_tidak_menghapus_yang_sudah_dilamar(server, siap):
+    siap.add_job({
+        "job_id": "indeed:3", "title": "Stok", "company": "PT C",
+        "location": "Bandung", "url": "https://x/3", "has_logo": True,
+    })
+    siap.record_application("indeed:3", "applied", "Terkirim")
+    _, dasar = server
+
+    _post(f"{dasar}/api/aksi?aksi=clear&konfirmasi=1")
+
+    assert siap.get_job("indeed:3") is not None
+
+
+def test_retry_mengembalikan_lowongan_gagal(server, siap):
+    siap.add_job({
+        "job_id": "indeed:4", "title": "Stok", "company": "PT D",
+        "location": "Bandung", "url": "https://x/4", "has_logo": True,
+    })
+    siap.set_status_antrean("indeed:4", "failed", "Timeout")
+    _, dasar = server
+
+    kode, hasil = _post(f"{dasar}/api/aksi?aksi=retry")
+
+    assert kode == 200 and hasil["ok"] is True
+    assert siap.get_job("indeed:4")["status_antrean"] == "qualified"
+
+
+def test_aksi_tidak_dikenal_ditolak(server):
+    _, dasar = server
+
+    kode, hasil = _post(f"{dasar}/api/aksi?aksi=hapus-semua")
+
+    assert kode == 400
+    assert "tidak dikenal" in hasil["pesan"]
+
+
+# ---------------------------------------------------------------- laporan --
+def test_laporan_menghitung_dan_memberi_saran(siap, monkeypatch):
+    monkeypatch.setattr(laporan.config, "cv_path", "", raising=False)
+    siap.add_job({
+        "job_id": "indeed:5", "title": "Inventory", "company": "PT E",
+        "location": "Bandung", "url": "https://x/5", "has_logo": True,
+    })
+    siap.set_status_antrean(
+        "indeed:5", "review_required", "Logo tidak dapat dipastikan"
+    )
+    siap.record_application("indeed:5", "applied", "Terkirim")
+
+    data = laporan.ringkasan()
+    saran = laporan.saran(data)
+
+    assert data["lamaran_terkirim"] == 1
+    assert data["per_lokasi"][0]["lokasi"] == "Bandung"
+    assert any("REVIEW_REQUIRED" in s for s in saran)
+    assert any("CV_PATH" in s for s in saran)

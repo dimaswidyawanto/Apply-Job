@@ -55,14 +55,15 @@ def _bool_setting(name: str, default: bool = False) -> bool:
 # Minimal satu halaman supaya perulangan pencarian tidak kosong.
 _MAX_PAGES = max(1, _int_setting("MAX_PAGES", 3))
 
-# Riset JobStreet (dan Glints): MAKSIMAL 5 halaman untuk setiap kombinasi
-# kata kunci × lokasi. Batas ini tidak bisa dinaikkan lewat .env — nilai 0
-# atau lebih dari 5 tetap dipakai sebagai 5. Boleh diturunkan (mis. 2).
-MAKS_HALAMAN_RISET = 5
+# Riset JobStreet, Glints, dan Indeed: MAKSIMAL 3 halaman untuk setiap
+# kombinasi kata kunci × lokasi (ketentuan master prompt pasal 3.2).
+# Batas ini tidak bisa dinaikkan lewat .env — nilai 0 atau lebih dari 3 tetap
+# dipakai sebagai 3. Boleh diturunkan (mis. 2).
+MAKS_HALAMAN_RISET = 3
 
 
 def batas_halaman_riset(nilai) -> int:
-    """Halaman riset per kombinasi kata kunci × lokasi: 1 sampai 5."""
+    """Halaman riset per kombinasi kata kunci × lokasi: 1 sampai 3."""
     try:
         angka = int(nilai)
     except (TypeError, ValueError):
@@ -97,7 +98,9 @@ class Config:
 
     # Ikut sertakan lowongan yang sepenuhnya remote.
     allow_remote: bool = _bool_setting("ALLOW_REMOTE", False)
-    min_salary: int = _int_setting("MIN_SALARY", 0)
+    # Batas bawah gaji (master prompt pasal 6.2). Lowongan TANPA info
+    # gaji tetap boleh dilamar; isi 0 untuk mematikan batas ini.
+    min_salary: int = _int_setting("MIN_SALARY", 4_500_000)
     max_experience: int = _int_setting("MAX_EXPERIENCE_YEARS", 5)
     exclude_keywords: list[str] = field(default_factory=lambda: _list_setting(
         "EXCLUDE_KEYWORDS",
@@ -127,7 +130,15 @@ class Config:
 
     # JobStreet: lamar hanya lowongan yang kartunya menampilkan logo
     # perusahaan. Bawaan false agar perilaku lama tidak berubah.
-    require_company_logo: bool = _bool_setting("REQUIRE_COMPANY_LOGO", False)
+    # Wajib logo/gambar perusahaan untuk JobStreet & Glints (pasal 6.1).
+    # Indeed dikecualikan karena kartunya tidak memuat logo.
+    require_company_logo: bool = _bool_setting("REQUIRE_COMPANY_LOGO", True)
+    # Berkas CV untuk mesin skor kecocokan (pasal 6.3). Mendukung .pdf (butuh
+    # pypdf), .docx, .txt, dan .md.
+    cv_path: str = os.getenv("CV_PATH", "").strip()
+    # Skor minimum 0-100 agar lowongan boleh masuk antrean apply (pasal 7.2).
+    # 0 = tanpa batas skor; syarat wajib tetap berlaku apa pun nilainya.
+    min_skor_cv: int = _int_setting("MIN_SKOR_CV", 0)
     # Situs yang dijalankan oleh "Lamar Otomatis.bat" (urut: JobStreet, Glints,
     # Indeed). Ubah jadi mis. "jobstreet,indeed" bila satu situs dilewati.
     situs_aktif: str = ",".join(

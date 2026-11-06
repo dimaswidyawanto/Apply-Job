@@ -120,8 +120,8 @@ def test_rincian_skor_ditampilkan_untuk_glints(capsys):
     assert keluaran.count("│") >= 10
 
 
-def test_kartu_tanpa_logo_tetap_dilamar(monkeypatch, capsys):
-    """Logo bukan syarat: semua kartu tanpa gambar tetap diproses."""
+def test_kartu_tanpa_logo_dilewati_di_glints(monkeypatch, capsys):
+    """Logo wajib di JobStreet & Glints (pasal 6.1 master prompt)."""
     from config import config as cfg
 
     monkeypatch.setattr(cfg, "require_company_logo", True)
@@ -167,6 +167,7 @@ def test_kartu_tanpa_logo_tetap_dilamar(monkeypatch, capsys):
 
     laporan = glints_module.jalankan_glints()
 
-    assert laporan["dilamar"] == 1
+    assert laporan["dilamar"] == 0
+    assert laporan["dilewati"] == 1
     keluaran = " ".join(capsys.readouterr().out.lower().split())
-    assert "terbaca tanpa logo" not in keluaran
+    assert "logo" in keluaran
