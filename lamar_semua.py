@@ -254,6 +254,15 @@ def jalankan(
     except Exception as exc:
         console.print(f"[yellow]Laporan harian gagal dikirim: {exc}[/]")
 
+    # Simpan laporan harian ke reports/ (evaluasi berkala tanpa perlu diingat).
+    try:
+        import laporan as laporan_modul
+
+        berkas = laporan_modul.simpan()
+        console.print(f"[dim]Laporan harian disimpan: {berkas}[/]")
+    except Exception as exc:
+        console.print(f"[yellow]Laporan harian tidak tersimpan: {exc}[/]")
+
     return hasil
 
 

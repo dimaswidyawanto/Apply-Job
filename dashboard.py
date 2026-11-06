@@ -5,8 +5,12 @@ Server HTTP kecil memakai pustaka standar — tanpa dependensi baru:
 
 - `GET /`            halaman yang menyegarkan diri setiap 2 detik,
 - `GET /api/status`  JSON statistik, antrean, log, dan status kendali,
+- `GET /api/lowongan?job_id=`  detail satu lowongan + riwayatnya,
+- `GET /api/riwayat?limit=`     riwayat lamaran terakhir,
 - `POST /api/aksi`   kontrol yang benar-benar bekerja:
-  `start`, `pause`, `lanjut`, `stop`, `clear`, `retry`, `hapus-log`.
+  `start`, `pause`, `lanjut`, `stop`, `clear`, `retry`, `hapus-log`,
+- `POST /api/konfigurasi`  ubah `.env` dengan validasi (MIN_SALARY,
+  MAX_APPLY_PER_DAY, MAX_AGE_DAYS, LOCATIONS, PRIORITAS_*).
 
 `start` menjalankan sesi lamar otomatis di proses terpisah
 (`cli.py lamar --tanpa-perbarui`), `pause`/`lanjut`/`stop` menulis berkas
@@ -32,6 +36,8 @@ import log_aktivitas
 from database import db
 
 PORT_BAKU = 8765
+# Berkas .env yang diubah lewat dashboard (tes bisa menggantinya).
+PATH_ENV = Path(__file__).resolve().parent / ".env"
 _ANAK: dict = {"proses": None, "mulai": 0.0}
 
 
@@ -61,6 +67,114 @@ def status() -> dict:
         },
         "ringkasan": data,
         "log": log_aktivitas.baris_terakhir(40),
+    }
+
+
+def detail_lowongan(job_id: str) -> dict:
+    """Detail satu lowongan + riwayat lamarannya (pasal 11.5)."""
+    job_id = str(job_id or "").strip()
+    if not job_id:
+        return {"ok": False, "pesan": "job_id kosong"}
+
+    job = db.get_job(job_id)
+    if not job:
+        return {"ok": False, "pesan": f"Lowongan {job_id} tidak ada di database"}
+
+    with db._get_conn() as conn:  # noqa: SLF001 (pembacaan langsung, aman)
+        riwayat = [
+            dict(baris)
+            for baris in conn.execute(
+                """
+                SELECT applied_at, status, notes
+                  FROM applications
+                 WHERE job_id = ?
+                 ORDER BY applied_at DESC, id DESC
+                """,
+                (job_id,),
+            )
+        ]
+
+    return {
+        "ok": True,
+        "lowongan": job,
+        "riwayat": riwayat,
+        "sudah_dilamar": db.is_already_applied(job_id),
+    }
+
+
+def riwayat(batas: int = 30) -> dict:
+    """Riwayat lamaran terakhir untuk ditampilkan di dashboard."""
+    batas = max(1, min(200, int(batas or 30)))
+    return {"ok": True, "riwayat": db.get_recent_applications(batas)}
+
+
+# Nilai .env yang boleh diubah dari dashboard, beserta pemeriksanya.
+_KONFIG_DIIZINKAN = {
+    "MIN_SALARY": ("angka", 0, 1_000_000_000),
+    "MAX_APPLY_PER_DAY": ("angka", 0, 1000),
+    "MAX_AGE_DAYS": ("angka", 0, 365),
+    "LOCATIONS": ("daftar", 1, 20),
+    "PRIORITAS_LOKASI": ("daftar", 0, 20),
+    "PRIORITAS_KATEGORI": ("daftar", 0, 30),
+}
+
+
+def _periksa_nilai(kunci: str, nilai) -> str:
+    """Kembalikan nilai yang sudah dibersihkan; lempar ValueError bila salah."""
+    jenis, minimal, maksimal = _KONFIG_DIIZINKAN[kunci]
+
+    if jenis == "angka":
+        teks = str(nilai).strip().replace(".", "").replace(",", "")
+        if not teks.isdigit():
+            raise ValueError(f"{kunci} harus angka, bukan {nilai!r}")
+        angka = int(teks)
+        if not minimal <= angka <= maksimal:
+            raise ValueError(f"{kunci} harus {minimal}-{maksimal}, bukan {angka}")
+        return str(angka)
+
+    if isinstance(nilai, (list, tuple)):
+        butir = [str(b).strip() for b in nilai]
+    else:
+        butir = [b.strip() for b in str(nilai).split(",")]
+
+    butir = [b for b in butir if b]
+    if not (minimal <= len(butir) <= maksimal):
+        raise ValueError(
+            f"{kunci} harus {minimal}-{maksimal} butir, bukan {len(butir)}"
+        )
+    if any(len(b) > 40 for b in butir):
+        raise ValueError(f"{kunci} berisi nama yang terlalu panjang")
+    return ",".join(butir)
+
+
+def simpan_konfigurasi(pasangan: dict) -> dict:
+    """Ubah nilai .env dari dashboard (dengan validasi + cadangan .env.bak)."""
+    import env_tools
+
+    if not isinstance(pasangan, dict) or not pasangan:
+        return {"ok": False, "pesan": "Tidak ada nilai yang dikirim"}
+
+    bersih = {}
+    try:
+        for kunci, nilai in pasangan.items():
+            nama = str(kunci or "").strip().upper()
+            if nama not in _KONFIG_DIIZINKAN:
+                raise ValueError(f"{kunci} tidak boleh diubah dari dashboard")
+            bersih[nama] = _periksa_nilai(nama, nilai)
+    except ValueError as salah:
+        return {"ok": False, "pesan": str(salah)}
+
+    hasil = env_tools.atur_nilai(PATH_ENV, bersih)
+    log_aktivitas.catat(
+        "Konfigurasi diubah dari dashboard: "
+        + ", ".join(f"{k}={v}" for k, v in bersih.items())
+    )
+
+    return {
+        "ok": True,
+        "pesan": "Konfigurasi disimpan. Mulai sesi baru agar berlaku.",
+        "perubahan": hasil.get("perubahan") or [],
+        "perlu_restart": True,
     }
 
 
@@ -139,6 +253,8 @@ table{width:100%;border-collapse:collapse;font-size:13px}
 td,th{padding:3px 4px;text-align:left;border-bottom:1px solid #334155}
 pre{white-space:pre-wrap;font-size:11.5px;line-height:1.45;margin:0;color:#cbd5e1;max-height:260px;overflow:auto}
 #pesan{font-size:12.5px;color:#fbbf24}
+input{background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:6px;padding:6px 8px;font-size:13px;width:100%;box-sizing:border-box;margin-bottom:6px}
+label{font-size:12px;color:#94a3b8;display:block;margin-bottom:2px}
 </style></head><body>
 <header>
   <h1>Lamar Otomatis — Dashboard</h1>
@@ -157,6 +273,19 @@ pre{white-space:pre-wrap;font-size:11.5px;line-height:1.45;margin:0;color:#cbd5e
   <section><h2>Per lokasi</h2><table id="lokasi"></table></section>
   <section><h2>Per kategori</h2><table id="kategori"></table></section>
   <section><h2>Aktivitas</h2><pre id="log"></pre></section>
+  <section><h2>Riwayat lamaran</h2><table id="riwayat"></table></section>
+  <section><h2>Detail lowongan</h2>
+    <input id="jid" placeholder="job_id, mis. 88112233">
+    <button onclick="cariDetail()">Lihat detail</button>
+    <pre id="detail">(belum ada)</pre></section>
+  <section><h2>Konfigurasi</h2>
+    <label>MIN_SALARY</label><input id="k-min" placeholder="4500000">
+    <label>MAX_APPLY_PER_DAY</label><input id="k-max" placeholder="50">
+    <label>MAX_AGE_DAYS</label><input id="k-age" placeholder="30">
+    <label>LOCATIONS (pisah koma)</label><input id="k-lok" placeholder="Bandung,Jakarta">
+    <label>PRIORITAS_LOKASI (pisah koma)</label><input id="k-pri" placeholder="Bandung,Cikarang">
+    <button class="w" onclick="simpanKonf()">Simpan konfigurasi</button>
+    <pre id="konf-pesan"></pre></section>
 </main>
 <script>
 function baris(id,obj){document.getElementById(id).innerHTML=Object.entries(obj)
@@ -184,7 +313,42 @@ async function aksi(nama,konfirmasi){
  document.getElementById('pesan').textContent=d.pesan;
  segarkan();
 }
-segarkan();setInterval(segarkan,2000);
+async function muatRiwayat(){
+ try{const r=await fetch('api/riwayat?limit=10');const d=await r.json();
+  tabel('riwayat',d.riwayat||[],['applied_at','title','company','status']);
+ }catch(e){}}
+async function cariDetail(){
+ const id=document.getElementById('jid').value.trim();
+ if(!id)return;
+ const r=await fetch('api/lowongan?job_id='+encodeURIComponent(id));
+ const d=await r.json();
+ const el=document.getElementById('detail');
+ if(!d.ok){el.textContent=d.pesan||'Tidak ditemukan';return}
+ const j=d.lowongan;
+ el.textContent=[j.title,j.company,j.location,j.salary,
+  'Status: '+j.status_antrean,'Alasan: '+(j.alasan||'-'),
+  'Skor: '+(j.skor??'-'),'Logo: '+(j.has_logo??'-'),
+  'URL: '+(j.url||'-'),'Dilamar: '+(d.sudah_dilamar?'ya':'belum'),
+  'Riwayat: '+(d.riwayat.length?d.riwayat.map(x=>x.applied_at+' '+x.status).join('; '):'-')
+ ].filter(x=>x!==undefined).join('\n');
+}
+async function simpanKonf(){
+ const pasangan={};
+ const isi=(id,k)=>{const v=document.getElementById(id).value.trim();
+  if(v)pasangan[k]=v};
+ isi('k-min','MIN_SALARY');isi('k-max','MAX_APPLY_PER_DAY');
+ isi('k-age','MAX_AGE_DAYS');isi('k-lok','LOCATIONS');
+ isi('k-pri','PRIORITAS_LOKASI');
+ if(!Object.keys(pasangan).length){
+  document.getElementById('konf-pesan').textContent='Isi minimal satu nilai.';
+  return}
+ const r=await fetch('api/konfigurasi',{method:'POST',
+  headers:{'Content-Type':'application/json'},
+  body:JSON.stringify({pasangan})});
+ const d=await r.json();
+ document.getElementById('konf-pesan').textContent=d.pesan||'';
+}
+segarkan();muatRiwayat();setInterval(segarkan,2000);setInterval(muatRiwayat,10000);
 </script></body></html>
 """
 
@@ -222,10 +386,44 @@ class PenanganDash(BaseHTTPRequestHandler):
                 self._json({"galat": str(exc)}, 500)
             return
 
+        if alamat.path in ("/api/lowongan", "/api/riwayat"):
+            kueri = parse_qs(alamat.query)
+            try:
+                if alamat.path == "/api/riwayat":
+                    batas = int((kueri.get("limit") or ["30"])[0])
+                    self._json(riwayat(batas))
+                else:
+                    job_id = (kueri.get("job_id") or [""])[0]
+                    hasil = detail_lowongan(job_id)
+                    self._json(hasil, 200 if hasil.get("ok") else 404)
+            except Exception as exc:
+                self._json({"galat": str(exc)}, 500)
+            return
+
         self._json({"galat": "tidak ditemukan"}, 404)
+
+    def _baca_json(self) -> dict:
+        panjang = int(self.headers.get("Content-Length") or 0)
+        if panjang <= 0:
+            return {}
+        mentah = self.rfile.read(panjang)
+        try:
+            data = json.loads(mentah.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return {}
+        return data if isinstance(data, dict) else {}
 
     def do_POST(self) -> None:  # noqa: N802
         alamat = urlparse(self.path)
+
+        if alamat.path == "/api/konfigurasi":
+            try:
+                hasil = simpan_konfigurasi(self._baca_json().get("pasangan") or {})
+            except Exception as exc:
+                self._json({"ok": False, "pesan": str(exc)}, 500)
+                return
+            self._json(hasil, 200 if hasil.get("ok") else 400)
+            return
 
         if alamat.path != "/api/aksi":
             self._json({"galat": "tidak ditemukan"}, 404)

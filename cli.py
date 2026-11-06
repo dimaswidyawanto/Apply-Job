@@ -255,7 +255,47 @@ def tampilkan_antrean(batas: int = 20):
     console.print(table)
 
 
-def tampilkan_laporan():
+def tampilkan_backup(daftar: bool = False, pulihkan: str = ""):
+    """Backup / pulihkan database lamaran (master prompt pasal 12)."""
+    import backup
+
+    if pulihkan:
+        try:
+            sasaran = backup.pulihkan(pulihkan)
+        except (FileNotFoundError, ValueError) as salah:
+            console.print(f"[red]Gagal memulihkan:[/] {salah}")
+            return
+        console.print(f"[green]Database dipulihkan ke:[/] {sasaran}")
+        console.print("[dim]Database sebelumnya disimpan sebagai .db.bak[/]")
+        return
+
+    if daftar:
+        isi = backup.daftar()
+        if not isi:
+            console.print("[dim]Belum ada backup.[/]")
+            return
+        table = Table(title=f"Backup tersedia ({len(isi)})")
+        table.add_column("Nama", style="cyan")
+        table.add_column("Waktu")
+        table.add_column("Ukuran", justify="right")
+        for baris in isi:
+            table.add_row(
+                baris["nama"], baris["waktu"], f"{baris['ukuran'] / 1024:.0f} KB"
+            )
+        console.print(table)
+        return
+
+    try:
+        berkas = backup.buat()
+    except FileNotFoundError as salah:
+        console.print(f"[red]Gagal backup:[/] {salah}")
+        return
+
+    ukuran = Path(berkas).stat().st_size / 1024
+    console.print(f"[green]Backup dibuat:[/] {berkas} ({ukuran:.0f} KB)")
+
+
+def tampilkan_laporan(simpan: bool = False):
     """Laporan kinerja + saran (master prompt pasal 12.4)."""
     import laporan
 
@@ -298,6 +338,10 @@ def tampilkan_laporan():
         console.print("[bold cyan]Saran:[/]")
         for satu in saran:
             console.print(f"  - {satu}")
+
+    if simpan:
+        berkas = laporan.simpan(data=data)
+        console.print(f"[green]Laporan disimpan:[/] {berkas}")
 
 
 def buka_dashboard(port: int = 0, tanpa_browser: bool = False):
@@ -780,6 +824,14 @@ def show_config():
         ", ".join(config.locations) if config.locations else "(semua)",
     )
     table.add_row(
+        "Prioritas lokasi",
+        ", ".join(getattr(config, "prioritas_lokasi", []) or []) or "(tanpa)",
+    )
+    table.add_row(
+        "Prioritas kategori",
+        ", ".join(getattr(config, "prioritas_kategori", []) or []) or "(tanpa)",
+    )
+    table.add_row(
         "Filter judul minat",
         (
             f"Aktif ({len(config.title_keywords)} kata kunci)"
@@ -1213,7 +1265,24 @@ if __name__ == "__main__":
         "--tanpa-browser", action="store_true", help="Jangan buka browser"
     )
 
-    subparsers.add_parser("laporan", help="Laporan kinerja + saran perbaikan")
+    lapor_parser = subparsers.add_parser(
+        "laporan", help="Laporan kinerja + saran perbaikan"
+    )
+    lapor_parser.add_argument(
+        "--simpan",
+        action="store_true",
+        help="Simpan laporan harian ke folder reports/",
+    )
+
+    backup_parser = subparsers.add_parser(
+        "backup", help="Backup atau pulihkan database lamaran"
+    )
+    backup_parser.add_argument(
+        "--daftar", action="store_true", help="Tampilkan backup yang ada"
+    )
+    backup_parser.add_argument(
+        "--pulihkan", default="", help="Nama berkas backup yang dipulihkan"
+    )
 
     antre_parser = subparsers.add_parser(
         "antrean", help="Lihat antrean: status dan lowongan yang perlu ditinjau"
@@ -1397,7 +1466,9 @@ if __name__ == "__main__":
     elif args.command == "dashboard":
         buka_dashboard(args.port, args.tanpa_browser)
     elif args.command == "laporan":
-        tampilkan_laporan()
+        tampilkan_laporan(args.simpan)
+    elif args.command == "backup":
+        tampilkan_backup(args.daftar, args.pulihkan)
     elif args.command == "antrean":
         tampilkan_antrean(args.limit)
     elif args.command == "lamar":

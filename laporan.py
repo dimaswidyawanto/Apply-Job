@@ -11,7 +11,9 @@ Menghitung dari database yang sudah ada — bukan data simulasi:
 Dipakai perintah `laporan` dan dashboard.
 """
 
-from typing import Dict, List
+from datetime import date
+from pathlib import Path
+from typing import Dict, List, Optional
 
 import kuota
 from config import config
@@ -41,6 +43,85 @@ def ringkasan() -> Dict:
             round(100 * terkirim / percobaan, 1) if percobaan else 0.0
         ),
     }
+
+
+FOLDER_LAPORAN = Path(__file__).resolve().parent / "reports"
+
+
+def teks_markdown(data: Optional[Dict] = None) -> str:
+    """Laporan dalam bentuk teks Markdown (untuk berkas harian)."""
+    data = data or ringkasan()
+    hari = date.today().isoformat()
+
+    baris = [
+        f"# Laporan Lamar Otomatis — {hari}",
+        "",
+        "## Angka utama",
+        "",
+        f"- Lowongan tersimpan: {data['lowongan_tersimpan']}",
+        f"- Lamaran terkirim: {data['lamaran_terkirim']}",
+        f"- Lamaran hari ini (WIB): {data['lamaran_hari_ini']}",
+        "- Sisa kuota: "
+        + ("tanpa batas" if data["sisa_kuota"] is None else str(data["sisa_kuota"])),
+        f"- Tingkat berhasil: {data['tingkat_berhasil']}%",
+        "",
+        "## Status antrean",
+        "",
+        "| Status | Jumlah |",
+        "|---|---|",
+    ]
+    baris += [
+        f"| {nama} | {jumlah} |"
+        for nama, jumlah in data["status_antrean"].items()
+        if jumlah
+    ] or ["| (kosong) | 0 |"]
+
+    if data["per_lokasi"]:
+        baris += [
+            "",
+            "## Per lokasi",
+            "",
+            "| Lokasi | Lowongan | Dilamar |",
+            "|---|---|---|",
+        ]
+        baris += [
+            f"| {i['lokasi']} | {i['jumlah']} | {i['dilamar']} |"
+            for i in data["per_lokasi"]
+        ]
+
+    if data["alasan_tersering"]:
+        baris += [
+            "",
+            "## Alasan paling sering",
+            "",
+            "| Alasan | Jumlah |",
+            "|---|---|",
+        ]
+        baris += [
+            f"| {i['alasan']} | {i['jumlah']} |" for i in data["alasan_tersering"]
+        ]
+
+    saran_saran = saran(data)
+    if saran_saran:
+        baris += ["", "## Saran", ""]
+        baris += [f"- {satu}" for satu in saran_saran]
+
+    return "\n".join(baris) + "\n"
+
+
+def simpan(folder: Optional[str | Path] = None,
+           data: Optional[Dict] = None) -> Path:
+    """Simpan laporan harian ke `reports/laporan-YYYY-MM-DD.md`.
+
+    Berkas hari yang sama ditimpa, jadi menjalankan beberapa kali dalam sehari
+    tidak menumpuk berkas.
+    """
+    tujuan = Path(folder) if folder else FOLDER_LAPORAN
+    tujuan.mkdir(parents=True, exist_ok=True)
+
+    berkas = tujuan / f"laporan-{date.today().isoformat()}.md"
+    berkas.write_text(teks_markdown(data), encoding="utf-8")
+    return berkas
 
 
 def saran(data: Dict) -> List[str]:

@@ -176,11 +176,28 @@ dan semua fase dikerjakan berurutan.
 | 14 | status kirim tidak pasti | `review_required`, bukan "berhasil" |
 | 15 | klik dua kali | satu lamaran saja |
 
+**Pelengkap setelah Fase 4 (revisi ini):**
+- **Prioritas lokasi × kategori** (`PRIORITAS_LOKASI`, `PRIORITAS_KATEGORI`):
+  mengatur urutan saat skor sama; tidak pernah menolak lowongan.
+- **Dashboard lengkap**: detail satu lowongan + riwayat lamaran, tabel riwayat,
+  dan edit konfigurasi dengan validasi (`.env` dicadangkan ke `.env.bak`,
+  berlaku pada sesi berikutnya).
+- **Backup & restore** database (`backup.py`, `jalankan.bat backup`): memakai
+  API backup SQLite (aman saat sesi berjalan), `integrity_check` sebelum
+  pemulihan, database lama disimpan `.db.bak`, 20 backup terbaru disimpan.
+- **Laporan berkala**: `laporan.teks_markdown()` + `laporan.simpan()` menulis
+  `reports/laporan-YYYY-MM-DD.md`, otomatis setelah sesi `lamar` selesai dan
+  bisa dijadwalkan lewat Task Scheduler (`jalankan.bat laporan --simpan`).
+
 **Batas yang perlu diketahui (jujur):**
 - Uji browser nyata (Selenium) tetap hanya bisa di PC Anda; semua tes di sini
   memakai bot/driver palsu.
 - Pelacakan "kata kunci mana yang menghasilkan lamaran" belum disimpan per
   lowongan, jadi saran pembelajaran masih berbasis lokasi/kategori/alasan.
+- Laporan berkala berbentuk berkas harian + panduan Task Scheduler; tidak ada
+  penjadwal bawaan di dalam aplikasi.
+- Uji end-to-end di browser sungguhan (JobStreet/Glints/Indeed) tetap harus
+  dijalankan di PC pengguna.
 - Klaim worker memakai status di database + kunci sesi tunggal, bukan antrean
   multi-mesin.
 

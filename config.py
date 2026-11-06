@@ -75,6 +75,17 @@ def batas_halaman_riset(nilai) -> int:
     return min(MAKS_HALAMAN_RISET, angka)
 
 
+def _unik_urutan(daftar: list[str]) -> list[str]:
+    """Buang duplikat (tanpa peduli huruf besar/kecil) tanpa ubah urutan."""
+    hasil, terlihat = [], set()
+    for item in daftar:
+        kunci = str(item or "").strip().lower()
+        if kunci and kunci not in terlihat:
+            terlihat.add(kunci)
+            hasil.append(str(item).strip())
+    return hasil
+
+
 @dataclass
 class Config:
     # Catatan: alat ini TIDAK pernah meminta/menyimpan email & password
@@ -152,6 +163,20 @@ class Config:
 
     # Hanya lamar lowongan yang judulnya cocok dengan minat.
     require_keyword_match: bool = _bool_setting("REQUIRE_KEYWORD_MATCH", True)
+    # Prioritas lokasi (master prompt pasal 3): urutan kota yang diinginkan,
+    # dipisah koma. Hanya memengaruhi URUTAN lamaran, bukan menyaring —
+    # lokasi di luar daftar tetap boleh dilamar bila lolos aturan lain.
+    # Kosong = pakai urutan LOCATIONS.
+    prioritas_lokasi: list[str] = field(default_factory=lambda: _list_setting(
+        "PRIORITAS_LOKASI", ""
+    ))
+
+    # Prioritas kategori pekerjaan (urutan kata kunci yang paling diinginkan).
+    # Kosong = tanpa prioritas kategori.
+    prioritas_kategori: list[str] = field(default_factory=lambda: _list_setting(
+        "PRIORITAS_KATEGORI", ""
+    ))
+
     # Kata kunci untuk mencocokkan judul. Kosong = pakai KEYWORDS.
     # Daftar bawaan disusun dari pengalaman CV (PPIC/inventory, gudang,
     # material/pengadaan, supply chain) dan lebih lebar dari KEYWORDS karena
@@ -328,6 +353,16 @@ class Config:
 
         if not self.location and self.locations:
             self.location = self.locations[0]
+
+        # PRIORITAS_LOKASI kosong -> pakai urutan LOCATIONS (lokasi pertama
+        # paling diprioritaskan). Duplikat dibuang tanpa mengubah urutan.
+        lokasi_prioritas = [l.strip() for l in self.prioritas_lokasi if l.strip()]
+        if not lokasi_prioritas:
+            lokasi_prioritas = list(self.locations)
+        self.prioritas_lokasi = _unik_urutan(lokasi_prioritas)
+        self.prioritas_kategori = _unik_urutan(
+            [k.strip() for k in self.prioritas_kategori if k.strip()]
+        )
 
         # TITLE_KEYWORDS kosong -> pakai daftar kata kunci pencarian.
         self.title_keywords = [

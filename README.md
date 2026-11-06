@@ -960,6 +960,13 @@ benar-benar bekerja:
 | **Retry failed** | lowongan berstatus `failed` kembali ke antrean |
 | **Clear queue** | menghapus lowongan yang **belum pernah** dilamar (pakai konfirmasi) |
 
+Selain itu dashboard menampilkan **riwayat lamaran terakhir**, bisa membuka
+**detail satu lowongan** (masukkan `job_id` — status antrean, alasan ditolak,
+skor, logo, riwayat pengiriman), dan mengubah **konfigurasi** tertentu
+(`MIN_SALARY`, `MAX_APPLY_PER_DAY`, `MAX_AGE_DAYS`, `LOCATIONS`,
+`PRIORITAS_LOKASI`) langsung dari browser. Perubahan divalidasi, `.env`
+dicadangkan ke `.env.bak`, dan berlaku saat sesi baru dimulai.
+
 CV dan skor kecocokan:
 
 ```powershell
@@ -976,6 +983,39 @@ pendidikan 10 · jabatan 10 · lokasi 5) dengan kategori 90/80/70. Batas
 bermutu rendah; syarat wajib (logo, gaji, judul, blacklist) tetap berlaku.
 
 Tanpa CV, peringkat memakai skor lama — tidak ada nilai karangan.
+
+### Prioritas lokasi × kategori
+
+```powershell
+.\jalankan.bat set-env PRIORITAS_LOKASI=Bandung,Cikarang,Jakarta
+.\jalankan.bat set-env PRIORITAS_KATEGORI=inventory,ppic,warehouse
+```
+
+Prioritas **hanya mengatur urutan** lamaran saat skor kecocokan sama — tidak
+pernah menolak lowongan. `PRIORITAS_LOKASI` kosong berarti memakai urutan
+`LOCATIONS`. Bisa juga diubah dari dashboard tanpa membuka `.env`.
+
+### Backup & laporan berkala
+
+```powershell
+.\jalankan.bat backup                    # salinan database ke backups\
+.\jalankan.bat backup --daftar           # lihat salinan yang ada
+.\jalankan.bat backup --pulihkan jobstreet_auto-20261106-190000.db
+.\jalankan.bat laporan --simpan          # tulis reports\laporan-YYYY-MM-DD.md
+```
+
+Backup memakai API backup SQLite, jadi aman dijalankan saat sesi berjalan
+(termasuk mode WAL). Sebelum dipulihkan, berkas backup diperiksa dulu
+(`PRAGMA integrity_check`) dan database lama disimpan sebagai `.db.bak`.
+Dua puluh backup terbaru disimpan; sisanya dihapus otomatis.
+
+Laporan harian juga tersimpan sendiri setiap kali sesi `lamar` selesai. Untuk
+laporan otomatis tiap hari tanpa membuka aplikasi, tambahkan Task Scheduler
+Windows yang menjalankan:
+
+```powershell
+C:\Dimas\Lamar otomatis Jobstreet dan Glints\jalankan.bat laporan --simpan
+```
 
 Laporan & antrean:
 
