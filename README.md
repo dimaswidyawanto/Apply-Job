@@ -234,8 +234,8 @@ python cli.py run --manual
 # Hanya lowongan 3 hari terakhir, 3 halaman per kata kunci (mode lama)
 python cli.py run --auto --max-age-days 3 --max-pages 5
 
-# Riset 3 halaman per kombinasi kata kunci x lokasi (bawaan) atau 2 halaman
-python cli.py run --auto --riset-pages 5
+# Riset 3 halaman per kombinasi kata kunci x lokasi (bawaan) atau lebih sedikit
+python cli.py run --auto --riset-pages 3
 python cli.py run --auto --riset-pages 2
 
 # Lokasi lain tanpa mengubah .env
