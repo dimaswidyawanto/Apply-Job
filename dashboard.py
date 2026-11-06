@@ -282,6 +282,8 @@ label{font-size:12px;color:#94a3b8;display:block;margin-bottom:2px}
   <section><h2>Status antrean</h2><div id="antrean"></div></section>
   <section><h2>Per lokasi</h2><table id="lokasi"></table></section>
   <section><h2>Per kategori</h2><table id="kategori"></table></section>
+  <section><h2>Per kata kunci</h2><table id="katakunci"></table></section>
+  <section><h2>Per sumber</h2><table id="sumber"></table></section>
   <section><h2>Aktivitas</h2><pre id="log"></pre></section>
   <section><h2>Riwayat lamaran</h2><table id="riwayat"></table></section>
   <section><h2>Detail lowongan</h2>
@@ -315,6 +317,8 @@ async function segarkan(){
   baris('antrean',g.status_antrean);
   tabel('lokasi',g.per_lokasi,['lokasi','jumlah','dilamar']);
   tabel('kategori',g.per_kategori,['kategori','jumlah','dilamar']);
+  tabel('katakunci',g.per_kata_kunci||[],['kata_kunci','jumlah','dilamar']);
+  tabel('sumber',g.per_sumber||[],['sumber','jumlah','dilamar']);
   document.getElementById('log').textContent=d.log.join(NL)||'(belum ada aktivitas)';
   isiKonfigurasi(d.konfigurasi);
  }catch(e){document.getElementById('pesan').textContent='Gagal memuat: '+e}

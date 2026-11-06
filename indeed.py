@@ -815,6 +815,7 @@ def kumpulkan_lowongan(bot: IndeedBot, kata_kunci: List[str],
                     duplikat += 1
                     continue
                 terlihat.add(job["job_id"])
+                job.setdefault("kata_kunci", kata)
                 lowongan.append(job)
                 baru += 1
 

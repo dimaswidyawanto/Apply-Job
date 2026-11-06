@@ -63,6 +63,21 @@ def _nilai_logo(nilai) -> int | None:
     return 1 if nilai else 0
 
 
+def sumber_dari_url(url: str) -> str:
+    """Nama situs dari URL (jobstreet / glints / indeed / lainnya)."""
+    host = str(url or "").strip().lower().split("://", 1)[-1]
+    host = host.split("/", 1)[0].split(":", 1)[0]
+    if host.startswith("www."):
+        host = host[4:]
+
+    for nama in ("jobstreet", "glints", "indeed", "linkedin", "kalibrr",
+                 "jobsdb", "karir"):
+        if nama in host:
+            return nama
+
+    return host or "lainnya"
+
+
 class Database:
     def __init__(self, db_path: str | None = None):
         # Path absolut supaya database tidak "hilang" ketika program
@@ -202,11 +217,31 @@ class Database:
             ("dikumpulkan_at", "TIMESTAMP"),
             ("diperbarui_at", "TIMESTAMP"),
             ("skor", "REAL"),
+            # Asal lowongan: situs + kata kunci yang menemukannya. Dipakai
+            # evaluasi berkala (kata kunci & sumber mana yang produktif).
+            ("sumber", "TEXT"),
+            ("kata_kunci", "TEXT"),
         ):
             if column not in job_columns:
                 conn.execute(
                     f"ALTER TABLE jobs ADD COLUMN {column} {definition}"
                 )
+
+        # Isi `sumber` untuk lowongan lama (dibaca dari URL masing-masing),
+        # supaya laporan per sumber tidak kosong setelah pembaruan.
+        try:
+            kosong = conn.execute(
+                "SELECT id, url FROM jobs "
+                "WHERE sumber IS NULL OR TRIM(sumber) = ''"
+            ).fetchall()
+            for baris in kosong:
+                conn.execute(
+                    "UPDATE jobs SET sumber = ? WHERE id = ?",
+                    (sumber_dari_url(baris["url"]), baris["id"]),
+                )
+        except Exception:
+            # Database sangat lama/tanpa tabel jobs: tidak perlu menggagalkan.
+            pass
 
     # ------------------------------------------------------------------
     # Ingatan jawaban formulir
@@ -308,9 +343,11 @@ class Database:
                         job_id, title, company, location,
                         salary, description, url, date_posted,
                         has_logo, logo_src,
-                        status_antrean, alasan, posted_at, dikumpulkan_at
+                        status_antrean, alasan, posted_at, dikumpulkan_at,
+                        sumber, kata_kunci
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP,
+                            ?, ?)
                     """,
                     (
                         job_id,
@@ -326,6 +363,8 @@ class Database:
                         str(job_data.get("status_antrean") or "found"),
                         str(job_data.get("alasan") or ""),
                         str(job_data.get("date_posted") or ""),
+                        sumber_dari_url(url),
+                        str(job_data.get("kata_kunci") or "").strip(),
                     ),
                 )
                 return True
@@ -368,6 +407,45 @@ class Database:
                   FROM jobs
                  GROUP BY lokasi
                  ORDER BY jumlah DESC
+                 LIMIT ?
+                """,
+                (max(1, batas),),
+            ).fetchall()
+
+        return [dict(item) for item in baris]
+
+    def statistik_sumber(self, batas: int = 10) -> list[dict]:
+        """Jumlah lowongan & lamaran per situs (master prompt pasal 12.4)."""
+        with self._get_conn() as conn:
+            baris = conn.execute(
+                """
+                SELECT COALESCE(NULLIF(TRIM(sumber), ''), 'lainnya') AS sumber,
+                       COUNT(*) AS jumlah,
+                       SUM(CASE WHEN status_antrean = 'applied' THEN 1 ELSE 0 END)
+                           AS dilamar
+                  FROM jobs
+                 GROUP BY sumber
+                 ORDER BY jumlah DESC
+                 LIMIT ?
+                """,
+                (max(1, batas),),
+            ).fetchall()
+
+        return [dict(item) for item in baris]
+
+    def statistik_kata_kunci(self, batas: int = 15) -> list[dict]:
+        """Kata kunci mana yang menghasilkan lowongan & lamaran terbanyak."""
+        with self._get_conn() as conn:
+            baris = conn.execute(
+                """
+                SELECT COALESCE(NULLIF(TRIM(kata_kunci), ''), '(tidak dicatat)')
+                           AS kata_kunci,
+                       COUNT(*) AS jumlah,
+                       SUM(CASE WHEN status_antrean = 'applied' THEN 1 ELSE 0 END)
+                           AS dilamar
+                  FROM jobs
+                 GROUP BY kata_kunci
+                 ORDER BY dilamar DESC, jumlah DESC
                  LIMIT ?
                 """,
                 (max(1, batas),),

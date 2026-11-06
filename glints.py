@@ -1575,6 +1575,7 @@ def kumpulkan_lowongan(bot, kata_kunci, halaman: int) -> List[Dict]:
             if job["job_id"] in terlihat:
                 continue
             terlihat.add(job["job_id"])
+            job.setdefault("kata_kunci", keyword)
             lowongan.append(job)
 
     return dedupe_jobs(lowongan)

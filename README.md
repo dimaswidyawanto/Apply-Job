@@ -1009,6 +1009,13 @@ Backup memakai API backup SQLite, jadi aman dijalankan saat sesi berjalan
 (`PRAGMA integrity_check`) dan database lama disimpan sebagai `.db.bak`.
 Dua puluh backup terbaru disimpan; sisanya dihapus otomatis.
 
+Laporan (`laporan`, dashboard, dan berkas harian) kini juga memuat **per kata
+kunci** dan **per sumber**: setiap lowongan mencatat situs asalnya (dibaca dari
+URL) dan kata kunci yang menemukannya, jadi Anda bisa melihat kata kunci mana
+yang benar-benar menghasilkan lamaran dan mana yang hanya menghasilkan
+lowongan yang lalu ditolak. Sarannya tetap hanya anjuran — tidak ada aturan
+yang diubah otomatis.
+
 Laporan harian juga tersimpan sendiri setiap kali sesi `lamar` selesai. Untuk
 laporan otomatis tiap hari tanpa membuka aplikasi, tambahkan Task Scheduler
 Windows yang menjalankan:

@@ -333,6 +333,28 @@ def tampilkan_laporan(simpan: bool = False):
             )
         console.print(lokasi)
 
+    if data.get("per_kata_kunci"):
+        kk = Table(title="Per kata kunci")
+        kk.add_column("Kata kunci", style="cyan")
+        kk.add_column("Lowongan", justify="right")
+        kk.add_column("Dilamar", justify="right")
+        for item in data["per_kata_kunci"]:
+            kk.add_row(
+                item["kata_kunci"], str(item["jumlah"]), str(item["dilamar"])
+            )
+        console.print(kk)
+
+    if data.get("per_sumber"):
+        sumber = Table(title="Per sumber")
+        sumber.add_column("Sumber", style="cyan")
+        sumber.add_column("Lowongan", justify="right")
+        sumber.add_column("Dilamar", justify="right")
+        for item in data["per_sumber"]:
+            sumber.add_row(
+                item["sumber"], str(item["jumlah"]), str(item["dilamar"])
+            )
+        console.print(sumber)
+
     saran = laporan.saran(data)
     if saran:
         console.print("[bold cyan]Saran:[/]")
