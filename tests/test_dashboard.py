@@ -257,3 +257,70 @@ def test_halaman_memuat_kontrol_baru():
     for bagian in ("api/riwayat", "api/lowongan", "api/konfigurasi",
                    "Simpan konfigurasi", "Detail lowongan"):
         assert bagian in dashboard.HALAMAN
+
+
+# ------------------------------------------------------------ skrip halaman --
+def _skrip() -> str:
+    import re
+
+    return re.search(r"<script>(.*)</script>", dashboard.HALAMAN, re.S).group(1)
+
+
+def _galat_kutip(js: str) -> list:
+    """Cari string JS yang terputus baris (bug yang membuat halaman kosong)."""
+    galat = []
+    kutip = None
+    for nomor, baris in enumerate(js.splitlines(), 1):
+        i = 0
+        while i < len(baris):
+            huruf = baris[i]
+            if kutip:
+                if huruf == "\\":
+                    i += 2
+                    continue
+                if huruf == kutip:
+                    kutip = None
+            elif huruf in "'\"`":
+                kutip = huruf
+            i += 1
+        if kutip in ("'", '"'):
+            galat.append((nomor, baris.strip()))
+            kutip = None
+    return galat
+
+
+def test_skrip_halaman_tidak_punya_string_terputus():
+    galat = _galat_kutip(_skrip())
+
+    assert not galat, f"String JS terputus di baris: {galat}"
+
+
+def test_id_yang_dipakai_skrip_ada_di_halaman():
+    import re
+
+    js = _skrip()
+    dipakai = set(re.findall(r"getElementById\('([^']+)'\)", js))
+    js = js.replace('\\"', '"')
+    for nama in dipakai:
+        assert f'id="{nama}"' in dashboard.HALAMAN, f'tidak ada id="{nama}"'
+
+
+def test_join_baris_memakai_nl():
+    js = _skrip()
+
+    assert "const NL=String.fromCharCode(10);" in dashboard.HALAMAN
+    assert ".join(NL)" in js
+    # String literal berisi escape newline tidak dipakai lagi.
+    assert ".join('\\n')" not in js
+
+
+def test_status_memuat_konfigurasi_untuk_form(siap):
+    data = dashboard.status()
+
+    konf = data["konfigurasi"]
+    assert set(konf) == {
+        "MIN_SALARY", "MAX_APPLY_PER_DAY", "MAX_AGE_DAYS",
+        "LOCATIONS", "PRIORITAS_LOKASI",
+    }
+    assert isinstance(konf["MIN_SALARY"], int)
+    assert isinstance(konf["LOCATIONS"], str)

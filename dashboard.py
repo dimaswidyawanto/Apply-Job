@@ -33,6 +33,7 @@ import kendali
 import kuota
 import laporan
 import log_aktivitas
+from config import config
 from database import db
 
 PORT_BAKU = 8765
@@ -66,6 +67,15 @@ def status() -> dict:
             "mulai": _ANAK.get("mulai") or None,
         },
         "ringkasan": data,
+        "konfigurasi": {
+            "MIN_SALARY": config.min_salary,
+            "MAX_APPLY_PER_DAY": config.max_apply_per_day,
+            "MAX_AGE_DAYS": config.max_age_days,
+            "LOCATIONS": ",".join(config.locations or []),
+            "PRIORITAS_LOKASI": ",".join(
+                getattr(config, "prioritas_lokasi", []) or []
+            ),
+        },
         "log": log_aktivitas.baris_terakhir(40),
     }
 
@@ -279,15 +289,16 @@ label{font-size:12px;color:#94a3b8;display:block;margin-bottom:2px}
     <button onclick="cariDetail()">Lihat detail</button>
     <pre id="detail">(belum ada)</pre></section>
   <section><h2>Konfigurasi</h2>
-    <label>MIN_SALARY</label><input id="k-min" placeholder="4500000">
-    <label>MAX_APPLY_PER_DAY</label><input id="k-max" placeholder="50">
-    <label>MAX_AGE_DAYS</label><input id="k-age" placeholder="30">
-    <label>LOCATIONS (pisah koma)</label><input id="k-lok" placeholder="Bandung,Jakarta">
-    <label>PRIORITAS_LOKASI (pisah koma)</label><input id="k-pri" placeholder="Bandung,Cikarang">
+    <label>MIN_SALARY</label><input id="k-MIN_SALARY" placeholder="4500000">
+    <label>MAX_APPLY_PER_DAY</label><input id="k-MAX_APPLY_PER_DAY" placeholder="50">
+    <label>MAX_AGE_DAYS</label><input id="k-MAX_AGE_DAYS" placeholder="30">
+    <label>LOCATIONS (pisah koma)</label><input id="k-LOCATIONS" placeholder="Bandung,Jakarta">
+    <label>PRIORITAS_LOKASI (pisah koma)</label><input id="k-PRIORITAS_LOKASI" placeholder="Bandung,Cikarang">
     <button class="w" onclick="simpanKonf()">Simpan konfigurasi</button>
     <pre id="konf-pesan"></pre></section>
 </main>
 <script>
+const NL=String.fromCharCode(10);
 function baris(id,obj){document.getElementById(id).innerHTML=Object.entries(obj)
  .map(([k,v])=>`<div class="k"><span>${k}</span><span class="v">${v}</span></div>`).join('')}
 function tabel(id,rows,kolom){const el=document.getElementById(id);
@@ -304,7 +315,8 @@ async function segarkan(){
   baris('antrean',g.status_antrean);
   tabel('lokasi',g.per_lokasi,['lokasi','jumlah','dilamar']);
   tabel('kategori',g.per_kategori,['kategori','jumlah','dilamar']);
-  document.getElementById('log').textContent=d.log.join('\\n')||'(belum ada aktivitas)';
+  document.getElementById('log').textContent=d.log.join(NL)||'(belum ada aktivitas)';
+  isiKonfigurasi(d.konfigurasi);
  }catch(e){document.getElementById('pesan').textContent='Gagal memuat: '+e}
 }
 async function aksi(nama,konfirmasi){
@@ -313,6 +325,12 @@ async function aksi(nama,konfirmasi){
  document.getElementById('pesan').textContent=d.pesan;
  segarkan();
 }
+function isiKonfigurasi(k){
+ Object.entries(k||{}).forEach(([nama,nilai])=>{
+  const el=document.getElementById('k-'+nama);
+  if(el && !el.value) el.placeholder=nilai;
+  if(el && !el.value && el.dataset.terisi!=='1'){el.value=nilai;el.dataset.terisi='1'}
+ })}
 async function muatRiwayat(){
  try{const r=await fetch('api/riwayat?limit=10');const d=await r.json();
   tabel('riwayat',d.riwayat||[],['applied_at','title','company','status']);
@@ -330,15 +348,14 @@ async function cariDetail(){
   'Skor: '+(j.skor??'-'),'Logo: '+(j.has_logo??'-'),
   'URL: '+(j.url||'-'),'Dilamar: '+(d.sudah_dilamar?'ya':'belum'),
   'Riwayat: '+(d.riwayat.length?d.riwayat.map(x=>x.applied_at+' '+x.status).join('; '):'-')
- ].filter(x=>x!==undefined).join('\n');
+ ].filter(x=>x!==undefined).join(NL);
 }
 async function simpanKonf(){
  const pasangan={};
  const isi=(id,k)=>{const v=document.getElementById(id).value.trim();
   if(v)pasangan[k]=v};
- isi('k-min','MIN_SALARY');isi('k-max','MAX_APPLY_PER_DAY');
- isi('k-age','MAX_AGE_DAYS');isi('k-lok','LOCATIONS');
- isi('k-pri','PRIORITAS_LOKASI');
+ ['MIN_SALARY','MAX_APPLY_PER_DAY','MAX_AGE_DAYS','LOCATIONS',
+  'PRIORITAS_LOKASI'].forEach(k=>isi('k-'+k,k));
  if(!Object.keys(pasangan).length){
   document.getElementById('konf-pesan').textContent='Isi minimal satu nilai.';
   return}
