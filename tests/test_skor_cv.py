@@ -186,3 +186,51 @@ def test_saring_minimal_tanpa_cv_semua_lolos(monkeypatch):
 
     assert lolos == daftar
     assert dibuang == []
+
+
+# ------------------------------------------------ pengalaman dari rentang ---
+def test_pengalaman_dari_rentang_tanggal():
+    """CV Indonesia umumnya menulis "2020-2024", bukan "4 tahun"."""
+    teks = (
+        "PENGALAMAN\n"
+        "2020-2024  Inventory Controller, PT Contoh, Bandung\n"
+        "2016-2020  Staff Gudang, PT Contoh Distribusi\n"
+    )
+
+    assert cv.pengalaman_tahun(teks) == 8
+
+
+def test_pengalaman_rentang_sampai_sekarang_dihitung_sampai_tahun_ini():
+    tahun = cv.datetime.now().year
+    teks = "2018 - sekarang\nInventory Controller\n"
+
+    assert cv.pengalaman_tahun(teks) == tahun - 2018
+
+
+def test_rentang_tumpang_tindih_tidak_dihitung_dua_kali():
+    teks = "2018-2022  A\n2020-2024  B\n"
+
+    assert cv.pengalaman_tahun(teks) == 6
+
+
+def test_tahun_pendidikan_bukan_pengalaman_kerja():
+    teks = "2012-2016  S1 Teknik Industri, Universitas Contoh\n"
+
+    assert cv.pengalaman_tahun(teks) is None
+
+
+def test_angka_eksplisit_dipakai_bila_lebih_besar():
+    assert cv.pengalaman_tahun("10 tahun pengalaman kerja") == 10
+
+
+def test_sertifikasi_dipisah_dari_alat():
+    teks = (
+        "KETERAMPILAN\nSAP, Microsoft Excel, WMS\n"
+        "SERTIFIKASI\nAhli K3 Umum, 2019\n"
+    )
+    profil = cv.profil_dari_teks(teks)
+
+    assert "ahli k3" in profil["sertifikasi"]
+    assert "k3" not in profil["sertifikasi"]  # tidak dobel
+    assert "excel" not in profil["sertifikasi"]
+    assert set(profil["alat"]) == {"sap", "excel", "wms"}

@@ -337,3 +337,13 @@ def test_port_terpakai_diberi_pesan_jelas(capsys):
     pesan = capsys.readouterr().out
     assert "sedang dipakai" in pesan
     assert "--port" in pesan
+
+
+def test_aksi_menerima_nama_alternatif():
+    """Nama tombol versi Inggris/Indonesia sama-sama dikenali."""
+    import dashboard as dashboard_modul
+
+    for nama in ("resume", "continue"):
+        hasil = dashboard_modul.aksi(nama)
+        assert hasil["ok"] is True, nama
+        assert "lanjut" in hasil["pesan"], nama

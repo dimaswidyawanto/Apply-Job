@@ -806,6 +806,19 @@ class Database:
                 (company_name, reason),
             )
 
+    def hapus_blacklist(self, company_name: str) -> bool:
+        """Hapus satu perusahaan dari blacklist; True bila ada yang terhapus."""
+        company_name = str(company_name or "").strip()
+
+        if not company_name:
+            return False
+
+        with self._get_conn() as conn:
+            kursor = conn.execute(
+                "DELETE FROM blacklist WHERE company_name = ?", (company_name,)
+            )
+            return bool(kursor.rowcount)
+
     # ------------------------------------------------------------------
     # Statistik & perbaikan data
     # ------------------------------------------------------------------

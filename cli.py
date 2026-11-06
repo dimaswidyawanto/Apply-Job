@@ -197,7 +197,12 @@ def tampilkan_cv(path: str = "", pasang: bool = False):
     table.add_row(
         "Keterampilan", ", ".join(profil.get("keterampilan") or []) or "-"
     )
-    table.add_row("Sertifikasi", ", ".join(profil.get("sertifikasi") or []) or "-")
+    table.add_row(
+        "Alat / software", ", ".join(profil.get("alat") or []) or "-"
+    )
+    table.add_row(
+        "Sertifikasi", ", ".join(profil.get("sertifikasi") or []) or "-"
+    )
     console.print(table)
     console.print(
         "[dim]Skor 6 parameter otomatis aktif selama CV_PATH terisi.[/]"
@@ -1014,6 +1019,30 @@ def show_config():
     console.print(table)
 
 
+def tampilkan_blacklist():
+    """Daftar perusahaan yang dikecualikan (pasal 7: bisa ditinjau balik)."""
+    baris = db.get_blacklist()
+
+    if not baris:
+        console.print(
+            "[dim]Belum ada perusahaan di blacklist. "
+            'Tambah dengan: jalankan.bat blacklist "Nama PT"[/]'
+        )
+        return
+
+    table = Table(title=f"Blacklist ({len(baris)} perusahaan)")
+    table.add_column("Perusahaan", style="yellow")
+    table.add_column("Alasan", style="white")
+
+    for item in baris:
+        table.add_row(item["company_name"], item.get("reason") or "-")
+
+    console.print(table)
+    console.print(
+        '[dim]Hapus dengan: jalankan.bat blacklist --hapus "Nama PT"[/]'
+    )
+
+
 def blacklist_company(company: str, reason: str = ""):
     db.add_blacklist(company, reason)
     console.print(f"[green]{company} di-blacklist[/]")
@@ -1444,9 +1473,19 @@ if __name__ == "__main__":
         "--isi", default="", help='Tambah manual: "pertanyaan=jawaban"'
     )
 
-    bl_parser = subparsers.add_parser("blacklist", help="Blacklist company")
-    bl_parser.add_argument("company", help="Nama company")
+    bl_parser = subparsers.add_parser(
+        "blacklist",
+        help="Blacklist company (tanpa argumen = lihat daftar)",
+    )
+    bl_parser.add_argument(
+        "company", nargs="?", default="",
+        help="Nama company (kosong = tampilkan daftar)",
+    )
     bl_parser.add_argument("--reason", default="", help="Alasan")
+    bl_parser.add_argument(
+        "--hapus", default="", metavar="NAMA",
+        help="Hapus perusahaan dari blacklist",
+    )
 
     args = parser.parse_args()
 
@@ -1561,6 +1600,15 @@ if __name__ == "__main__":
     elif args.command == "jawaban":
         kelola_jawaban(args.hapus, args.reset, args.isi)
     elif args.command == "blacklist":
-        blacklist_company(args.company, args.reason)
+        if args.hapus:
+            nama = args.hapus.strip()
+            if db.hapus_blacklist(nama):
+                console.print(f"[green]{nama} dihapus dari blacklist[/]")
+            else:
+                console.print(f"[yellow]{nama} tidak ada di blacklist[/]")
+        elif args.company:
+            blacklist_company(args.company, args.reason)
+        else:
+            tampilkan_blacklist()
     else:
         parser.print_help()

@@ -195,6 +195,17 @@ def aksi(nama: str, konfirmasi: bool = False) -> dict:
     """Jalankan satu kontrol dashboard. Hasil: {"ok": bool, "pesan": str}."""
     nama = str(nama or "").strip().lower()
 
+    # Terima nama tombol versi Inggris/Indonesia sekaligus.
+    nama = {
+        "resume": "lanjut",
+        "continue": "lanjut",
+        "mulai": "start",
+        "jeda": "pause",
+        "berhenti": "stop",
+        "ulangi": "retry",
+        "bersihkan": "clear",
+    }.get(nama, nama)
+
     if nama == "start":
         if sesi_berjalan():
             return {"ok": False, "pesan": "Sesi sudah berjalan"}

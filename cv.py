@@ -11,6 +11,7 @@ dikarang: semua nilai diambil dari teks CV atau dari `.env`.
 
 import re
 import zipfile
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -40,6 +41,20 @@ POLA_PENGALAMAN = re.compile(
     r"\s*(?:pengalaman|of experience|experience)?",
     re.IGNORECASE,
 )
+# Rentang tahun kerja, mis. "2020-2024", "Jan 2020 – sekarang", "2016 s/d 2020".
+POLA_RENTANG_TAHUN = re.compile(
+    r"\b((?:19|20)\d{2})\s*(?:-|–|—|s/d|s\.d\.|sampai|hingga|to)\s*"
+    r"((?:19|20)\d{2}|sekarang|kini|present|now|current)\b",
+    re.IGNORECASE,
+)
+
+# Baris yang menandakan bagian pendidikan — tahun di sini bukan pengalaman kerja.
+TANDA_PENDIDIKAN_BARIS = (
+    "universitas", "university", "institut", "institute", "sekolah", "school",
+    "sma", "smk", "smp", "kuliah", "fakultas", "jurusan", "lulus", "graduate",
+    "bachelor", "master", "diploma", "s1", "s2", "s3", "gpa", "ipk",
+)
+
 POLA_PENDIDIKAN = (
     ("s3", ("s3", "doktor", "doctoral", "phd")),
     ("s2", ("s2", "magister", "master", "mba", "msc")),
@@ -114,10 +129,66 @@ def baca_berkas(path: str | Path) -> str:
 
 # ---------------------------------------------------------------- profil ----
 def pengalaman_tahun(teks: str) -> Optional[int]:
-    """Tahun pengalaman kerja tertinggi yang disebut di CV."""
+    """Tahun pengalaman kerja tertinggi yang disebut di CV.
+
+    Dua bentuk dikenali: angka eksplisit ("8 tahun pengalaman") dan rentang
+    tahun pada riwayat kerja ("2020-2024"), karena CV Indonesia umumnya
+    memakai rentang tanggal, bukan jumlah tahun.
+    """
     angka = [int(cocok.group(1)) for cocok in POLA_PENGALAMAN.finditer(teks)]
     angka = [n for n in angka if 0 < n <= 45]
+
+    rentang = pengalaman_dari_rentang(teks)
+    if rentang is not None:
+        angka.append(rentang)
+
     return max(angka) if angka else None
+
+
+def _tahun_sekarang() -> int:
+    return datetime.now().year
+
+
+def pengalaman_dari_rentang(teks: str) -> Optional[int]:
+    """Total tahun kerja dari rentang tanggal (irisan dihitung sekali)."""
+    sekarang = _tahun_sekarang()
+    selang = []
+
+    for baris in str(teks or "").splitlines():
+        isi = baris.lower()
+
+        if any(tanda in isi for tanda in TANDA_PENDIDIKAN_BARIS):
+            continue
+
+        for cocok in POLA_RENTANG_TAHUN.finditer(baris):
+            mulai = int(cocok.group(1))
+            akhir = cocok.group(2).lower()
+
+            selesai = int(akhir) if akhir.isdigit() else sekarang
+
+            if not (1970 <= mulai <= sekarang) or selesai < mulai:
+                continue
+
+            if selesai > sekarang:
+                selesai = sekarang
+
+            selang.append((mulai, selesai))
+
+    if not selang:
+        return None
+
+    # Gabungkan rentang yang tumpang tindih agar pekerjaan bersamaan tidak
+    # dihitung dua kali.
+    selang.sort()
+    gabungan = [list(selang[0])]
+    for mulai, selesai in selang[1:]:
+        if mulai <= gabungan[-1][1]:
+            gabungan[-1][1] = max(gabungan[-1][1], selesai)
+        else:
+            gabungan.append([mulai, selesai])
+
+    total = sum(selesai - mulai for mulai, selesai in gabungan)
+    return min(45, total) if total > 0 else None
 
 
 def pendidikan(teks: str) -> Optional[str]:
@@ -166,15 +237,30 @@ def profil_dari_teks(teks: str) -> Dict:
         "bidang": bidang(isi),
         "keterampilan": keterampilan(isi),
         "sertifikasi": _sertifikasi(isi),
+        "alat": _alat(isi),
     }
 
 
 def _sertifikasi(teks: str) -> List[str]:
+    """Sertifikat/pelatihan resmi — bukan nama aplikasi."""
     isi = teks.lower()
     daftar = (
-        "sap", "erp", "excel", "wms", "iso 9001", "iso 14001", "lean",
-        "six sigma", "apics", "cpim", "forklift", "k3", "ahli k3",
+        "iso 9001", "iso 14001", "iso 45001", "six sigma", "lean",
+        "apics", "cpim", "forklift", "k3", "ahli k3", "bnsp",
     )
+    hasil = [kata for kata in daftar if kata in isi]
+
+    # "ahli k3" sudah mencakup "k3" — jangan tampil dua kali.
+    if "ahli k3" in hasil and "k3" in hasil:
+        hasil.remove("k3")
+
+    return hasil
+
+
+def _alat(teks: str) -> List[str]:
+    """Aplikasi/perangkat yang dikuasai (SAP, Excel, WMS, ...)."""
+    isi = teks.lower()
+    daftar = ("sap", "erp", "excel", "wms", "accurate", "odoo", "oracle")
     return [kata for kata in daftar if kata in isi]
 
 

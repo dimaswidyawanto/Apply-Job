@@ -137,6 +137,25 @@ def test_blacklist(database):
     assert database.is_blacklisted("") is False
 
 
+def test_blacklist_bisa_dilihat_dan_dihapus(database):
+    """Blacklist harus bisa ditinjau balik, bukan sekali tambah langsung mati."""
+    database.add_blacklist("PT Contoh", "tidak sesuai")
+    database.add_blacklist("PT Lain", "outsourcing")
+
+    daftar = database.get_blacklist()
+
+    assert [item["company_name"] for item in daftar] == ["PT Contoh", "PT Lain"]
+    assert daftar[0]["reason"] == "tidak sesuai"
+
+    assert database.hapus_blacklist("PT Contoh") is True
+    assert database.is_blacklisted("PT Contoh") is False
+    assert [item["company_name"] for item in database.get_blacklist()] == ["PT Lain"]
+
+    # Menghapus yang tidak ada: aman, tidak melempar galat.
+    assert database.hapus_blacklist("PT Tidak Ada") is False
+    assert database.hapus_blacklist("") is False
+
+
 def test_migrasi_mengisi_status_dan_sumber(tmp_path):
     """Database lama tanpa kolom baru tetap terbaca dengan status 'found'."""
     import sqlite3
