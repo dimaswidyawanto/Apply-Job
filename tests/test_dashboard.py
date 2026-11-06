@@ -324,3 +324,16 @@ def test_status_memuat_konfigurasi_untuk_form(siap):
     }
     assert isinstance(konf["MIN_SALARY"], int)
     assert isinstance(konf["LOCATIONS"], str)
+
+
+def test_port_terpakai_diberi_pesan_jelas(capsys):
+    """Port bentrok tidak boleh membuat pengguna menunggu tanpa penjelasan."""
+    penjaga = dashboard.buat_server(0, "127.0.0.1")
+    try:
+        dashboard.jalankan(penjaga.server_port, "127.0.0.1", buka_browser=False)
+    finally:
+        penjaga.server_close()
+
+    pesan = capsys.readouterr().out
+    assert "sedang dipakai" in pesan
+    assert "--port" in pesan

@@ -366,6 +366,49 @@ def tampilkan_laporan(simpan: bool = False):
         console.print(f"[green]Laporan disimpan:[/] {berkas}")
 
 
+def tampilkan_performa():
+    """Ukur kecepatan di komputer ini + saran (master prompt pasal 13)."""
+    import performa
+
+    console.print("[bold cyan]Mengukur, mohon tunggu beberapa detik...[/]")
+
+    table = Table(title="Diagnosa kecepatan")
+    table.add_column("Bagian", style="cyan")
+    table.add_column("Waktu", justify="right")
+    table.add_column("Status")
+
+    warna = {"ok": "green", "lambat": "red", "lewat": "dim"}
+    hasil = performa.kumpulkan()
+    for baris in hasil:
+        waktu = "tidak tersedia" if baris["ms"] < 0 else f"{baris['ms']:.0f} ms"
+        table.add_row(
+            baris["bagian"],
+            waktu,
+            f"[{warna.get(baris['status'], 'white')}]{baris['status']}[/]",
+        )
+    console.print(table)
+
+    angka = performa.ringkas()
+    console.print(
+        f"[dim]Lowongan tersimpan: {angka['jumlah_lowongan']} · "
+        f"ukuran database: {angka['ukuran_db_mb']} MB · "
+        f"Chrome terdeteksi: {'ya' if angka['chrome'] else 'tidak'}[/]"
+    )
+    console.print(f"[dim]Folder proyek: {angka['folder']}[/]")
+
+    lambat = [b for b in hasil if b["status"] == "lambat"]
+    if lambat:
+        console.print("[bold yellow]Yang perlu diperhatikan:[/]")
+        for baris in lambat:
+            console.print(f"  - {baris['bagian']}: {baris['saran']}")
+    else:
+        console.print("[green]Semua bagian dalam batas wajar.[/]")
+
+    console.print("[bold cyan]Saran umum:[/]")
+    for satu in performa.saran_umum():
+        console.print(f"  - {satu}")
+
+
 def buka_dashboard(port: int = 0, tanpa_browser: bool = False):
     """Jalankan dashboard monitoring lokal."""
     import dashboard
@@ -1296,6 +1339,10 @@ if __name__ == "__main__":
         help="Simpan laporan harian ke folder reports/",
     )
 
+    subparsers.add_parser(
+        "performa", help="Ukur kecepatan di komputer ini + saran"
+    )
+
     backup_parser = subparsers.add_parser(
         "backup", help="Backup atau pulihkan database lamaran"
     )
@@ -1489,6 +1536,8 @@ if __name__ == "__main__":
         buka_dashboard(args.port, args.tanpa_browser)
     elif args.command == "laporan":
         tampilkan_laporan(args.simpan)
+    elif args.command == "performa":
+        tampilkan_performa()
     elif args.command == "backup":
         tampilkan_backup(args.daftar, args.pulihkan)
     elif args.command == "antrean":

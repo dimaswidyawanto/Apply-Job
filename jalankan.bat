@@ -12,6 +12,12 @@ rem   LEWATI_PASANG=1 -> jangan pernah memasang dependensi
 setlocal
 cd /d "%~dp0"
 
+rem --- 0. Jalur cepat: .venv sudah siap -> jangan cari Python lagi ---
+rem     Tanpa ini setiap perintah menunggu beberapa detik karena cmd
+rem     menjalankan `py -3.13 --version`, `py -3.12`, ... satu per satu.
+rem     Penanda .venv\.python-baik hanya dibuat bila versinya didukung.
+if exist ".venv\Scripts\python.exe" if exist ".venv\.deps-terpasang" if exist ".venv\.python-baik" goto :venv_siap
+
 rem --- 1. Pilih Python yang didukung (3.10 - 3.13) ---
 set "PY="
 for %%V in (3.13 3.12 3.11 3.10) do (
@@ -51,6 +57,13 @@ if exist ".venv-lama" rmdir /s /q ".venv-lama"
 move ".venv" ".venv-lama" >nul
 
 :venv_siap
+if exist ".venv\.python-baik" goto :cek_deps
+if not exist ".venv\Scripts\python.exe" goto :cek_deps
+if not defined PYMINOR goto :cek_deps
+if %PYMINOR% GEQ 14 goto :cek_deps
+> ".venv\.python-baik" echo ok
+
+:cek_deps
 if not exist ".venv\Scripts\python.exe" (
     echo [1/3] Membuat virtual environment dengan %PY%...
     %PY% -m venv .venv
