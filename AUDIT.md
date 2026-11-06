@@ -188,12 +188,19 @@ dan semua fase dikerjakan berurutan.
 - **Laporan berkala**: `laporan.teks_markdown()` + `laporan.simpan()` menulis
   `reports/laporan-YYYY-MM-DD.md`, otomatis setelah sesi `lamar` selesai dan
   bisa dijadwalkan lewat Task Scheduler (`jalankan.bat laporan --simpan`).
+- **Evaluasi kata kunci & sumber**: tabel `jobs` menyimpan `sumber` (dibaca
+  dari URL, dengan pengisian otomatis untuk database lama) dan `kata_kunci`
+  yang menemukan lowongan. Laporan, dashboard, dan berkas harian menampilkan
+  jumlah lowongan + lamaran per kata kunci dan per sumber, lalu menyarankan
+  kata kunci yang tidak produktif.
 
 **Batas yang perlu diketahui (jujur):**
 - Uji browser nyata (Selenium) tetap hanya bisa di PC Anda; semua tes di sini
   memakai bot/driver palsu.
-- Pelacakan "kata kunci mana yang menghasilkan lamaran" belum disimpan per
-  lowongan, jadi saran pembelajaran masih berbasis lokasi/kategori/alasan.
+- Atribusi kata kunci mencatat **kata kunci pertama** yang menemukan sebuah
+  lowongan (bukan semua kata kunci yang juga menemukannya).
+- Jumlah duplikat yang dibuang tercatat di konsol setiap riset, tetapi belum
+  disimpan sebagai angka di laporan.
 - Laporan berkala berbentuk berkas harian + panduan Task Scheduler; tidak ada
   penjadwal bawaan di dalam aplikasi.
 - Uji end-to-end di browser sungguhan (JobStreet/Glints/Indeed) tetap harus

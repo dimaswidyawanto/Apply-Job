@@ -38,6 +38,8 @@ def ringkasan() -> Dict:
         "status_antrean": status,
         "per_lokasi": db.statistik_lokasi(10),
         "per_kategori": db.statistik_kategori(10),
+        "per_sumber": db.statistik_sumber(10),
+        "per_kata_kunci": db.statistik_kata_kunci(12),
         "alasan_tersering": db.alasan_tersering(8),
         "tingkat_berhasil": (
             round(100 * terkirim / percobaan, 1) if percobaan else 0.0
@@ -87,6 +89,32 @@ def teks_markdown(data: Optional[Dict] = None) -> str:
         baris += [
             f"| {i['lokasi']} | {i['jumlah']} | {i['dilamar']} |"
             for i in data["per_lokasi"]
+        ]
+
+    if data.get("per_kata_kunci"):
+        baris += [
+            "",
+            "## Per kata kunci",
+            "",
+            "| Kata kunci | Lowongan | Dilamar |",
+            "|---|---|---|",
+        ]
+        baris += [
+            f"| {i['kata_kunci']} | {i['jumlah']} | {i['dilamar']} |"
+            for i in data["per_kata_kunci"]
+        ]
+
+    if data.get("per_sumber"):
+        baris += [
+            "",
+            "## Per sumber",
+            "",
+            "| Sumber | Lowongan | Dilamar |",
+            "|---|---|---|",
+        ]
+        baris += [
+            f"| {i['sumber']} | {i['jumlah']} | {i['dilamar']} |"
+            for i in data["per_sumber"]
         ]
 
     if data["alasan_tersering"]:
@@ -150,6 +178,41 @@ def saran(data: Dict) -> List[str]:
             + ", ".join(tanpa_hasil[:3])
             + ". Pertimbangkan menambah kata kunci."
         )
+
+    # Kata kunci yang tidak menghasilkan lamaran sama sekali.
+    kk = data.get("per_kata_kunci") or []
+    sia_sia = [
+        item["kata_kunci"] for item in kk
+        if item.get("jumlah", 0) >= 5 and not item.get("dilamar")
+    ]
+    if sia_sia:
+        hasil.append(
+            "Kata kunci tanpa hasil lamaran: "
+            + ", ".join(sia_sia[:3])
+            + ". Pertimbangkan menggantinya (cek `config` lalu `.env`)."
+        )
+
+    # Kata kunci paling produktif — dipertahankan, bukan diubah otomatis.
+    produktif = [item for item in kk if item.get("dilamar")]
+    if produktif:
+        teratas = produktif[0]
+        hasil.append(
+            f"Kata kunci paling produktif: \"{teratas['kata_kunci']}\" "
+            f"({teratas['dilamar']} lamaran). Pertahankan di daftar."
+        )
+
+    sumber = data.get("per_sumber") or []
+    if len(sumber) > 1:
+        tanpa_lamaran = [
+            item["sumber"] for item in sumber
+            if item.get("jumlah", 0) >= 5 and not item.get("dilamar")
+        ]
+        if tanpa_lamaran:
+            hasil.append(
+                "Sumber tanpa lamaran terkirim: "
+                + ", ".join(tanpa_lamaran)
+                + ". Periksa apakah situs itu masih memuat logo/gaji."
+            )
 
     if data.get("tingkat_berhasil", 0) and data["tingkat_berhasil"] < 80:
         hasil.append(

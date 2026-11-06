@@ -132,6 +132,12 @@ class AutoApplyEngine:
         """
         mulai_halaman = time.monotonic()
         jobs = self.bot.search_jobs(keyword, page, location=location)
+
+        # Catat kata kunci yang menemukan lowongan (evaluasi berkala pasal 12.4).
+        for job in jobs or []:
+            if isinstance(job, dict):
+                job.setdefault("kata_kunci", keyword)
+
         lama_halaman = time.monotonic() - mulai_halaman
         self.waktu_halaman += lama_halaman
         self.jumlah_halaman += 1
