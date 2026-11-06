@@ -598,6 +598,28 @@ def kunci_duplikat(job: Dict) -> str:
     return f"isi:{judul}|{perusahaan}|{lokasi}"
 
 
+def kunci_isi(job: Dict) -> str:
+    """Kunci isi lowongan (judul + perusahaan + lokasi), lintas situs."""
+    judul = normalisasi_judul(job.get("title"))
+    perusahaan = normalisasi_perusahaan(job.get("company"))
+    lokasi = " ".join(str(job.get("location") or "").lower().split())
+
+    if not judul or not perusahaan:
+        return ""
+
+    return f"{judul}|{perusahaan}|{lokasi}"
+
+
+def _situs(job: Dict) -> str:
+    """Nama situs dari URL lowongan ("" bila tidak diketahui)."""
+    url = str(job.get("url") or "").strip().lower()
+    if not url:
+        return ""
+    tanpa_skema = url.split("://", 1)[-1]
+    host = tanpa_skema.split("/", 1)[0].split(":", 1)[0]
+    return host[4:] if host.startswith("www.") else host
+
+
 def dedupe_jobs(jobs: List[Dict]) -> List[Dict]:
     """Buang lowongan duplikat dari gabungan semua kategori & lokasi.
 
@@ -607,14 +629,27 @@ def dedupe_jobs(jobs: List[Dict]) -> List[Dict]:
     """
     unik: List[Dict] = []
     terlihat: Dict[str, Dict] = {}
+    terlihat_isi: Dict[str, Dict] = {}
 
     for job in jobs:
         if not isinstance(job, dict):
             continue
 
         kunci = kunci_duplikat(job)
-        if kunci in terlihat:
-            asli = terlihat[kunci]
+        # Lowongan yang sama bisa muncul di lebih dari satu situs dengan URL
+        # berbeda. Kunci kedua (judul + perusahaan + lokasi) menangkapnya
+        # tanpa bergantung pada id/url masing-masing situs.
+        isi = kunci_isi(job)
+
+        # Kunci isi hanya dipakai untuk lowongan dari situs BERBEDA: dua
+        # lowongan berjudul sama di situs yang sama bisa jadi dua kesempatan
+        # berbeda (cabang lain / repost), jadi tidak digabung.
+        asli = terlihat.get(kunci)
+        if asli is None and isi:
+            tercatat = terlihat_isi.get(isi)
+            if tercatat is not None and _situs(tercatat) != _situs(job):
+                asli = tercatat
+        if asli is not None:
             for medan in ("company", "location", "salary", "description",
                           "date_posted", "url"):
                 if not asli.get(medan) and job.get(medan):
@@ -622,6 +657,8 @@ def dedupe_jobs(jobs: List[Dict]) -> List[Dict]:
             continue
 
         terlihat[kunci] = job
+        if isi and isi not in terlihat_isi:
+            terlihat_isi[isi] = job
         unik.append(job)
 
     return unik

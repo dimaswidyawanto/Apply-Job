@@ -1240,6 +1240,14 @@ pytest -q
 
 Test tidak membutuhkan Chrome maupun koneksi internet.
 
+`tests/test_skenario_wajib.py` memuat **15 skenario wajib** dari master prompt,
+satu tes per skenario: 200 lowongan sekaligus, duplikat lintas sumber, logo
+wajib (Indeed dikecualikan), gaji Rp4,0 jt vs Rp4,5 jt, lowongan tanpa info
+gaji, lowongan tidak relevan CV, batas 50 lamaran/hari, kuota habis, aplikasi
+dimatikan, internet putus, resume setelah aplikasi ditutup, pertanyaan formulir
+berulang, pertanyaan bahasa berbeda, status kirim tidak pasti
+(`review_required`), dan klik dua kali tidak menghasilkan lamaran ganda.
+
 ## Troubleshooting
 
 **Muncul "Tidak ada lowongan yang berhasil dibaca".**

@@ -156,6 +156,26 @@ dan semua fase dikerjakan berurutan.
 - Perintah CLI baru: `cv`, `dashboard`, `laporan`, `antrean`; berkas
   `Dashboard.bat`.
 
+**Uji 15 skenario wajib (pasal 14) — `tests/test_skenario_wajib.py`:**
+
+| # | Skenario | Hasil |
+|---|---|---|
+| 1 | 200 lowongan sekaligus | 200 diproses & terurut, tanpa gagal |
+| 2 | duplikat lintas sumber | digabung; satu baris per lowongan |
+| 3 | tanpa logo | ditolak, kecuali Indeed |
+| 4 | gaji Rp4,0 jt vs Rp4,5 jt | 4,0 jt ditolak (termasuk rentang 4,0–6,0 jt), 4,5 jt lolos |
+| 5 | tanpa info gaji | tetap boleh dilamar |
+| 6 | tidak relevan CV | tersaring `MIN_SKOR_CV` |
+| 7 | batas 50/hari | dipotong tepat sesuai sisa kuota |
+| 8 | kuota habis | berhenti, tidak melebihi batas |
+| 9 | aplikasi dimatikan | sesi kedua ditolak; Stop menghentikan sesi |
+| 10 | internet putus | dicatat `failed`, riwayat tetap, bisa diulang |
+| 11 | resume setelah ditutup | status tersimpan & dibaca ulang |
+| 12 | pertanyaan berulang | dijawab dari ingatan |
+| 13 | bahasa berbeda | "Full Name" → jawaban "Nama Lengkap" |
+| 14 | status kirim tidak pasti | `review_required`, bukan "berhasil" |
+| 15 | klik dua kali | satu lamaran saja |
+
 **Batas yang perlu diketahui (jujur):**
 - Uji browser nyata (Selenium) tetap hanya bisa di PC Anda; semua tes di sini
   memakai bot/driver palsu.
