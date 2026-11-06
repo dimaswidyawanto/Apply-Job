@@ -368,6 +368,31 @@ class JobFilter:
 
         return min_years
 
+    def _peringkat_prioritas(self, job: Dict) -> tuple[int, int]:
+        """(peringkat lokasi, peringkat kategori) — angka kecil lebih utama.
+
+        Prioritas hanya memutuskan urutan; tidak pernah menolak lowongan.
+        Lokasi/kategori yang tidak ada di daftar diberi nilai 99.
+        """
+        lokasi = str(job.get("location") or "").lower()
+        judul = str(job.get("title") or "").lower()
+
+        daftar_lokasi = [
+            str(l).lower() for l in getattr(config, "prioritas_lokasi", []) or []
+        ]
+        daftar_kategori = [
+            str(k).lower()
+            for k in getattr(config, "prioritas_kategori", []) or []
+        ]
+
+        p_lokasi = next(
+            (i for i, l in enumerate(daftar_lokasi) if l and l in lokasi), 99
+        )
+        p_kategori = next(
+            (i for i, k in enumerate(daftar_kategori) if k and k in judul), 99
+        )
+        return p_lokasi, p_kategori
+
     def rank_jobs(
         self, jobs: List[Dict], prefer_newest: Optional[bool] = None
     ) -> List[Dict]:
@@ -382,6 +407,9 @@ class JobFilter:
             rincian = self.score_breakdown(job)
             job["_skor_rincian"] = rincian
             job["_score"] = sum(rincian.values())
+            lokasi_pri, kategori_pri = self._peringkat_prioritas(job)
+            job["_prioritas_lokasi"] = lokasi_pri
+            job["_prioritas_kategori"] = kategori_pri
 
             if pakai_cv:
                 # Skor 6 parameter berbobot (0-100) menjadi prioritas utama.
@@ -399,6 +427,8 @@ class JobFilter:
                     item.get("age_days") or 0,
                     -skor_cv(item),
                     -item["_score"],
+                    item.get("_prioritas_lokasi", 99),
+                    item.get("_prioritas_kategori", 99),
                 )
             )
         else:
@@ -407,6 +437,8 @@ class JobFilter:
                 key=lambda item: (
                     -skor_cv(item),
                     -item["_score"],
+                    item.get("_prioritas_lokasi", 99),
+                    item.get("_prioritas_kategori", 99),
                     item.get("age_days") is None,
                     item.get("age_days") or 0,
                 )

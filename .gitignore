@@ -34,6 +34,9 @@ pantau.log
 
 # Berkas runtime (jangan di-commit)
 logs/
+reports/
+backups/
+*.db.bak
 .dimastes-sesi.lock
 .dimastes-kendali
 debug/

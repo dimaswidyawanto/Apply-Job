@@ -166,3 +166,94 @@ def test_laporan_menghitung_dan_memberi_saran(siap, monkeypatch):
     assert data["per_lokasi"][0]["lokasi"] == "Bandung"
     assert any("REVIEW_REQUIRED" in s for s in saran)
     assert any("CV_PATH" in s for s in saran)
+
+
+# ------------------------------------------- detail, riwayat, konfigurasi ---
+def test_api_detail_lowongan_dan_riwayat(server, siap):
+    siap.add_job({
+        "job_id": "js-77", "title": "PPIC Staff", "company": "PT Detail",
+        "location": "Bandung", "url": "https://x/77", "has_logo": True,
+    })
+    siap.set_status_antrean("js-77", "applied")
+    siap.record_application("js-77")
+    _, dasar = server
+
+    detail = _get(f"{dasar}/api/lowongan?job_id=js-77")
+    assert detail["ok"] is True
+    assert detail["lowongan"]["title"] == "PPIC Staff"
+    assert detail["sudah_dilamar"] is True
+    assert len(detail["riwayat"]) == 1
+
+    riwayat = _get(f"{dasar}/api/riwayat?limit=5")
+    assert riwayat["riwayat"][0]["title"] == "PPIC Staff"
+
+
+def test_api_detail_lowongan_tidak_ada(server):
+    _, dasar = server
+
+    with pytest.raises(urllib.error.HTTPError) as info:
+        _get(f"{dasar}/api/lowongan?job_id=tidak-ada")
+
+    assert info.value.code == 404
+    pesan = json.loads(info.value.read().decode("utf-8"))["pesan"]
+    assert "tidak ada" in pesan
+
+
+def _post_json(url, data):
+    badan = json.dumps(data).encode("utf-8")
+    permintaan = urllib.request.Request(
+        url, data=badan, method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(permintaan, timeout=5) as jawab:
+            return jawab.status, json.loads(jawab.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        return exc.code, json.loads(exc.read().decode("utf-8"))
+
+
+def test_konfigurasi_tersimpan_dengan_validasi(server, tmp_path, monkeypatch):
+    berkas_env = tmp_path / ".env"
+    berkas_env.write_text("MIN_SALARY=4500000\n", encoding="utf-8")
+    monkeypatch.setattr(dashboard, "PATH_ENV", berkas_env)
+    _, dasar = server
+
+    kode, hasil = _post_json(
+        f"{dasar}/api/konfigurasi",
+        {
+            "pasangan": {
+                "MAX_APPLY_PER_DAY": "50",
+                "PRIORITAS_LOKASI": "Bandung,Cikarang",
+            }
+        },
+    )
+
+    assert kode == 200 and hasil["ok"] is True
+    isi = berkas_env.read_text(encoding="utf-8")
+    assert "MAX_APPLY_PER_DAY=50" in isi
+    assert "PRIORITAS_LOKASI=Bandung,Cikarang" in isi
+
+
+def test_konfigurasi_menolak_kunci_dan_nilai_salah(server, tmp_path, monkeypatch):
+    berkas_env = tmp_path / ".env"
+    berkas_env.write_text("MIN_SALARY=4500000\n", encoding="utf-8")
+    monkeypatch.setattr(dashboard, "PATH_ENV", berkas_env)
+    _, dasar = server
+
+    kode, hasil = _post_json(
+        f"{dasar}/api/konfigurasi", {"pasangan": {"CV_PATH": "D:/lain.docx"}}
+    )
+    assert kode == 400 and "tidak boleh diubah" in hasil["pesan"]
+
+    kode, hasil = _post_json(
+        f"{dasar}/api/konfigurasi", {"pasangan": {"MIN_SALARY": "-5"}}
+    )
+    assert kode == 400
+    # Nilai lama tidak berubah saat input ditolak.
+    assert "MIN_SALARY=4500000" in berkas_env.read_text(encoding="utf-8")
+
+
+def test_halaman_memuat_kontrol_baru():
+    for bagian in ("api/riwayat", "api/lowongan", "api/konfigurasi",
+                   "Simpan konfigurasi", "Detail lowongan"):
+        assert bagian in dashboard.HALAMAN
