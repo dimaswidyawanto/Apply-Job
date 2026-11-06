@@ -308,8 +308,9 @@ const NL=String.fromCharCode(10);
 function baris(id,obj){document.getElementById(id).innerHTML=Object.entries(obj)
  .map(([k,v])=>`<div class="k"><span>${k}</span><span class="v">${v}</span></div>`).join('')}
 function tabel(id,rows,kolom){const el=document.getElementById(id);
+ const isi=(rows||[]).map(r=>'<tr>'+kolom.map(k=>`<td>${r[k]??''}</td>`).join('')+'</tr>').join('');
  el.innerHTML='<tr>'+kolom.map(k=>`<th>${k}</th>`).join('')+'</tr>'+
- rows.map(r=>'<tr>'+kolom.map(k=>`<td>${r[k]??''}</td>`).join('')+'</tr>').join('')}
+ (isi||`<tr><td colspan="${kolom.length}">belum ada data</td></tr>`)}
 let terakhir='';
 async function segarkan(){
  try{const r=await fetch('api/status');const d=await r.json();
