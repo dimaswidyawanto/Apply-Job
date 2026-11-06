@@ -176,3 +176,20 @@ def test_dashboard_bat_ada():
     isi = mentah.decode("utf-8")
     assert "jalankan.bat dashboard" in isi
     assert not any(b.strip().lower().startswith("goto") for b in isi.splitlines())
+
+
+def test_jalankan_bat_punya_jalur_cepat():
+    """Kalau .venv siap, skrip tidak boleh mencari Python lagi (lambat)."""
+    isi = (AKAR / "jalankan.bat").read_text(encoding="utf-8")
+
+    cepat = (
+        'if exist ".venv\\Scripts\\python.exe" if exist ".venv\\.deps-terpasang" '
+        'if exist ".venv\\.python-baik" goto :venv_siap'
+    )
+    assert cepat in isi
+
+    # Jalur cepat harus muncul SEBELUM pencarian `py -3.13 --version` dst.
+    assert isi.index(cepat) < isi.index("for %%V in (3.13")
+    # Penanda hanya dibuat untuk Python yang didukung (< 3.14).
+    assert ".python-baik" in isi
+    assert ':cek_deps' in isi

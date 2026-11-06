@@ -470,7 +470,14 @@ def jalankan(port: int = PORT_BAKU, host: str = "0.0.0.0",
     """Jalankan dashboard sampai Ctrl+C."""
     import webbrowser
 
-    server = buat_server(port, host)
+    try:
+        server = buat_server(port, host)
+    except OSError as salah:
+        print(f"Port {port} sedang dipakai proses lain ({salah}).")
+        print("Tutup dashboard yang lama (Ctrl+C di terminalnya) atau jalankan:")
+        print(f"  jalankan.bat dashboard --port {port + 1}")
+        return
+
     alamat = f"http://127.0.0.1:{port}/"
 
     print(f"Dashboard berjalan di {alamat}")
