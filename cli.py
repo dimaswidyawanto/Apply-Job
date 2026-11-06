@@ -29,6 +29,22 @@ def versi_kode() -> str:
     return "-"
 
 
+def jalankan_terkunci(fungsi, *argumen, **kata_kunci):
+    """Jalankan sesi lamar di bawah kunci tunggal (pasal 4.3).
+
+    Tanpa kunci, dua jendela peluncur bisa memproses lowongan yang sama dan
+    mengirim lamaran ganda.
+    """
+    import kunci
+
+    try:
+        with kunci.sesi_tunggal("."):
+            return fungsi(*argumen, **kata_kunci)
+    except kunci.SesiBerjalan as exc:
+        console.print(f"[bold red]{exc}[/]")
+        return None
+
+
 def lamar_semua_situs(situs: str = "", max_pages: int = 0, batas: int = 0,
                       perbarui: bool = True):
     """Satu perintah untuk JobStreet + Glints + Indeed (dipakai .bat)."""
@@ -36,7 +52,8 @@ def lamar_semua_situs(situs: str = "", max_pages: int = 0, batas: int = 0,
 
     console.print(f"[cyan]Versi kode:[/] {versi_kode()}")
     try:
-        _jalankan(
+        jalankan_terkunci(
+            _jalankan,
             situs=situs, max_pages=max(0, max_pages),
             batas=max(0, batas), perbarui=perbarui,
         )
@@ -53,14 +70,18 @@ def jalankan_indeed(max_pages: int = 0, keywords: str = "", batas: int = 0):
 
     daftar = [k.strip() for k in keywords.split(",") if k.strip()] or None
     try:
-        laporan = _jalankan(
-            max_pages=max(0, max_pages), keywords=daftar, batas=max(0, batas)
+        laporan = jalankan_terkunci(
+            _jalankan,
+            max_pages=max(0, max_pages), keywords=daftar, batas=max(0, batas),
         )
     except KeyboardInterrupt:
         console.print("\n[yellow]Dihentikan oleh pengguna.[/]")
         return
     except Exception as exc:
         console.print(f"[bold red]Gagal menjalankan Indeed:[/] {exc}")
+        return
+
+    if not laporan:
         return
 
     console.print()
@@ -344,14 +365,18 @@ def jalankan_glints(max_pages: int = 0, keywords: str = "", batas: int = 0):
 
     daftar = [k.strip() for k in keywords.split(",") if k.strip()] or None
     try:
-        laporan = _jalankan(
-            max_pages=max(0, max_pages), keywords=daftar, batas=max(0, batas)
+        laporan = jalankan_terkunci(
+            _jalankan,
+            max_pages=max(0, max_pages), keywords=daftar, batas=max(0, batas),
         )
     except KeyboardInterrupt:
         console.print("\n[yellow]Dihentikan oleh pengguna.[/]")
         return
     except Exception as exc:
         console.print(f"[bold red]Gagal menjalankan Glints:[/] {exc}")
+        return
+
+    if not laporan:
         return
 
     console.print()
@@ -615,7 +640,7 @@ def show_config():
     )
     table.add_row(
         "Wajib ada logo perusahaan",
-        "Tidak dipakai (sama di JobStreet, Glints, Indeed)",
+        "Aktif (JobStreet & Glints; Indeed tanpa logo)",
     )
     table.add_row(
         "Pertanyaan pilihan otomatis",
@@ -1142,7 +1167,7 @@ if __name__ == "__main__":
 
         from main import main
 
-        main()
+        jalankan_terkunci(main)
     elif args.command == "stats":
         show_stats()
     elif args.command == "config":

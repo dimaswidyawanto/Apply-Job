@@ -171,14 +171,14 @@ cp .env.example .env
 | `ALLOW_REMOTE` | `false` | `true` = lowongan "Remote" juga diterima saat `STRICT_LOCATION` aktif |
 | `REQUIRE_KEYWORD_MATCH` | `true` | Hanya lamar lowongan yang judulnya cocok dengan minat |
 | `TITLE_KEYWORDS` | 43 kata kunci (inventory, gudang, ppic, logistik, ...) | Kata kunci pencocok **judul**; kosong = ikut `KEYWORDS` |
-| `MIN_SALARY` | `0` | Gaji minimum (0 = tanpa filter) |
+| `MIN_SALARY` | `4500000` | Batas **bawah** gaji; lowongan tanpa info gaji tetap dilamar; `0` = tanpa batas |
 | `MAX_EXPERIENCE_YEARS` | `5` | Tolak lowongan yang minta pengalaman lebih dari ini |
 | `BLACKLIST_COMPANIES` | kosong | Perusahaan yang tidak ingin dilamar (dipisah koma, cocok longgar) |
 | `BLOCKED_COMPANIES` | `royal abadi,ifa` | Perusahaan yang **selalu** ditolak di JobStreet maupun Glints. Nama pendek seperti `ifa` dicocokkan per kata, jadi `Kafifa` tidak ikut tertolak |
 | `GLINTS_MIN_SALARY` | `4500000` | **Tidak dipakai lagi.** Batas gaji sekarang satu untuk semua situs: `MIN_SALARY` |
 | `EXCLUDE_KEYWORDS` | `principal,director,head,senior,lead` | Kata yang membuat judul otomatis ditolak |
 | `STRICT_LOCATION` | `false` | `true` = tolak lowongan yang lokasinya di luar `LOCATION` |
-| `REQUIRE_COMPANY_LOGO` | `false` | **Tidak dipakai menyaring.** Logo/gambar perusahaan tidak pernah menjadi alasan melewati lowongan di JobStreet, Glints, maupun Indeed |
+| `REQUIRE_COMPANY_LOGO` | `true` | Wajib logo/gambar di **JobStreet & Glints**; Indeed dikecualikan karena kartunya tidak memuat logo |
 | `MAX_APPLY_PER_DAY` | `0` | Batas **lamaran yang dikirim** per hari (mis. `50`); `0` = tanpa batas. Riset & penilaian tetap tanpa batas |
 | `DELAY_BETWEEN_APPLY` | `3` | Jeda (detik) antar lowongan |
 | `MAX_PAGES` | `3` | Jumlah halaman per kata kunci untuk mode lama (`COLLECT_BEFORE_APPLY=false`) dan `cek-logo` |
@@ -228,10 +228,10 @@ python cli.py run
 # 2b. Meninjau sendiri (tanpa mengirim otomatis)
 python cli.py run --manual
 
-# Hanya lowongan 3 hari terakhir, 5 halaman per kata kunci (mode lama)
+# Hanya lowongan 3 hari terakhir, 3 halaman per kata kunci (mode lama)
 python cli.py run --auto --max-age-days 3 --max-pages 5
 
-# Riset 5 halaman per kombinasi kata kunci x lokasi (bawaan) atau 2 halaman
+# Riset 3 halaman per kombinasi kata kunci x lokasi (bawaan) atau 2 halaman
 python cli.py run --auto --riset-pages 5
 python cli.py run --auto --riset-pages 2
 
@@ -778,7 +778,7 @@ python cli.py set-env MAX_APPLY_PER_DAY=100 AUTO_APPLY_MAX_PER_SESSION=50
 ### Riset sebanyak mungkin → nilai → peringkat → TOP 50 → apply
 
 **50 adalah batas lamaran per hari, bukan batas riset.** Riset dibatasi
-**halaman**, bukan jumlah lowongan: maksimal 5 halaman untuk setiap kombinasi
+**halaman**, bukan jumlah lowongan: maksimal 3 halaman untuk setiap kombinasi
 kata kunci × lokasi. Alur yang dijalankan setiap `run`:
 
 ```
@@ -790,7 +790,7 @@ nilai kecocokan → peringkat → ambil TOP 50 → apply maksimal 50/hari
    kosong) dicari di **setiap** lokasi (`LOCATIONS`). Untuk setiap kombinasi
    kata kunci × lokasi dibuka **halaman 1 → 5 berurutan, lalu berhenti** —
    halaman 6 dan seterusnya tidak pernah dibuka, langsung lanjut ke kata
-   kunci/lokasi berikutnya. Batas 5 halaman berlaku **independen** untuk tiap
+   kunci/lokasi berikutnya. Batas 3 halaman berlaku **independen** untuk tiap
    kombinasi dan tidak bisa dinaikkan (`RESEARCH_MAX_PAGES` hanya boleh
    menurunkan). `SORT_MODE=ListedDate` membuat yang **paling baru** muncul
    lebih dulu. Pencarian satu kombinasi berhenti lebih awal bila halamannya
@@ -820,7 +820,7 @@ python cli.py run
 Contoh keluaran:
 
 ```
-RISET LOWONGAN — 14 kata kunci × 7 lokasi, maksimal 5 halaman per kombinasi kata kunci & lokasi (batas tetap 5), urut tanggal terbaru.
+RISET LOWONGAN — 14 kata kunci × 7 lokasi, maksimal 3 halaman per kombinasi kata kunci & lokasi (batas tetap 3), urut tanggal terbaru.
 Riset selesai: 412 lowongan terbaca dari 14 kategori × 7 lokasi → 187 unik (225 duplikat dibuang).
 Penilaian selesai: 187 lowongan dinilai (posisi, lokasi, kualifikasi, pengalaman,
 pendidikan, keterampilan, tanggal, gaji) dan diurutkan dari kecocokan tertinggi.
@@ -845,7 +845,7 @@ Kuota harian: 12 sudah dilamar hari ini, sisa 38 dari 50.
 
 Waktu riset = **jumlah kombinasi × halaman × biaya per halaman**:
 
-- Jumlah kombinasi = jumlah kata kunci × jumlah lokasi. Bawaannya 14 × 7 = **98 kombinasi**, masing-masing maksimal **5 halaman** → maksimal **490 pemuatan halaman**.
+- Jumlah kombinasi = jumlah kata kunci × jumlah lokasi. Bawaannya 14 × 7 = **98 kombinasi**, masing-masing maksimal **3 halaman** → maksimal **294 pemuatan halaman**.
 - Biaya satu halaman: buka URL + tunggu kartu muncul (`SEARCH_WAIT`, bawaan 12 detik bila kosong) + 1 detik + pembacaan kartu. Normalnya **4–12 detik** per halaman, jadi sesi penuh biasanya **35–80 menit**.
 - Kombinasi yang tidak punya lowongan tetap memakan ±12 detik per halaman (halaman 1 saja, lalu berhenti).
 - Fase lamaran menambah: jeda `DELAY_BETWEEN_APPLY` (3 detik) × 50 lamaran, waktu formulir (`AUTO_APPLY_STEP_TIMEOUT` 3 detik per langkah), dan `AUTO_ANSWER_WAIT` (20 detik) setiap kali ada kuesioner yang harus Anda isi sendiri.
@@ -897,11 +897,11 @@ JobStreet dipakai sebagai acuan; Glints mengikuti aturan yang sama:
 
 | Aturan | JobStreet | Glints |
 |---|---|---|
-| Riset semua kata kunci, maks 5 halaman per kombinasi | ya | ya (5 kali muat "Muat lebih banyak") |
+| Riset semua kata kunci, maks 3 halaman per kombinasi | ya | ya (3 kali muat "Muat lebih banyak") |
 | Urut posting terbaru | ya | ya ("Baru Ditambahkan") |
 | Dedupe lintas kata kunci | ya | ya |
 | Saring judul/lokasi/gaji/kualifikasi | `JobFilter` | `JobFilter` yang sama |
-| Logo perusahaan | tidak disaring | tidak disaring |
+| Logo perusahaan | wajib (`REQUIRE_COMPANY_LOGO`) | wajib (sama) |
 | Skor 8 dimensi + ranking global | ya | ya |
 | TOP 50 global per hari, kuota dipakai bersama | ya (`kuota.py`) | ya (`kuota.py`) |
 | Lewati yang sudah pernah dilamar (situs **dan** database) | ya | ya |
@@ -931,13 +931,29 @@ JobStreet adalah **acuan**. Glints dan Indeed tidak punya kriteria sendiri.
 | Logo/gambar perusahaan | tidak pernah menjadi alasan skip |
 | Perankingan 8 dimensi | `job_filter.rank_jobs()` |
 | TOP N sesuai sisa kuota | `pilih_teratas()` (Glints & Indeed) + `kuota.py` |
-| Batas 5 halaman per kombinasi | `config.batas_halaman_riset()` |
+| Batas 3 halaman per kombinasi | `config.batas_halaman_riset()` |
 | Batas per sesi & jeda | `AUTO_APPLY_MAX_PER_SESSION`, `DELAY_BETWEEN_APPLY` |
 | Ingatan isian formulir | `jawaban.py` lewat `auto_apply.py` |
 
 Perbedaan yang masih ada **hanya teknis**: cara membaca kartu, tombol Lamar,
 dan lowongan yang hanya bisa dilamar lewat aplikasi Glints (ditandai
 *perlu manual*, bukan dilewati). Dikunci oleh `tests/test_paritas_apply.py`.
+
+### Aturan inti (master prompt)
+
+| Pasal | Aturan | Setelan |
+|---|---|---|
+| 3.2 | **3 halaman** per kombinasi kata kunci × lokasi, tidak bisa dinaikkan | `RESEARCH_MAX_PAGES` (maks 3) |
+| 6.1 | **Wajib logo** di JobStreet & Glints; Indeed dikecualikan | `REQUIRE_COMPANY_LOGO` |
+| 6.2 | Gaji ≥ **Rp4.500.000** (batas bawah rentang); tanpa info gaji **tetap** dilamar | `MIN_SALARY` |
+| 9.2 | Maks **50** lamaran terkirim/hari, dihitung menurut **WIB** | `MAX_APPLY_PER_DAY` |
+| 4.3 | **Satu sesi** saja: peluncur kedua ditolak | berkas `.dimastes-sesi.lock` |
+
+Antrean lowongan kini dicatat di database (`jobs`): `status_antrean`
+(`found` → `collected` → `filtered` → `qualified` → `ready_to_apply` →
+`applying` → `applied` / `failed` / `review_required` / `rejected` /
+`expired`), `alasan`, `posted_at`, `dikumpulkan_at`, `diperbarui_at`, `skor`.
+Dipakai perintah `history` dan menjadi dasar dashboard pada fase berikutnya.
 
 ### Satu klik: berkas peluncur
 
@@ -994,11 +1010,11 @@ Indeed memakai **aturan yang sama persis** dengan JobStreet:
 
 | Aturan | Nilai di Indeed |
 |---|---|
-| Riset | semua `KEYWORDS` × semua `LOCATIONS`, maksimal 5 halaman per kombinasi |
+| Riset | semua `KEYWORDS` × semua `LOCATIONS`, maksimal 3 halaman per kombinasi |
 | Urutan | tanggal terbaru (`sort=date`) |
 | Dedupe | lintas kata kunci × lokasi |
 | Saringan | `JobFilter` yang sama (judul, lokasi, gaji `MIN_SALARY`, kualifikasi) |
-| Logo perusahaan | **tidak disaring** — sama seperti JobStreet & Glints |
+| Logo perusahaan | **tidak disaring** — kartu Indeed tidak memuat logo (dikecualikan) |
 | Skor & ranking | 8 dimensi, ranking global, ambil yang terbaik dulu |
 | Kuota harian | `kuota.py` — 50/hari, **dipakai bersama** JobStreet & Glints |
 | Batas per sesi | `AUTO_APPLY_MAX_PER_SESSION` |
@@ -1011,9 +1027,9 @@ Indeed memakai **aturan yang sama persis** dengan JobStreet:
 Lamaran Indeed yang dialihkan ke situs perusahaan (`Apply on company site`)
 dilewati sebagai *perlu manual* — sama seperti JobStreet.
 
-Catatan: ketiga situs tetap **membaca** gambar/logo perusahaan untuk
-ditampilkan di daftar kandidat, tetapi hasilnya **tidak** dipakai menyaring.
-Tidak ada syarat tambahan khusus Glints atau Indeed.
+Catatan: logo/gambar wajib di JobStreet & Glints. Indeed dikecualikan karena
+kartunya memang tidak memuat logo; bila suatu saat Indeed menampilkan logo,
+aturannya tetap tidak dipakai demi konsistensi hasil.
 
 ```powershell
 .\jalankan.bat indeed run
@@ -1102,7 +1118,7 @@ Perbedaan yang perlu diketahui:
 | Umur lowongan | terbaca ("3 hari yang lalu") | tidak ditampilkan Glints |
 | Lowongan khusus HP | — | *"Lamar & chat di aplikasi"* ditandai **perlu manual** |
 | Batas gaji | `MIN_SALARY` | `MIN_SALARY` (sama persis) |
-| Logo perusahaan | tidak disaring | tidak disaring (sama) |
+| Logo perusahaan | wajib | wajib (sama) |
 | Kuota harian & pilih yang paling cocok | `MAX_APPLY_PER_DAY` + `RANK_BY` | sama |
 | Menunggu kuesioner diisi | `AUTO_ANSWER_WAIT` | sama |
 

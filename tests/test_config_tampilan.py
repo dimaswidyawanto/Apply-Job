@@ -16,8 +16,7 @@ def test_show_config_menampilkan_aturan_baru(capsys, monkeypatch):
     keluaran = capsys.readouterr().out
 
     assert "Wajib ada logo perusahaan" in keluaran
-    # Logo tidak dipakai menyaring di situs mana pun.
-    assert "Tidak dipakai" in keluaran
+    assert "Aktif" in keluaran
     # Tabel rich membungkus teks per kata, jadi periksa per kata.
     assert "Kumpulkan" in keluaran
     assert "bandingkan" in keluaran
@@ -37,6 +36,6 @@ def test_show_config_saat_aturan_mati(capsys, monkeypatch):
     keluaran = capsys.readouterr().out
 
     assert "Wajib ada logo perusahaan" in keluaran
-    assert "Tidak dipakai" in keluaran
+    assert "Aktif" in keluaran
     assert "Lamar sambil mencari" in keluaran
     assert "Tidak menunggu (langsung dilewati)" in keluaran

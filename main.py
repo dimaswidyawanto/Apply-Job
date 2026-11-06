@@ -784,7 +784,7 @@ class AutoApplyEngine:
         )
         table.add_row(
             "Wajib ada logo perusahaan",
-            "Tidak dipakai (sama di JobStreet, Glints, Indeed)",
+            "Aktif (JobStreet & Glints; Indeed tanpa logo)",
         )
         table.add_row("Gaji minimum", f"Rp {config.min_salary:,}")
         table.add_row("Batas pengalaman", f"{config.max_experience} tahun")

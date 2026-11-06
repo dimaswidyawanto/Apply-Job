@@ -1253,7 +1253,7 @@ def tampilkan_konfigurasi_glints() -> None:
         if config.locations
         else "semua lokasi",
     )
-    tabel.add_row("Wajib logo perusahaan", "tidak (sama di semua situs)")
+    tabel.add_row("Wajib logo perusahaan", "ya (seperti JobStreet)")
     tabel.add_row("Urutan kandidat", getattr(config, "rank_by", "relevance"))
     tabel.add_row("Jeda antar lamaran", f"{config.delay_between_apply} detik")
     tabel.add_row(

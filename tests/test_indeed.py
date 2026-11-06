@@ -152,8 +152,8 @@ def test_tanpa_logo_tetap_layak_di_indeed(monkeypatch):
     assert indeed_module.alasan_tidak_layak(job) == ""
 
 
-def test_ketiga_situs_memakai_aturan_logo_yang_sama():
-    """JobStreet, Glints, dan Indeed: tanpa gambar pun tetap lolos."""
+def test_logo_wajib_di_jobstreet_dan_glints_tapi_tidak_di_indeed():
+    """Pasal 6.1: logo wajib; Indeed dikecualikan karena kartunya tanpa logo."""
     from glints import alasan_tidak_layak as alasan_glints
     from job_filter import JobFilter
 
@@ -170,10 +170,15 @@ def test_ketiga_situs_memakai_aturan_logo_yang_sama():
         }
 
         lolos, alasan = JobFilter().should_apply(dasar)
-        assert lolos is True, alasan
+        assert lolos is False
+        assert "logo" in alasan.lower()
 
-        assert alasan_glints(dict(dasar, job_id="glints:y")) == ""
-        assert indeed_module.alasan_tidak_layak(dict(dasar, job_id="indeed:z")) == ""
+        assert "logo" in alasan_glints(dict(dasar, job_id="glints:y")).lower()
+
+        # Indeed: kartu tanpa logo tetap layak.
+        assert indeed_module.alasan_tidak_layak(
+            dict(dasar, job_id="indeed:z", logo_diabaikan=True)
+        ) == ""
     finally:
         config.require_company_logo = lama_logo
         config.require_keyword_match = lama_kata

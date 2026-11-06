@@ -3,6 +3,7 @@
 import sqlite3
 import threading
 from contextlib import contextmanager, suppress
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from config import config
@@ -14,6 +15,45 @@ APPLIED_STATUSES = ("applied", "already_applied")
 QUOTA_STATUSES = ("applied",)
 
 TITLE_FALLBACK = "(judul tidak tersedia)"
+
+# Master prompt pasal 9.2: kuota harian mengikuti WIB (Asia/Jakarta), bukan
+# zona waktu komputer. `applied_at` disimpan SQLite dalam UTC, jadi batas hari
+# dihitung dalam WIB lalu dikonversi ke UTC sebelum dipakai pada query.
+WIB = timezone(timedelta(hours=7))
+
+
+def rentang_hari_wib(sekarang: Optional[datetime] = None) -> tuple[str, str]:
+    """Awal dan akhir hari ini menurut WIB, dalam teks UTC (format SQLite)."""
+    kini = sekarang or datetime.now(WIB)
+    kini = (
+        kini.replace(tzinfo=WIB) if kini.tzinfo is None else kini.astimezone(WIB)
+    )
+
+    mulai = kini.replace(hour=0, minute=0, second=0, microsecond=0)
+    selesai = mulai + timedelta(days=1)
+
+    format_ = "%Y-%m-%d %H:%M:%S"
+    return (
+        mulai.astimezone(timezone.utc).strftime(format_),
+        selesai.astimezone(timezone.utc).strftime(format_),
+    )
+
+
+# Status antrean lowongan (master prompt pasal 4.2).
+STATUS_ANTREAN = (
+    "found",
+    "collected",
+    "filtered",
+    "classified",
+    "qualified",
+    "ready_to_apply",
+    "applying",
+    "applied",
+    "failed",
+    "review_required",
+    "rejected",
+    "expired",
+)
 
 
 def _nilai_logo(nilai) -> int | None:
@@ -155,6 +195,13 @@ class Database:
         for column, definition in (
             ("has_logo", "INTEGER"),
             ("logo_src", "TEXT"),
+            # Status antrean & alasan penilaian (master prompt pasal 4.1-4.3).
+            ("status_antrean", "TEXT"),
+            ("alasan", "TEXT"),
+            ("posted_at", "TEXT"),
+            ("dikumpulkan_at", "TIMESTAMP"),
+            ("diperbarui_at", "TIMESTAMP"),
+            ("skor", "REAL"),
         ):
             if column not in job_columns:
                 conn.execute(
@@ -260,9 +307,10 @@ class Database:
                     INSERT INTO jobs (
                         job_id, title, company, location,
                         salary, description, url, date_posted,
-                        has_logo, logo_src
+                        has_logo, logo_src,
+                        status_antrean, alasan, posted_at, dikumpulkan_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                     """,
                     (
                         job_id,
@@ -275,11 +323,54 @@ class Database:
                         str(job_data.get("date_posted") or ""),
                         _nilai_logo(job_data.get("has_logo")),
                         str(job_data.get("logo_src") or ""),
+                        str(job_data.get("status_antrean") or "found"),
+                        str(job_data.get("alasan") or ""),
+                        str(job_data.get("date_posted") or ""),
                     ),
                 )
                 return True
             except sqlite3.IntegrityError:
                 return False
+
+    def set_status_antrean(self, job_id: str, status: str,
+                           alasan: str = "", skor: Optional[float] = None) -> bool:
+        """Ubah status antrean satu lowongan (pasal 4.2)."""
+        job_id = str(job_id or "").strip()
+        status = str(status or "").strip().lower()
+
+        if not job_id or status not in STATUS_ANTREAN:
+            return False
+
+        with self._get_conn() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE jobs
+                   SET status_antrean = ?,
+                       alasan = COALESCE(NULLIF(?, ''), alasan),
+                       skor = COALESCE(?, skor),
+                       diperbarui_at = CURRENT_TIMESTAMP
+                 WHERE job_id = ?
+                """,
+                (status, str(alasan or ""), skor, job_id),
+            )
+            return cursor.rowcount > 0
+
+    def hitung_status_antrean(self) -> dict:
+        """Jumlah lowongan per status antrean (untuk dashboard)."""
+        hasil = {status: 0 for status in STATUS_ANTREAN}
+
+        with self._get_conn() as conn:
+            for row in conn.execute(
+                """
+                SELECT COALESCE(NULLIF(status_antrean, ''), 'found') AS status,
+                       COUNT(*) AS jumlah
+                  FROM jobs
+                 GROUP BY status
+                """
+            ):
+                hasil[str(row["status"])] = int(row["jumlah"])
+
+        return hasil
 
     def get_job(self, job_id: str) -> dict | None:
         with self._get_conn() as conn:
@@ -352,18 +443,22 @@ class Database:
             )
 
     def get_today_apply_count(self) -> int:
-        """Jumlah lamaran terkirim hari ini (dipakai untuk batas harian)."""
+        """Jumlah lamaran terkirim hari ini (dipakai untuk batas harian).
+
+        Hari dihitung menurut WIB (pasal 9.2), bukan zona waktu komputer.
+        """
         placeholders = ", ".join("?" for _ in QUOTA_STATUSES)
+        mulai, selesai = rentang_hari_wib()
 
         with self._get_conn() as conn:
             result = conn.execute(
                 f"""
                 SELECT COUNT(*) AS count
                 FROM applications
-                WHERE DATE(applied_at, 'localtime') = DATE('now', 'localtime')
+                WHERE applied_at >= ? AND applied_at < ?
                   AND status IN ({placeholders})
                 """,
-                QUOTA_STATUSES,
+                (mulai, selesai, *QUOTA_STATUSES),
             ).fetchone()
 
             return int(result["count"])
@@ -458,14 +553,15 @@ class Database:
                 APPLIED_STATUSES,
             ).fetchone()["count"]
 
+            mulai, selesai = rentang_hari_wib()
             today_applied = conn.execute(
                 f"""
                 SELECT COUNT(*) AS count
                 FROM applications
-                WHERE DATE(applied_at, 'localtime') = DATE('now', 'localtime')
+                WHERE applied_at >= ? AND applied_at < ?
                   AND status IN ({placeholders})
                 """,
-                APPLIED_STATUSES,
+                (mulai, selesai, *APPLIED_STATUSES),
             ).fetchone()["count"]
 
             return {

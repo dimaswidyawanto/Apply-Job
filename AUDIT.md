@@ -106,6 +106,28 @@ menampilkan data yang tidak lengkap.
 
 ---
 
+## 5a. Status pelaksanaan
+
+Keputusan Anda: logo wajib di JobStreet & Glints (Indeed dikecualikan),
+3 halaman per kombinasi, lowongan tanpa info gaji tetap boleh dilamar,
+dan semua fase dikerjakan berurutan.
+
+**Fase 1 — selesai (`96dc574` → commit sesudahnya):**
+- Batas riset 5 → **3 halaman** (`config.MAKS_HALAMAN_RISET`), seragam 3 situs.
+- Logo **wajib lagi** di JobStreet & Glints; Indeed tetap dikecualikan
+  (`logo_diabaikan`).
+- `MIN_SALARY` bawaan **4.500.000**; lowongan tanpa info gaji tetap layak.
+- Kolom baru `jobs`: `status_antrean`, `alasan`, `posted_at`,
+  `dikumpulkan_at`, `diperbarui_at`, `skor` + `set_status_antrean()` dan
+  `hitung_status_antrean()`.
+- Kuota harian memakai **batas hari WIB** eksplisit (`rentang_hari_wib`),
+  bukan zona waktu komputer.
+- **Kunci sesi tunggal** (`kunci.py`) mencegah dua peluncur melamar bersamaan.
+- Tes: `tests/test_antrean.py` (12) + penyesuaian tes aturan; 465 tes hijau.
+
+**Berikutnya (Fase 2):** status antrean dipakai penuh di alur 3 situs,
+klaim worker, resume setelah henti, dan `REVIEW_REQUIRED` untuk logo tak pasti.
+
 ## 6. Yang TIDAK akan saya ubah tanpa persetujuan Anda
 
 Sesuai pasal 12.5: batas gaji, batas 50/hari, kriteria logo, daftar lokasi,

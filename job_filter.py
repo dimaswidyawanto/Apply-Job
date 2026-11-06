@@ -175,9 +175,15 @@ class JobFilter:
             if dikecualikan:
                 return False, f"Perusahaan di-blacklist: {dikecualikan}"
 
-        # Logo/gambar perusahaan TIDAK dipakai menyaring di situs mana pun.
-        # JobStreet, Glints, dan Indeed memakai aturan yang sama: ada gambar
-        # atau tidak, lowongan tetap diproses. `has_logo` hanya untuk tampilan.
+        # Logo/gambar perusahaan (pasal 6.1): WAJIB di JobStreet & Glints.
+        # Indeed menandai `logo_diabaikan` karena kartunya tidak memuat logo,
+        # jadi lowongan Indeed tidak ikut tertolak.
+        if (
+            config.require_company_logo
+            and not job.get("logo_diabaikan")
+            and job.get("has_logo") is False
+        ):
+            return False, "Tanpa logo perusahaan"
 
         title_lower = title.lower()
 

@@ -258,8 +258,9 @@ def rapikan_kartu(data: Dict) -> Optional[Dict]:
 
     return {
         "has_logo": punya_logo,
-        # Logo hanya untuk tampilan: ada/tidaknya gambar tidak pernah menjadi
-        # alasan melewati lowongan (aturan sama di JobStreet/Glints/Indeed).
+        # Kartu Indeed tidak memuat logo perusahaan, jadi aturan "wajib logo"
+        # (JobStreet & Glints) tidak dipakai di sini.
+        "logo_diabaikan": True,
         "logo_src": info_logo,
         "job_id": f"indeed:{kunci}",
         "title": judul,
@@ -861,7 +862,7 @@ def tampilkan_konfigurasi() -> None:
         else "semua lokasi",
     )
     tabel.add_row(
-        "Wajib logo perusahaan", "tidak (sama di semua situs)"
+        "Wajib logo perusahaan", "tidak (kartu Indeed tanpa logo)"
     )
     tabel.add_row("Urutan kandidat", getattr(config, "rank_by", "relevance"))
     tabel.add_row("Jeda antar lamaran", f"{config.delay_between_apply} detik")
