@@ -229,11 +229,11 @@ class AutoApplyEngine:
     def _peringatkan_logo(self, jobs: list):
         """Ingatkan bila semua kartu di satu halaman terbaca tanpa logo.
 
-        Bila di situs logonya terlihat, berarti aturan deteksi perlu
-        disesuaikan — tanpa peringatan ini filter akan diam-diam membuang
-        semua lowongan.
+        Logo **tidak** dipakai menyaring di JobStreet, Glints, maupun Indeed
+        (ada/tidaknya gambar bukan alasan melewati lowongan). Peringatan ini
+        hanya menandai kemungkinan deteksi gambar yang perlu disesuaikan.
         """
-        if not config.require_company_logo or self._logo_diingatkan:
+        if self._logo_diingatkan:
             return
 
         if len(jobs) < 3:
@@ -784,8 +784,7 @@ class AutoApplyEngine:
         )
         table.add_row(
             "Wajib ada logo perusahaan",
-            "Aktif (JobStreet & Glints)" if config.require_company_logo
-            else "Tidak aktif",
+            "Tidak dipakai (sama di JobStreet, Glints, Indeed)",
         )
         table.add_row("Gaji minimum", f"Rp {config.min_salary:,}")
         table.add_row("Batas pengalaman", f"{config.max_experience} tahun")

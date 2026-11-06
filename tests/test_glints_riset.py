@@ -120,8 +120,8 @@ def test_rincian_skor_ditampilkan_untuk_glints(capsys):
     assert keluaran.count("│") >= 10
 
 
-def test_peringatan_saat_semua_kartu_glints_tanpa_logo(monkeypatch, capsys):
-    """Jangan diam-diam melewati semua lowongan bila deteksi logo salah."""
+def test_kartu_tanpa_logo_tetap_dilamar(monkeypatch, capsys):
+    """Logo bukan syarat: semua kartu tanpa gambar tetap diproses."""
     from config import config as cfg
 
     monkeypatch.setattr(cfg, "require_company_logo", True)
@@ -152,16 +152,21 @@ def test_peringatan_saat_semua_kartu_glints_tanpa_logo(monkeypatch, capsys):
             return [dict(kartu)] if nomor == 0 else []
 
         def lamar(self, job):
+            from auto_apply import ApplyResult
+
             self.dilamar.append(job["job_id"])
-            raise AssertionError("tidak boleh melamar tanpa logo")
+            return ApplyResult(True, "applied", "Terkirim")
 
         def tutup(self):
             return None
 
     monkeypatch.setattr(glints_module, "GlintsBot", BotPalsu)
+    monkeypatch.setattr(glints_module.notifier, "send_apply_success", lambda job: None)
+    monkeypatch.setattr(glints_module.notifier, "send_daily_report", lambda s: None)
+    monkeypatch.setattr(glints_module.time, "sleep", lambda *_: None)
 
-    glints_module.jalankan_glints()
+    laporan = glints_module.jalankan_glints()
 
+    assert laporan["dilamar"] == 1
     keluaran = " ".join(capsys.readouterr().out.lower().split())
-    assert "terbaca tanpa logo" in keluaran
-    assert "glints cari" in keluaran
+    assert "terbaca tanpa logo" not in keluaran

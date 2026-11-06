@@ -35,13 +35,18 @@ from database import db
 from glints import (
     folder_debug,
     label_umur,
-    lokasi_cocok,
     pilih_teratas,
     tampilkan_perbandingan,
     tampilkan_rincian_skor,
     umur_dari_teks,
 )
-from job_filter import JobFilter, dedupe_jobs
+from job_filter import (
+    JobFilter,
+    dedupe_jobs,
+)
+from job_filter import (
+    alasan_tidak_layak as alasan_standar,
+)
 from notifier import notifier
 
 console = Console()
@@ -253,9 +258,8 @@ def rapikan_kartu(data: Dict) -> Optional[Dict]:
 
     return {
         "has_logo": punya_logo,
-        # Kartu Indeed tidak memuat logo perusahaan, jadi aturan "wajib logo"
-        # milik JobStreet tidak dipakai di situs ini.
-        "logo_diabaikan": True,
+        # Logo hanya untuk tampilan: ada/tidaknya gambar tidak pernah menjadi
+        # alasan melewati lowongan (aturan sama di JobStreet/Glints/Indeed).
         "logo_src": info_logo,
         "job_id": f"indeed:{kunci}",
         "title": judul,
@@ -273,23 +277,12 @@ def rapikan_kartu(data: Dict) -> Optional[Dict]:
 
 
 def alasan_tidak_layak(job: Dict, saringan: Optional[JobFilter] = None) -> str:
-    """Alasan lowongan tidak dicoba dilamar ('' bila layak) — sama JobStreet."""
-    if job.get("sudah_dilamar"):
-        return "sudah pernah dilamar"
+    """Alasan lowongan tidak dicoba dilamar ('' bila layak).
 
-    job_id = str(job.get("job_id") or "").strip()
-    if job_id and db.is_already_applied(job_id):
-        return "Sudah tercatat dilamar"
-
-    if not lokasi_cocok(str(job.get("location") or ""), config.locations):
-        return f"lokasi di luar daftar ({job.get('location') or '-'})"
-
-    saringan = saringan or JobFilter()
-    lolos, kenapa = saringan.should_apply(job)
-    if not lolos:
-        return kenapa
-
-    return ""
+    Memakai aturan tunggal JobStreet (`job_filter.alasan_tidak_layak`), tanpa
+    syarat tambahan khusus Indeed.
+    """
+    return alasan_standar(job, saringan)
 
 
 class IndeedApplier(AutoApplier):
@@ -868,7 +861,7 @@ def tampilkan_konfigurasi() -> None:
         else "semua lokasi",
     )
     tabel.add_row(
-        "Wajib logo perusahaan", "tidak (kartu Indeed tanpa logo)"
+        "Wajib logo perusahaan", "tidak (sama di semua situs)"
     )
     tabel.add_row("Urutan kandidat", getattr(config, "rank_by", "relevance"))
     tabel.add_row("Jeda antar lamaran", f"{config.delay_between_apply} detik")

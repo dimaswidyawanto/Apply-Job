@@ -615,8 +615,7 @@ def show_config():
     )
     table.add_row(
         "Wajib ada logo perusahaan",
-        "Aktif (JobStreet & Glints)" if config.require_company_logo
-        else "Tidak aktif",
+        "Tidak dipakai (sama di JobStreet, Glints, Indeed)",
     )
     table.add_row(
         "Pertanyaan pilihan otomatis",

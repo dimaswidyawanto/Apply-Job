@@ -269,8 +269,11 @@ def test_mode_manual_menunggu_konfirmasi(monkeypatch):
 
 
 def test_alasan_tidak_layak_memeriksa_database(monkeypatch):
-    monkeypatch.setattr(glints_module, "db", DbPalsu(sudah={KARTU[0]["job_id"]}))
-    monkeypatch.setattr(glints_module.config, "glints_min_salary", 0)
+    import job_filter as aturan
+
+    basis = DbPalsu(sudah={KARTU[0]["job_id"]})
+    monkeypatch.setattr(glints_module, "db", basis)
+    monkeypatch.setattr(aturan, "db", basis)
 
     alasan = glints_module.alasan_tidak_layak(dict(KARTU[0]))
 

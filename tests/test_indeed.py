@@ -6,6 +6,7 @@ sesi, serta peta tombol Indeed pada mesin lamaran.
 """
 
 import indeed as indeed_module
+import job_filter as aturan_module
 from config import config
 from indeed import IndeedApplier, IndeedBot, rapikan_kartu, url_pencarian
 
@@ -109,40 +110,51 @@ def test_kartu_bertanda_sudah_dilamar_dikenali():
 
 # ---------------------------------------------------------- penyaringan ----
 def test_alasan_menolak_yang_sudah_tercatat(monkeypatch):
-    monkeypatch.setattr(
-        indeed_module, "db", DbPalsu(sudah={"indeed:abc123def456"})
-    )
+    basis = DbPalsu(sudah={"indeed:abc123def456"})
+    monkeypatch.setattr(indeed_module, "db", basis)
+    monkeypatch.setattr(aturan_module, "db", basis)
     job = rapikan_kartu(KARTU_MENTAH)
 
     assert indeed_module.alasan_tidak_layak(job) == "Sudah tercatat dilamar"
 
 
-def test_alasan_menolak_lokasi_di_luar_daftar(monkeypatch):
-    monkeypatch.setattr(indeed_module, "db", DbPalsu())
+def test_lokasi_mengikuti_setelan_jobstreet(monkeypatch):
+    """Tidak ada syarat lokasi tambahan; hanya STRICT_LOCATION seperti JobStreet."""
+    basis = DbPalsu()
+    monkeypatch.setattr(indeed_module, "db", basis)
+    monkeypatch.setattr(aturan_module, "db", basis)
     monkeypatch.setattr(config, "locations", ["Jakarta"], raising=False)
-
-    job = rapikan_kartu(KARTU_MENTAH)
-    assert "lokasi di luar daftar" in indeed_module.alasan_tidak_layak(job)
-
-
-def test_tanpa_logo_tetap_layak_di_indeed(monkeypatch):
-    """Kartu Indeed tidak memuat logo, jadi aturan wajib logo tidak dipakai."""
-    monkeypatch.setattr(indeed_module, "db", DbPalsu())
-    monkeypatch.setattr(config, "locations", ["Bandung"], raising=False)
-    monkeypatch.setattr(config, "require_company_logo", True, raising=False)
+    monkeypatch.setattr(config, "strict_location", False, raising=False)
     monkeypatch.setattr(config, "min_salary", 0, raising=False)
     monkeypatch.setattr(config, "require_keyword_match", False, raising=False)
 
-    mentah = dict(KARTU_MENTAH, logo=[])
-    job = rapikan_kartu(mentah)
+    job = rapikan_kartu(KARTU_MENTAH)
+    assert indeed_module.alasan_tidak_layak(job) == ""
+
+    monkeypatch.setattr(config, "strict_location", True, raising=False)
+    assert "okasi" in indeed_module.alasan_tidak_layak(job)
+
+
+def test_tanpa_logo_tetap_layak_di_indeed(monkeypatch):
+    """Ada/tidaknya gambar tidak pernah menjadi alasan melewati lowongan."""
+    basis = DbPalsu()
+    monkeypatch.setattr(indeed_module, "db", basis)
+    monkeypatch.setattr(aturan_module, "db", basis)
+    monkeypatch.setattr(config, "locations", ["Bandung"], raising=False)
+    monkeypatch.setattr(config, "require_company_logo", True, raising=False)
+    monkeypatch.setattr(config, "strict_location", False, raising=False)
+    monkeypatch.setattr(config, "min_salary", 0, raising=False)
+    monkeypatch.setattr(config, "require_keyword_match", False, raising=False)
+
+    job = rapikan_kartu(dict(KARTU_MENTAH, logo=[]))
 
     assert job["has_logo"] is False
-    assert job["logo_diabaikan"] is True
     assert indeed_module.alasan_tidak_layak(job) == ""
 
 
-def test_jobstreet_tetap_mewajibkan_logo():
-    """Penanda logo_diabaikan hanya dipakai Indeed; JobStreet tidak berubah."""
+def test_ketiga_situs_memakai_aturan_logo_yang_sama():
+    """JobStreet, Glints, dan Indeed: tanpa gambar pun tetap lolos."""
+    from glints import alasan_tidak_layak as alasan_glints
     from job_filter import JobFilter
 
     lama_logo = config.require_company_logo
@@ -150,14 +162,18 @@ def test_jobstreet_tetap_mewajibkan_logo():
     config.require_company_logo = True
     config.require_keyword_match = False
     try:
-        job = {"job_id": "x1", "title": "Staff Gudang", "has_logo": False}
-        lolos, alasan = JobFilter().should_apply(job)
-        assert lolos is False
-        assert alasan == "Tanpa logo perusahaan"
+        dasar = {
+            "job_id": "x1",
+            "title": "Staff Gudang",
+            "location": "Bandung",
+            "has_logo": False,
+        }
 
-        job_indeed = dict(job, job_id="x2", logo_diabaikan=True)
-        lolos_indeed, _ = JobFilter().should_apply(job_indeed)
-        assert lolos_indeed is True
+        lolos, alasan = JobFilter().should_apply(dasar)
+        assert lolos is True, alasan
+
+        assert alasan_glints(dict(dasar, job_id="glints:y")) == ""
+        assert indeed_module.alasan_tidak_layak(dict(dasar, job_id="indeed:z")) == ""
     finally:
         config.require_company_logo = lama_logo
         config.require_keyword_match = lama_kata

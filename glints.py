@@ -30,7 +30,13 @@ from auto_apply import ApplyResult, AutoApplier
 from browser import buka_chrome, tutup_chrome
 from config import MAKS_HALAMAN_RISET, batas_halaman_riset, config
 from database import db
-from job_filter import JobFilter, dedupe_jobs, rentang_gaji
+from job_filter import (
+    JobFilter,
+    dedupe_jobs,
+)
+from job_filter import (
+    alasan_tidak_layak as alasan_standar,
+)
 from job_filter import job_filter as penyaring
 from notifier import notifier
 
@@ -472,67 +478,14 @@ def lokasi_cocok(lokasi: str, daftar: List[str]) -> bool:
     return any(item.lower().strip() in teks for item in daftar if item.strip())
 
 
-def lolos_gaji(job: Dict, minimal: Optional[int] = None) -> bool:
-    """True bila gaji lowongan memenuhi batas minimal Glints.
-
-    Aturan pemakai: gaji di bawah batas tidak dilamar, tetapi lowongan yang
-    tidak mencantumkan gaji tetap dilamar. Untuk rentang (mis. "Rp 4-4,5jt")
-    dipakai angka tertinggi, karena gaji yang ditawarkan bisa mencapai itu.
-    """
-    batas = config.glints_min_salary if minimal is None else minimal
-    if not batas or batas <= 0:
-        return True
-
-    _, tertinggi = rentang_gaji(str(job.get("salary") or ""))
-    if tertinggi <= 0:
-        # Tidak ada angka gaji: tetap dilamar sesuai permintaan.
-        return True
-
-    return tertinggi >= batas
-
-
-def alasan_gaji(job: Dict, minimal: Optional[int] = None) -> str:
-    """Alasan penolakan karena gaji ('' bila lolos)."""
-    if lolos_gaji(job, minimal):
-        return ""
-
-    batas = config.glints_min_salary if minimal is None else minimal
-    gaji = " ".join(str(job.get("salary") or "").split())
-    return (
-        f"Gaji di bawah Rp{batas:,}".replace(",", ".")
-        + f" ({gaji})"
-    )
-
-
 def alasan_tidak_layak(job: Dict, saringan: Optional[JobFilter] = None) -> str:
     """Alasan lowongan tidak dicoba dilamar ('' bila layak).
 
-    Dipakai `glints cari` dan `glints uji` otomatis, supaya keduanya memilih
-    lowongan dengan aturan yang sama seperti sesi penuh.
+    Memakai aturan tunggal JobStreet (`job_filter.alasan_tidak_layak`): tidak
+    ada syarat tambahan khusus Glints seperti batas gaji Glints atau lokasi
+    wajib, dan logo perusahaan tidak dipakai menyaring.
     """
-    if job.get("khusus_aplikasi"):
-        return "hanya bisa dilamar lewat aplikasi Glints"
-
-    if job.get("sudah_dilamar"):
-        return "sudah pernah dilamar"
-
-    job_id = str(job.get("job_id") or "").strip()
-    if job_id and db.is_already_applied(job_id):
-        return "Sudah tercatat dilamar"
-
-    alasan = alasan_gaji(job)
-    if alasan:
-        return alasan
-
-    if not lokasi_cocok(str(job.get("location") or ""), config.locations):
-        return f"lokasi di luar daftar ({job.get('location') or '-'})"
-
-    saringan = saringan or JobFilter()
-    lolos, kenapa = saringan.should_apply(job)
-    if not lolos:
-        return kenapa
-
-    return ""
+    return alasan_standar(job, saringan)
 
 
 # ----------------------------------------------------------------------
@@ -1300,15 +1253,13 @@ def tampilkan_konfigurasi_glints() -> None:
         if config.locations
         else "semua lokasi",
     )
-    tabel.add_row(
-        "Wajib logo perusahaan", "ya" if config.require_company_logo else "tidak"
-    )
+    tabel.add_row("Wajib logo perusahaan", "tidak (sama di semua situs)")
     tabel.add_row("Urutan kandidat", getattr(config, "rank_by", "relevance"))
     tabel.add_row("Jeda antar lamaran", f"{config.delay_between_apply} detik")
     tabel.add_row(
-        "Gaji minimal Glints",
-        f"Rp{config.glints_min_salary:,}".replace(",", ".")
-        if getattr(config, "glints_min_salary", 0)
+        "Gaji minimal",
+        f"Rp{config.min_salary:,}".replace(",", ".")
+        if config.min_salary
         else "tanpa batas",
     )
     tabel.add_row(
@@ -1421,17 +1372,17 @@ def jalankan_glints(max_pages: int = 0, keywords: Optional[List[str]] = None,
 
         # --- Saring dulu semuanya, baru bandingkan dan pilih yang terbaik ---
         layak: List[Dict] = []
-        tanpa_logo = 0
 
         for job in lowongan:
             if job.get("khusus_aplikasi"):
-                # Glints menandai lowongan "Lamar 1x tap di aplikasi"; tidak
-                # ada formulir web, jadi jangan buka halamannya sama sekali.
+                # Perbedaan teknis Glints: lowongan ini tidak punya formulir
+                # web. Diperlakukan seperti "apply di situs perusahaan" pada
+                # JobStreet, yaitu PERLU MANUAL — bukan dilewati.
                 laporan["khusus_aplikasi"] += 1
-                laporan["dilewati"] += 1
+                laporan["perlu_manual"] += 1
                 console.print(
-                    f"[dim]Lewati: {job['title']} — hanya bisa dilamar lewat "
-                    "aplikasi Glints[/]"
+                    f"[yellow]Perlu manual: {job['title']} — hanya bisa "
+                    f"dilamar lewat aplikasi Glints[/]\n[dim]   {job.get('url', '')}[/]"
                 )
                 continue
 
@@ -1455,38 +1406,14 @@ def jalankan_glints(max_pages: int = 0, keywords: Optional[List[str]] = None,
             if db.add_job(job):
                 laporan["baru"] += 1
 
-            alasan = alasan_gaji(job)
+            # Aturan kelayakan tunggal — sama persis dengan JobStreet & Indeed.
+            alasan = alasan_tidak_layak(job, bot.filters)
             if alasan:
                 laporan["dilewati"] += 1
                 console.print(f"[dim]Lewati: {job['title']} — {alasan}[/]")
                 continue
 
-            if not lokasi_cocok(job.get("location", ""), config.locations):
-                laporan["dilewati"] += 1
-                console.print(
-                    f"[dim]Lewati: {job['title']} — lokasi {job['location']}[/]"
-                )
-                continue
-
-            lolos, alasan = bot.filters.should_apply(job)
-            if not lolos:
-                laporan["dilewati"] += 1
-                if "logo" in str(alasan).lower():
-                    tanpa_logo += 1
-                console.print(f"[dim]Lewati: {job['title']} — {alasan}[/]")
-                continue
-
             layak.append(job)
-
-        # Peringatan penting: bila SEMUA kartu terbaca tanpa logo, kemungkinan
-        # besar deteksinya yang perlu disesuaikan, bukan lowongannya.
-        if config.require_company_logo and lowongan and tanpa_logo == len(lowongan):
-            console.print(
-                f"[yellow]Semua {tanpa_logo} kartu Glints terbaca tanpa logo. "
-                "Bila di situs logonya terlihat, jalankan "
-                "`python cli.py glints cari` lalu kirimkan tabelnya agar "
-                "deteksi logo Glints disesuaikan.[/]"
-            )
 
         if not layak:
             console.print("[yellow]Tidak ada lowongan Glints yang lolos filter.[/]")
@@ -1925,10 +1852,10 @@ def cek_glints(keyword: str = "", max_pages: int = 1, lamar: int = 0,
                         f"{len(kandidat) - tanpa_logo} berlogo · {dobel} duplikat"
                     )
                     if tanpa_logo:
-                        catatan += f" · {tanpa_logo} tanpa logo"
+                        catatan += f" · {tanpa_logo} tanpa logo (tidak disaring)"
                     catat(
                         "2. Saring kandidat",
-                        tanpa_logo == 0 and dobel == 0,
+                        dobel == 0,
                         catatan,
                     )
             except Exception as exc:

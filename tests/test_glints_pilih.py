@@ -17,7 +17,8 @@ def saringan(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "locations", ["Bandung", "Bekasi", "Tangerang"])
     monkeypatch.setattr(config, "blocked_companies", ["royal abadi", "ifa"])
     monkeypatch.setattr(config, "blacklist_companies", [])
-    monkeypatch.setattr(config, "glints_min_salary", 4_500_000)
+    monkeypatch.setattr(config, "min_salary", 0)
+    monkeypatch.setattr(config, "strict_location", False)
     monkeypatch.setattr(config, "require_keyword_match", True)
     monkeypatch.setattr(
         config, "title_keywords", ["inventory", "gudang", "warehouse", "ppic"]
@@ -50,10 +51,7 @@ def test_lowongan_layak_tidak_punya_alasan():
 @pytest.mark.parametrize(
     "ubah, potongan",
     [
-        ({"khusus_aplikasi": True}, "aplikasi"),
         ({"sudah_dilamar": True}, "sudah pernah"),
-        ({"salary": "Rp 2-3jt"}, "gaji"),
-        ({"location": "Surabaya, Jawa Timur"}, "lokasi"),
         ({"title": "Sales Executive"}, "judul"),
         ({"company": "PT IFA Indonesia"}, "blacklist"),
     ],
@@ -65,9 +63,32 @@ def test_alasan_tidak_layak(ubah, potongan):
     assert potongan in alasan.lower()
 
 
+@pytest.mark.parametrize(
+    "ubah",
+    [
+        {"khusus_aplikasi": True},          # ditangani sebagai "perlu manual"
+        {"salary": "Rp 2-3jt"},             # gaji tidak lagi jadi syarat Glints
+        {"location": "Surabaya, Jawa Timur"},
+        {"has_logo": False},                # logo tidak pernah menyaring
+    ],
+)
+def test_tidak_ada_syarat_tambahan_khusus_glints(ubah):
+    """Aturan Glints identik dengan JobStreet — tanpa kriteria tambahan."""
+    assert glints.alasan_tidak_layak(_job(**ubah)) == ""
+
+
+def test_lokasi_ketat_mengikuti_setelan_jobstreet(monkeypatch):
+    """Bila STRICT_LOCATION aktif, Glints memakai aturan yang sama."""
+    monkeypatch.setattr(config, "strict_location", True)
+
+    alasan = glints.alasan_tidak_layak(_job(location="Surabaya, Jawa Timur"))
+
+    assert "okasi" in alasan
+
+
 def test_pilih_kandidat_menjaga_urutan_dan_batas():
     lowongan = [
-        _job(salary="Rp 2-3jt"),             # gaji kurang -> dibuang
+        _job(title="Sales Executive"),        # judul tidak sesuai -> dibuang
         _job(title="Staff Gudang A"),
         _job(title="Staff Gudang B"),
         _job(title="Staff Gudang C"),

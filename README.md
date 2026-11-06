@@ -175,10 +175,10 @@ cp .env.example .env
 | `MAX_EXPERIENCE_YEARS` | `5` | Tolak lowongan yang minta pengalaman lebih dari ini |
 | `BLACKLIST_COMPANIES` | kosong | Perusahaan yang tidak ingin dilamar (dipisah koma, cocok longgar) |
 | `BLOCKED_COMPANIES` | `royal abadi,ifa` | Perusahaan yang **selalu** ditolak di JobStreet maupun Glints. Nama pendek seperti `ifa` dicocokkan per kata, jadi `Kafifa` tidak ikut tertolak |
-| `GLINTS_MIN_SALARY` | `4500000` | Khusus Glints: lamar hanya bila gaji bisa mencapai angka ini. Lowongan yang tidak mencantumkan gaji **tetap** dilamar; `0` = tanpa batas |
+| `GLINTS_MIN_SALARY` | `4500000` | **Tidak dipakai lagi.** Batas gaji sekarang satu untuk semua situs: `MIN_SALARY` |
 | `EXCLUDE_KEYWORDS` | `principal,director,head,senior,lead` | Kata yang membuat judul otomatis ditolak |
 | `STRICT_LOCATION` | `false` | `true` = tolak lowongan yang lokasinya di luar `LOCATION` |
-| `REQUIRE_COMPANY_LOGO` | `false` | JobStreet **dan** Glints: `true` = hanya lamar lowongan yang kartunya menampilkan **logo perusahaan**; tanpa logo dilewati |
+| `REQUIRE_COMPANY_LOGO` | `false` | **Tidak dipakai menyaring.** Logo/gambar perusahaan tidak pernah menjadi alasan melewati lowongan di JobStreet, Glints, maupun Indeed |
 | `MAX_APPLY_PER_DAY` | `0` | Batas **lamaran yang dikirim** per hari (mis. `50`); `0` = tanpa batas. Riset & penilaian tetap tanpa batas |
 | `DELAY_BETWEEN_APPLY` | `3` | Jeda (detik) antar lowongan |
 | `MAX_PAGES` | `3` | Jumlah halaman per kata kunci untuk mode lama (`COLLECT_BEFORE_APPLY=false`) dan `cek-logo` |
@@ -901,11 +901,11 @@ JobStreet dipakai sebagai acuan; Glints mengikuti aturan yang sama:
 | Urut posting terbaru | ya | ya ("Baru Ditambahkan") |
 | Dedupe lintas kata kunci | ya | ya |
 | Saring judul/lokasi/gaji/kualifikasi | `JobFilter` | `JobFilter` yang sama |
-| Wajib logo perusahaan (`REQUIRE_COMPANY_LOGO`) | ya | ya |
+| Logo perusahaan | tidak disaring | tidak disaring |
 | Skor 8 dimensi + ranking global | ya | ya |
 | TOP 50 global per hari, kuota dipakai bersama | ya (`kuota.py`) | ya (`kuota.py`) |
 | Lewati yang sudah pernah dilamar (situs **dan** database) | ya | ya |
-| Lewati lowongan yang hanya bisa dilamar via aplikasi | tidak berlaku | ya (khusus Glints) |
+| Lowongan yang hanya bisa dilamar via aplikasi | tidak berlaku | perlu manual (bukan dilewati) |
 | `AUTO_APPLY_MAX_PER_SESSION` | ya | ya |
 | `DELAY_BETWEEN_APPLY` (hanya setelah lamaran/error) | ya | ya |
 | Mode manual `AUTO_APPLY=false` (tinjau lalu konfirmasi) | ya | ya |
@@ -920,6 +920,24 @@ Dua perbedaan yang memang disengaja:
 2. **Pencarian Glints tidak per lokasi** — alamat explore-nya nasional
    (`countryCode=ID`), jadi hasilnya lebih luas lalu disaring dengan
    `LOCATIONS`. Aturan "semua lokasi tercakup" tetap terpenuhi.
+
+### Paritas aturan Apply: JobStreet = Glints = Indeed
+
+JobStreet adalah **acuan**. Glints dan Indeed tidak punya kriteria sendiri.
+
+| Hal | Letak satu sumbernya |
+|---|---|
+| Kelayakan lowongan (judul, blacklist, senior, gaji, pengalaman, umur, lokasi ketat) | `job_filter.alasan_tidak_layak()` dipakai ketiga situs |
+| Logo/gambar perusahaan | tidak pernah menjadi alasan skip |
+| Perankingan 8 dimensi | `job_filter.rank_jobs()` |
+| TOP N sesuai sisa kuota | `pilih_teratas()` (Glints & Indeed) + `kuota.py` |
+| Batas 5 halaman per kombinasi | `config.batas_halaman_riset()` |
+| Batas per sesi & jeda | `AUTO_APPLY_MAX_PER_SESSION`, `DELAY_BETWEEN_APPLY` |
+| Ingatan isian formulir | `jawaban.py` lewat `auto_apply.py` |
+
+Perbedaan yang masih ada **hanya teknis**: cara membaca kartu, tombol Lamar,
+dan lowongan yang hanya bisa dilamar lewat aplikasi Glints (ditandai
+*perlu manual*, bukan dilewati). Dikunci oleh `tests/test_paritas_apply.py`.
 
 ### Satu klik: berkas peluncur
 
@@ -980,7 +998,7 @@ Indeed memakai **aturan yang sama persis** dengan JobStreet:
 | Urutan | tanggal terbaru (`sort=date`) |
 | Dedupe | lintas kata kunci × lokasi |
 | Saringan | `JobFilter` yang sama (judul, lokasi, gaji `MIN_SALARY`, kualifikasi) |
-| Logo perusahaan | **tidak dipakai** — kartu Indeed tidak memuat logo, jadi `REQUIRE_COMPANY_LOGO` hanya berlaku untuk JobStreet & Glints |
+| Logo perusahaan | **tidak disaring** — sama seperti JobStreet & Glints |
 | Skor & ranking | 8 dimensi, ranking global, ambil yang terbaik dulu |
 | Kuota harian | `kuota.py` — 50/hari, **dipakai bersama** JobStreet & Glints |
 | Batas per sesi | `AUTO_APPLY_MAX_PER_SESSION` |
@@ -993,9 +1011,9 @@ Indeed memakai **aturan yang sama persis** dengan JobStreet:
 Lamaran Indeed yang dialihkan ke situs perusahaan (`Apply on company site`)
 dilewati sebagai *perlu manual* — sama seperti JobStreet.
 
-Catatan: Indeed tetap mencoba membaca logo perusahaan (untuk ditampilkan di
-daftar kandidat), tetapi hasilnya **tidak** dipakai menyaring lowongan. Logo
-hanya jadi syarat di JobStreet dan Glints.
+Catatan: ketiga situs tetap **membaca** gambar/logo perusahaan untuk
+ditampilkan di daftar kandidat, tetapi hasilnya **tidak** dipakai menyaring.
+Tidak ada syarat tambahan khusus Glints atau Indeed.
 
 ```powershell
 .\jalankan.bat indeed run
@@ -1082,19 +1100,18 @@ Perbedaan yang perlu diketahui:
 | Filter lokasi | lewat pencarian situs | disaring dari teks lokasi kartu |
 | Urutan terbaru | parameter `sortmode=ListedDate` | klik tombol *Baru Ditambahkan* |
 | Umur lowongan | terbaca ("3 hari yang lalu") | tidak ditampilkan Glints |
-| Lowongan khusus HP | — | *"Lamar & chat di aplikasi"* dilewati otomatis |
-| Batas gaji | `MIN_SALARY` (batas bawah) | `GLINTS_MIN_SALARY` (gaji tertinggi di rentang) |
-| Logo perusahaan | `REQUIRE_COMPANY_LOGO` | `REQUIRE_COMPANY_LOGO` (aturan sama) |
+| Lowongan khusus HP | — | *"Lamar & chat di aplikasi"* ditandai **perlu manual** |
+| Batas gaji | `MIN_SALARY` | `MIN_SALARY` (sama persis) |
+| Logo perusahaan | tidak disaring | tidak disaring (sama) |
 | Kuota harian & pilih yang paling cocok | `MAX_APPLY_PER_DAY` + `RANK_BY` | sama |
 | Menunggu kuesioner diisi | `AUTO_ANSWER_WAIT` | sama |
 
 Karena Glints tidak menampilkan tanggal tayang di kartu, urutan "terbaru"
 mengandalkan urutan situs, bukan `MAX_AGE_DAYS`.
 
-Aturan gaji di Glints: lowongan dengan gaji di bawah `GLINTS_MIN_SALARY`
-(bawaan **Rp4.500.000**) dilewati. Untuk rentang seperti *Rp 4-4,5jt* dipakai
-angka tertinggi — jadi masih dilamar karena bisa mencapai 4,5 juta. Lowongan
-yang menulis *"Gaji Tidak Ditampilkan"* atau tanpa info gaji **tetap dilamar**.
+Aturan gaji di Glints sama persis dengan JobStreet: memakai `MIN_SALARY`
+(bawaan `0` = tanpa batas). `GLINTS_MIN_SALARY` sudah tidak dipakai lagi.
+Lowongan yang menulis *"Gaji Tidak Ditampilkan"* tetap dilamar.
 
 ### Versi ringan tanpa Selenium
 

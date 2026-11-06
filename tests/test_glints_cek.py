@@ -149,7 +149,8 @@ def test_cek_gagal_bila_kartu_sedikit(monkeypatch):
     assert glints_module.cek_glints(keyword="inventory") is False
 
 
-def test_cek_gagal_bila_kandidat_tanpa_logo(monkeypatch):
+def test_cek_lulus_walau_kandidat_tanpa_logo(monkeypatch):
+    """Logo bukan syarat: kartu tanpa gambar tetap diperiksa dan dilamar."""
     _siapkan(monkeypatch)
     _tanpa_simulasi(monkeypatch)
     tanpa_logo = [dict(KANDIDAT[0], has_logo=False)]
@@ -160,7 +161,7 @@ def test_cek_gagal_bila_kandidat_tanpa_logo(monkeypatch):
         glints_module, "pilih_kandidat", lambda low, batas=0, semuanya=False: low
     )
 
-    assert glints_module.cek_glints(keyword="inventory") is False
+    assert glints_module.cek_glints(keyword="inventory") is True
 
 
 def test_cek_gagal_bila_simulasi_tidak_sesuai(monkeypatch):
