@@ -186,7 +186,7 @@ cp .env.example .env
 | `JEDA_ULANG` | `3` | Jeda (detik) sebelum mencoba ulang lowongan yang gagal sementara |
 | `MAX_PAGES` | `3` | Jumlah halaman per kata kunci untuk mode lama (`COLLECT_BEFORE_APPLY=false`) dan `cek-logo` |
 | `RESEARCH_KEYWORDS` | kosong | Kata kunci **khusus riset** (boleh lebih lebar dari `KEYWORDS`); kosong = ikut `KEYWORDS`. Semua kata kunci dicari di semua lokasi |
-| `RESEARCH_MAX_PAGES` | `5` | Halaman riset untuk **setiap kombinasi kata kunci × lokasi**: halaman 1–5 lalu berhenti. Maksimal **5** (batas tetap); `0` atau nilai di atas 5 tetap dipakai sebagai 5, boleh diturunkan |
+| `RESEARCH_MAX_PAGES` | `3` | Halaman riset untuk **setiap kombinasi kata kunci × lokasi**: halaman 1–3 lalu berhenti. Maksimal **3** (batas tetap); `0` atau nilai di atas 3 tetap dipakai sebagai 3, boleh diturunkan |
 | `RESEARCH_MAX_JOBS` | `0` | Batas jumlah lowongan hasil riset (pengaman). `0` = tanpa batas — **riset tidak dibatasi 50** |
 | `SEARCH_WAIT` | `12` | Detik menunggu kartu lowongan muncul sebelum halaman dianggap kosong. Makin kecil makin cepat, tetapi halaman yang sangat lambat bisa terlewat (3–20) |
 | `SKILL_KEYWORDS` | inventory, sap, erp, excel, ppic, ... | Keterampilan yang dicari di deskripsi untuk skor kesesuaian keterampilan |
@@ -791,8 +791,8 @@ nilai kecocokan → peringkat → ambil TOP 50 → apply maksimal 50/hari
 
 1. **Riset.** Setiap kata kunci (`RESEARCH_KEYWORDS`, atau `KEYWORDS` bila
    kosong) dicari di **setiap** lokasi (`LOCATIONS`). Untuk setiap kombinasi
-   kata kunci × lokasi dibuka **halaman 1 → 5 berurutan, lalu berhenti** —
-   halaman 6 dan seterusnya tidak pernah dibuka, langsung lanjut ke kata
+   kata kunci × lokasi dibuka **halaman 1 → 3 berurutan, lalu berhenti** —
+   halaman 4 dan seterusnya tidak pernah dibuka, langsung lanjut ke kata
    kunci/lokasi berikutnya. Batas 3 halaman berlaku **independen** untuk tiap
    kombinasi dan tidak bisa dinaikkan (`RESEARCH_MAX_PAGES` hanya boleh
    menurunkan). `SORT_MODE=ListedDate` membuat yang **paling baru** muncul
