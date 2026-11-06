@@ -69,6 +69,26 @@ PowerShell/Command Prompt di folder itu, lalu:
 ```
 
 Di Command Prompt lama, `.\` boleh dihilangkan (`jalankan.bat run`).
+**Bila `jalankan.bat` berhenti di “[2/3] Memasang dependensi…”** dengan
+traceback `pip` yang berakhir `KeyboardInterrupt`, penyebabnya biasanya Python
+**3.14/3.15** — pip versi itu sering macet saat memasang paket. Mulai versi ini
+`jalankan.bat`:
+
+* memilih Python 3.13 → 3.12 → 3.11 → 3.10 lebih dulu (bukan yang terbaru),
+* membuat ulang `.venv` yang dibuat Python 3.14+ (folder lama disimpan sebagai
+  `.venv-lama`),
+* memasang dependensi **sekali saja** — pemakaian berikutnya langsung jalan.
+  Paksa pasang ulang dengan `set PAKSA_PASANG=1`, atau lewati dengan
+  `set LEWATI_PASANG=1`.
+
+Jalan pintas bila masih bermasalah:
+
+```powershell
+Remove-Item -Recurse -Force .venv
+py -3.12 -m venv .venv
+.\jalankan.bat config        # sekali ini saja yang memasang dependensi
+```
+
 **Bila `tarik.bat` mencetak `'gabungan' is not recognized as an internal or
 external command`**, itu bug lama pada skrip: berkas batch berakhir baris LF
 sehingga `cmd.exe` melompat ke tengah baris. Sudah diperbaiki — semua `.bat`
@@ -102,6 +122,20 @@ chmod +x jalankan.sh
 
 Argumen apa pun diteruskan ke `cli.py`, misalnya
 `jalankan.bat history --limit 10` atau `jalankan.bat repair`.
+
+Ringkasnya, berkas yang bisa diklik:
+
+| Berkas | Gunanya |
+|---|---|
+| **`Lamar JobStreet.bat`** | satu klik: lamar otomatis **hanya di JobStreet** |
+| **`Lamar Glints.bat`** | satu klik: lamar otomatis **hanya di Glints** |
+| **`Lamar Indeed.bat`** | satu klik: lamar otomatis **hanya di Indeed** |
+| **`Lamar Otomatis.bat`** | satu klik: ketiganya berurutan (JobStreet → Glints → Indeed) |
+| `buat-pintasan.bat` | sekali jalan: menaruh keempat pintasan di Desktop |
+| `tarik.bat` | hanya menarik pembaruan kode |
+| `jalankan.bat` | menjalankan perintah CLI mana pun (mis. `jalankan.bat glints run`) |
+| `simpan.bat` | mengirim perubahan kode ke repo Anda |
+| `pantau.bat` | memantau repo dan menarik pembaruan otomatis |
 
 ## Instalasi manual
 
@@ -141,10 +175,10 @@ cp .env.example .env
 | `MAX_EXPERIENCE_YEARS` | `5` | Tolak lowongan yang minta pengalaman lebih dari ini |
 | `BLACKLIST_COMPANIES` | kosong | Perusahaan yang tidak ingin dilamar (dipisah koma, cocok longgar) |
 | `BLOCKED_COMPANIES` | `royal abadi,ifa` | Perusahaan yang **selalu** ditolak di JobStreet maupun Glints. Nama pendek seperti `ifa` dicocokkan per kata, jadi `Kafifa` tidak ikut tertolak |
-| `GLINTS_MIN_SALARY` | `4500000` | Khusus Glints: lamar hanya bila gaji bisa mencapai angka ini. Lowongan yang tidak mencantumkan gaji **tetap** dilamar; `0` = tanpa batas |
+| `GLINTS_MIN_SALARY` | `4500000` | **Tidak dipakai lagi.** Batas gaji sekarang satu untuk semua situs: `MIN_SALARY` |
 | `EXCLUDE_KEYWORDS` | `principal,director,head,senior,lead` | Kata yang membuat judul otomatis ditolak |
 | `STRICT_LOCATION` | `false` | `true` = tolak lowongan yang lokasinya di luar `LOCATION` |
-| `REQUIRE_COMPANY_LOGO` | `false` | JobStreet **dan** Glints: `true` = hanya lamar lowongan yang kartunya menampilkan **logo perusahaan**; tanpa logo dilewati |
+| `REQUIRE_COMPANY_LOGO` | `false` | **Tidak dipakai menyaring.** Logo/gambar perusahaan tidak pernah menjadi alasan melewati lowongan di JobStreet, Glints, maupun Indeed |
 | `MAX_APPLY_PER_DAY` | `0` | Batas **lamaran yang dikirim** per hari (mis. `50`); `0` = tanpa batas. Riset & penilaian tetap tanpa batas |
 | `DELAY_BETWEEN_APPLY` | `3` | Jeda (detik) antar lowongan |
 | `MAX_PAGES` | `3` | Jumlah halaman per kata kunci untuk mode lama (`COLLECT_BEFORE_APPLY=false`) dan `cek-logo` |
@@ -176,6 +210,7 @@ cp .env.example .env
 | `YEARS_EXPERIENCE` | `3` | Total pengalaman kerja (tahun) untuk pertanyaan pengalaman |
 | `EXPERIENCE_ROLES` | inventory, ppic, gudang, purchasing, ... | Bidang pengalaman Anda; di luar daftar ini dijawab 0 tahun |
 | `AUTO_ANSWER_YES` | `true` | Jawab **Ya** untuk pertanyaan ya/tidak seputar kesediaan/pengalaman |
+| `INGAT_JAWABAN` | `true` | Ingat isian yang Anda lakukan sendiri dan pakai lagi otomatis di lamaran berikutnya |
 | `EDUCATION_LEVEL` | `S1` | Jenjang pendidikan untuk pertanyaan kualifikasi |
 | `AUTO_APPLY_SUBMIT_TIMEOUT` | `20` | Batas detik khusus halaman **Review and submit** (mengirim lamaran) |
 | `AUTO_APPLY_DEBUG` | `true` | Simpan HTML + screenshot halaman yang tak dikenali ke folder `debug/` |
@@ -643,6 +678,47 @@ Tips: jalankan tanpa `HEADLESS_MODE` (bawaan) supaya jendela Chrome terlihat
 dan bisa Anda isi. Di mode headless tidak ada yang bisa diklik, jadi biarkan
 `AUTO_ANSWER_WAIT=0`.
 
+### Ingatan jawaban: sekali diisi, selamanya otomatis
+
+Setiap isian yang **Anda** lakukan sendiri di formulir dicatat, lalu dipakai
+otomatis pada lamaran berikutnya. Jadi kuesioner berulang seperti ini:
+
+> *Seberapa mahir kamu dengan keahlian berikut ini?* — Manajemen Rantai
+> Pasokan, Microsoft Excel, Manajemen Persediaan
+> (Tidak Berpengalaman / Dasar / Menengah / Ahli)
+
+cukup Anda jawab **sekali**. Lamaran Glints/JobStreet berikutnya terisi sendiri,
+dan bot hanya berhenti bertanya untuk pertanyaan yang benar-benar baru.
+
+Yang dicatat: pilihan ganda (radio), dropdown, dan kolom teks — termasuk kolom
+gaji, tahun pengalaman, dan pendidikan bila Anda mengubahnya.
+
+Yang **tidak** dicatat: tebakan bot sendiri. Bila bot memilih "Dasar" lalu Anda
+mengubahnya menjadi "Ahli", yang diingat adalah "Ahli" (keadaan akhir formulir).
+
+Perubahan Anda juga diingat **walau lamaran tidak selesai**: alur yang berakhir
+"perlu manual", galat, atau waktu tunggu habis tetap merekam isian yang sempat
+Anda ubah. Begitu juga di mode manual `AUTO_APPLY=false` — setelah Anda meninjau
+halaman lowongan dan menekan Enter di terminal, isian yang Anda lakukan ikut
+disimpan.
+
+Kelola ingatannya:
+
+```bash
+python cli.py jawaban                                  # lihat semua
+python cli.py jawaban --isi "Microsoft Excel=Ahli"     # isi manual
+python cli.py jawaban --hapus "Microsoft Excel"        # hapus satu
+python cli.py jawaban --reset                          # kosongkan
+```
+
+Matikan fitur ini dengan `python cli.py set-env INGAT_JAWABAN=false` bila ingin
+bot kembali menebak dari aturan bawaan setiap kali.
+
+Pencocokan pertanyaan tidak peka huruf besar/kecil, spasi ganda, atau tanda
+baca, dan masih mengenali pertanyaan yang berubah sedikit (kemiripan teks
+≥ 86%). Pertanyaan berbeda tetap dianggap berbeda — "Manajemen Rantai Pasokan"
+tidak akan memakai jawaban "Manajemen Persediaan".
+
 ### Isian lamaran otomatis
 
 Bila formulir meminta cover letter atau berkas CV, isi dulu di `.env`:
@@ -815,6 +891,149 @@ yang sama dengan JobStreet karena keduanya menulis ke database yang sama.
 
 ### Glints (glints.com)
 
+#### Aturan Glints = aturan JobStreet
+
+JobStreet dipakai sebagai acuan; Glints mengikuti aturan yang sama:
+
+| Aturan | JobStreet | Glints |
+|---|---|---|
+| Riset semua kata kunci, maks 5 halaman per kombinasi | ya | ya (5 kali muat "Muat lebih banyak") |
+| Urut posting terbaru | ya | ya ("Baru Ditambahkan") |
+| Dedupe lintas kata kunci | ya | ya |
+| Saring judul/lokasi/gaji/kualifikasi | `JobFilter` | `JobFilter` yang sama |
+| Logo perusahaan | tidak disaring | tidak disaring |
+| Skor 8 dimensi + ranking global | ya | ya |
+| TOP 50 global per hari, kuota dipakai bersama | ya (`kuota.py`) | ya (`kuota.py`) |
+| Lewati yang sudah pernah dilamar (situs **dan** database) | ya | ya |
+| Lowongan yang hanya bisa dilamar via aplikasi | tidak berlaku | perlu manual (bukan dilewati) |
+| `AUTO_APPLY_MAX_PER_SESSION` | ya | ya |
+| `DELAY_BETWEEN_APPLY` (hanya setelah lamaran/error) | ya | ya |
+| Mode manual `AUTO_APPLY=false` (tinjau lalu konfirmasi) | ya | ya |
+| Login habis → sesi berhenti + notifikasi Telegram | ya | ya |
+| Laporan harian Telegram di akhir sesi | ya | ya |
+| Pencarian per lokasi | `LOCATIONS` × kata kunci | satu pencarian nasional per kata kunci, hasil disaring `LOCATIONS` |
+
+Dua perbedaan yang memang disengaja:
+
+1. **Glints selalu riset dulu** (tidak ada mode "lamar sambil mencari"),
+   karena TOP 50 global hanya bisa ditentukan setelah semua hasil dinilai.
+2. **Pencarian Glints tidak per lokasi** — alamat explore-nya nasional
+   (`countryCode=ID`), jadi hasilnya lebih luas lalu disaring dengan
+   `LOCATIONS`. Aturan "semua lokasi tercakup" tetap terpenuhi.
+
+### Paritas aturan Apply: JobStreet = Glints = Indeed
+
+JobStreet adalah **acuan**. Glints dan Indeed tidak punya kriteria sendiri.
+
+| Hal | Letak satu sumbernya |
+|---|---|
+| Kelayakan lowongan (judul, blacklist, senior, gaji, pengalaman, umur, lokasi ketat) | `job_filter.alasan_tidak_layak()` dipakai ketiga situs |
+| Logo/gambar perusahaan | tidak pernah menjadi alasan skip |
+| Perankingan 8 dimensi | `job_filter.rank_jobs()` |
+| TOP N sesuai sisa kuota | `pilih_teratas()` (Glints & Indeed) + `kuota.py` |
+| Batas 5 halaman per kombinasi | `config.batas_halaman_riset()` |
+| Batas per sesi & jeda | `AUTO_APPLY_MAX_PER_SESSION`, `DELAY_BETWEEN_APPLY` |
+| Ingatan isian formulir | `jawaban.py` lewat `auto_apply.py` |
+
+Perbedaan yang masih ada **hanya teknis**: cara membaca kartu, tombol Lamar,
+dan lowongan yang hanya bisa dilamar lewat aplikasi Glints (ditandai
+*perlu manual*, bukan dilewati). Dikunci oleh `tests/test_paritas_apply.py`.
+
+### Satu klik: berkas peluncur
+
+Ada empat berkas yang bisa diklik — **satu untuk tiap situs**, plus satu untuk
+semuanya:
+
+| Berkas | Yang dijalankan |
+|---|---|
+| `Lamar JobStreet.bat` | JobStreet saja |
+| `Lamar Glints.bat` | Glints saja |
+| `Lamar Indeed.bat` | Indeed saja |
+| `Lamar Otomatis.bat` | JobStreet → Glints → Indeed |
+
+Semuanya bekerja sama: klik dua kali berkasnya (atau pintasannya di Desktop).
+Setiap peluncur:
+
+1. menarik kode terbaru dari GitHub (`tarik.bat`),
+2. memasang dependensi hanya bila `requirements.txt` berubah,
+3. melamar di situs yang dituju,
+4. memakai **satu** kuota harian bersama — kalau jatah hari ini sudah habis,
+   sesi langsung berhenti dengan pesan kuota,
+5. mengirim laporan harian Telegram,
+6. tidak menutup jendela sebelum Anda melihat ringkasannya.
+
+```powershell
+# cukup klik dua kali, atau:
+.\Lamar JobStreet.bat
+.\Lamar Glints.bat
+.\Lamar Indeed.bat
+.\Lamar Otomatis.bat
+```
+
+Opsi bisa ditambahkan pada berkas mana pun:
+
+```powershell
+.\Lamar Indeed.bat --limit 10
+.\Lamar Indeed.bat --max-pages 2
+.\Lamar Otomatis.bat --situs jobstreet,indeed
+```
+
+Ingin ikon di Desktop? Jalankan sekali — keempat pintasan dibuat sekaligus:
+
+```powershell
+.\buat-pintasan.bat
+```
+
+Jalankan berurutan kapan saja; lowongan yang sudah dilamar tercatat sehingga
+tidak terkirim dua kali. Pada `Lamar Otomatis.bat`, satu situs gagal
+(mis. Cloudflare) tidak menghentikan situs lain.
+
+### Indeed (id.indeed.com)
+
+Indeed memakai **aturan yang sama persis** dengan JobStreet:
+
+| Aturan | Nilai di Indeed |
+|---|---|
+| Riset | semua `KEYWORDS` × semua `LOCATIONS`, maksimal 5 halaman per kombinasi |
+| Urutan | tanggal terbaru (`sort=date`) |
+| Dedupe | lintas kata kunci × lokasi |
+| Saringan | `JobFilter` yang sama (judul, lokasi, gaji `MIN_SALARY`, kualifikasi) |
+| Logo perusahaan | **tidak disaring** — sama seperti JobStreet & Glints |
+| Skor & ranking | 8 dimensi, ranking global, ambil yang terbaik dulu |
+| Kuota harian | `kuota.py` — 50/hari, **dipakai bersama** JobStreet & Glints |
+| Batas per sesi | `AUTO_APPLY_MAX_PER_SESSION` |
+| Sudah pernah dilamar | dilewati (tanda situs + catatan database) |
+| Mode manual | `AUTO_APPLY=false` → buka lowongan, Anda kirim sendiri |
+| Login habis | sesi berhenti + notifikasi Telegram |
+| Notifikasi | per lamaran + laporan harian |
+| Ingatan jawaban | `jawaban.py` — sekali diisi, terisi otomatis |
+
+Lamaran Indeed yang dialihkan ke situs perusahaan (`Apply on company site`)
+dilewati sebagai *perlu manual* — sama seperti JobStreet.
+
+Catatan: ketiga situs tetap **membaca** gambar/logo perusahaan untuk
+ditampilkan di daftar kandidat, tetapi hasilnya **tidak** dipakai menyaring.
+Tidak ada syarat tambahan khusus Glints atau Indeed.
+
+```powershell
+.\jalankan.bat indeed run
+.\jalankan.bat indeed run --max-pages 2 --limit 10
+.\jalankan.bat indeed cari --keywords "inventory staff" --limit 10
+.\jalankan.bat indeed diagnosa --keyword "inventory staff"
+```
+
+#### Batas harian: satu aturan untuk dua situs
+
+Batas `MAX_APPLY_PER_DAY` dihitung di satu tempat (`kuota.py`) dan dipakai
+**bersama** oleh JobStreet dan Glints:
+
+* lamaran yang terkirim lewat JobStreet mengurangi jatah Glints, dan sebaliknya;
+* `0` berarti tanpa batas;
+* kandidat dipotong menurut sisa kuota **setelah** dinilai dan diperingkat,
+  jadi slot dipakai untuk lowongan yang paling cocok;
+* pesan yang dicetak kedua situs identik:
+  `Kuota harian: 4 sudah dilamar hari ini, sisa 46 dari 50.`
+
 #### "Terbaca 0 lowongan" di Glints
 
 Kalau `glints run`/`glints cari` melaporkan tidak ada lowongan padahal di
@@ -881,19 +1100,18 @@ Perbedaan yang perlu diketahui:
 | Filter lokasi | lewat pencarian situs | disaring dari teks lokasi kartu |
 | Urutan terbaru | parameter `sortmode=ListedDate` | klik tombol *Baru Ditambahkan* |
 | Umur lowongan | terbaca ("3 hari yang lalu") | tidak ditampilkan Glints |
-| Lowongan khusus HP | — | *"Lamar & chat di aplikasi"* dilewati otomatis |
-| Batas gaji | `MIN_SALARY` (batas bawah) | `GLINTS_MIN_SALARY` (gaji tertinggi di rentang) |
-| Logo perusahaan | `REQUIRE_COMPANY_LOGO` | `REQUIRE_COMPANY_LOGO` (aturan sama) |
+| Lowongan khusus HP | — | *"Lamar & chat di aplikasi"* ditandai **perlu manual** |
+| Batas gaji | `MIN_SALARY` | `MIN_SALARY` (sama persis) |
+| Logo perusahaan | tidak disaring | tidak disaring (sama) |
 | Kuota harian & pilih yang paling cocok | `MAX_APPLY_PER_DAY` + `RANK_BY` | sama |
 | Menunggu kuesioner diisi | `AUTO_ANSWER_WAIT` | sama |
 
 Karena Glints tidak menampilkan tanggal tayang di kartu, urutan "terbaru"
 mengandalkan urutan situs, bukan `MAX_AGE_DAYS`.
 
-Aturan gaji di Glints: lowongan dengan gaji di bawah `GLINTS_MIN_SALARY`
-(bawaan **Rp4.500.000**) dilewati. Untuk rentang seperti *Rp 4-4,5jt* dipakai
-angka tertinggi — jadi masih dilamar karena bisa mencapai 4,5 juta. Lowongan
-yang menulis *"Gaji Tidak Ditampilkan"* atau tanpa info gaji **tetap dilamar**.
+Aturan gaji di Glints sama persis dengan JobStreet: memakai `MIN_SALARY`
+(bawaan `0` = tanpa batas). `GLINTS_MIN_SALARY` sudah tidak dipakai lagi.
+Lowongan yang menulis *"Gaji Tidak Ditampilkan"* tetap dilamar.
 
 ### Versi ringan tanpa Selenium
 

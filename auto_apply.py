@@ -21,6 +21,7 @@ from rich.console import Console
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import Select
 
+import jawaban
 from config import config
 
 console = Console()
@@ -909,6 +910,139 @@ class AutoApplier:
 
         return False
 
+    @staticmethod
+    def _dari_ingatan(pertanyaan: str, opsi) -> tuple:
+        """Pilih opsi dari ingatan jawaban pengguna. (pilihan, dari_ingatan)."""
+        ingat = jawaban.cari(pertanyaan)
+
+        if not ingat:
+            return "", False
+
+        kunci_ingat = jawaban.kunci_pertanyaan(ingat)
+        for item in opsi or []:
+            if jawaban.kunci_pertanyaan(item) == kunci_ingat:
+                return item, True
+
+        # Toleransi ejaan: "Menengah" vs "menengah " / "Ahli" vs "ahli".
+        for item in opsi or []:
+            kunci_opsi = jawaban.kunci_pertanyaan(item)
+            if kunci_ingat and kunci_opsi and (
+                kunci_ingat in kunci_opsi or kunci_opsi in kunci_ingat
+            ):
+                return item, True
+
+        return "", False
+
+    def _potret_jawaban(self) -> dict:
+        """Isian formulir saat ini: {kunci pertanyaan: (pertanyaan, jawaban)}."""
+        potret = {}
+
+        grup = {}
+        for element in self._find_all("input[type='radio']"):
+            if not self._visible(element):
+                continue
+            try:
+                nama = (element.get_attribute("name") or "").strip()
+            except Exception:
+                nama = ""
+            if nama:
+                grup.setdefault(nama, []).append(element)
+
+        for elemen in grup.values():
+            terpilih = [item for item in elemen if self._selected(item)]
+            if not terpilih:
+                continue
+
+            opsi = [self._label_untuk(item) for item in elemen]
+            pertanyaan = self._pertanyaan(elemen[0], opsi)
+            kunci = jawaban.kunci_pertanyaan(pertanyaan)
+            label = self._label_untuk(terpilih[0])
+
+            if kunci and label:
+                potret[kunci] = (pertanyaan, label)
+
+        for element in self._find_all("select"):
+            if not self._visible(element):
+                continue
+
+            try:
+                terisi = (element.get_attribute("value") or "").strip()
+            except Exception:
+                continue
+
+            if not terisi:
+                continue
+
+            label = ""
+            try:
+                terpilih = Select(element).first_selected_option
+                label = " ".join((terpilih.text or "").split())
+            except Exception:
+                label = terisi
+
+            if not label or label.strip("-— ") == "":
+                continue
+
+            pertanyaan = self._pertanyaan(element, self._teks_opsi(element))
+            kunci = jawaban.kunci_pertanyaan(pertanyaan)
+            if kunci:
+                potret[kunci] = (pertanyaan, label)
+
+        for selector in ("input[type='text']", "input[type='number']"):
+            for element in self._find_all(selector):
+                if not self._visible(element):
+                    continue
+
+                try:
+                    isi = (element.get_attribute("value") or "").strip()
+                except Exception:
+                    continue
+
+                if not isi:
+                    continue
+
+                pertanyaan = self._pertanyaan(element)
+                kunci = jawaban.kunci_pertanyaan(pertanyaan)
+                if kunci:
+                    potret[kunci] = (pertanyaan, isi)
+
+        return potret
+
+    def _rekam_jawaban_pengguna(self, sebelum: dict) -> int:
+        """Simpan isian yang baru atau berubah — itulah jawaban pengguna.
+
+        Hanya yang berbeda dari potret awal yang dicatat, supaya jawaban hasil
+        tebakan bot tidak ikut "diingat" sebagai jawaban pengguna.
+        """
+        if not getattr(config, "ingat_jawaban", True):
+            return 0
+
+        sesudah = self._potret_jawaban()
+        baru = 0
+
+        for kunci, (pertanyaan, jawaban_baru) in sesudah.items():
+            lama = sebelum.get(kunci)
+            if lama and jawaban.kunci_pertanyaan(lama[1]) == jawaban.kunci_pertanyaan(
+                jawaban_baru
+            ):
+                continue
+
+            if jawaban.ingat(pertanyaan, jawaban_baru):
+                baru += 1
+                tanda = "diperbarui" if lama else "diingat"
+                console.print(
+                    f'[dim green]   {tanda}: "{pertanyaan[:50]}" = '
+                    f'"{jawaban_baru[:30]}"[/]'
+                )
+
+        if baru:
+            console.print(
+                f"[dim green]   {baru} jawaban disimpan — lain kali terisi "
+                "otomatis.[/]"
+            )
+
+        return baru
+
     def _jawab_select(self, element) -> str:
         """Isi satu dropdown. Kembalikan teks jawaban ('' bila tidak dijawab)."""
         try:
@@ -921,11 +1055,15 @@ class AutoApplier:
 
         opsi = self._teks_opsi(element)
         pertanyaan = self._pertanyaan(element, opsi)
-        pilihan = pilih_jawaban(pertanyaan, opsi)
+        pilihan, dari_ingatan = self._dari_ingatan(pertanyaan, opsi)
+
+        if not pilihan:
+            pilihan = pilih_jawaban(pertanyaan, opsi)
 
         if pilihan and self._pilih_opsi(element, pilihan):
+            catatan = " (ingatan)" if dari_ingatan else ""
             console.print(
-                f'[dim]   jawab "{pilihan}" untuk: '
+                f'[dim]   jawab "{pilihan}"{catatan} untuk: '
                 f'{pertanyaan[:70] or "pertanyaan"}[/]'
             )
             return pilihan
@@ -961,7 +1099,10 @@ class AutoApplier:
                     opsi.append(label)
 
             pertanyaan = self._pertanyaan(element_grup[0], opsi)
-            pilihan = pilih_jawaban_radio(pertanyaan, opsi)
+            pilihan, dari_ingatan = self._dari_ingatan(pertanyaan, opsi)
+
+            if not pilihan:
+                pilihan = pilih_jawaban_radio(pertanyaan, opsi)
 
             if not pilihan:
                 gagal.append(pertanyaan or "pertanyaan pilihan")
@@ -974,8 +1115,9 @@ class AutoApplier:
                     break
 
             if diklik:
+                catatan = " (ingatan)" if dari_ingatan else ""
                 console.print(
-                    f'[dim]   jawab "{pilihan}" untuk: '
+                    f'[dim]   jawab "{pilihan}"{catatan} untuk: '
                     f'{pertanyaan[:70] or "pertanyaan"}[/]'
                 )
             else:
@@ -1003,11 +1145,13 @@ class AutoApplier:
                 pertanyaan = self._pertanyaan(element)
                 jenis = klasifikasi_pertanyaan(pertanyaan)
 
-                if jenis == "gaji":
+                nilai = jawaban.cari(pertanyaan) or ""
+
+                if not nilai and jenis == "gaji":
                     nilai = str(config.expected_salary or "").strip()
-                elif jenis == "pengalaman":
+                elif not nilai and jenis == "pengalaman":
                     nilai = f"{float(config.years_experience or 0):g}"
-                else:
+                elif not nilai:
                     continue
 
                 if not nilai:
@@ -1070,18 +1214,23 @@ class AutoApplier:
         )
         console.print(
             "   Silakan isi di jendela Chrome sekarang — menunggu sampai "
-            f"{batas} detik..."
+            f"{batas} detik. Isian Anda akan diingat dan dipakai otomatis "
+            "di lamaran berikutnya."
         )
+
+        sebelum = self._potret_jawaban()
 
         for sisa in range(batas, 0, -1):
             time.sleep(1)
 
             if self._is_success():
+                self._rekam_jawaban_pengguna(sebelum)
                 return "applied"
 
             # Lanjut hanya bila tidak ada pertanyaan tersisa DAN tidak ada
             # peringatan validasi — supaya tidak mengklik Kirim berulang kali.
             if not self.jawab_pertanyaan() and not self._validation_error():
+                self._rekam_jawaban_pengguna(sebelum)
                 console.print(
                     "[green]   isian sudah lengkap — melanjutkan pengiriman "
                     "lamaran.[/]"
@@ -1249,6 +1398,25 @@ class AutoApplier:
     # Alur utama
     # ------------------------------------------------------------------
     def apply(self, job: dict) -> ApplyResult:
+        """Lamar satu lowongan; semua isian pengguna direkam di akhir.
+
+        Pembungkus ini memastikan perubahan jawaban tetap diingat walau alur
+        berakhir dengan `manual_required`, galat, atau waktu tunggu habis —
+        bukan hanya saat lamaran berhasil.
+        """
+        try:
+            potret_awal = self._potret_jawaban()
+        except Exception:
+            potret_awal = {}
+
+        try:
+            return self._apply_alur(job)
+        finally:
+            # Jangan pernah menggagalkan lamaran hanya karena pencatatan.
+            with contextlib.suppress(Exception):
+                self._rekam_jawaban_pengguna(potret_awal)
+
+    def _apply_alur(self, job: dict) -> ApplyResult:
         url = (job.get("url") or "").strip()
 
         if not url:

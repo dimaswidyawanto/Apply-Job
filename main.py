@@ -5,6 +5,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+import kuota
 from config import MAKS_HALAMAN_RISET, batas_halaman_riset, config
 from database import db
 from job_filter import dedupe_jobs, job_filter
@@ -56,7 +57,12 @@ class AutoApplyEngine:
         self.waktu_halaman = 0.0
         self.jumlah_halaman = 0
 
-    def run(self):
+    def run(self, laporan_harian: bool = True):
+        """Jalankan sesi JobStreet.
+
+        `laporan_harian=False` dipakai peluncur satu klik agar laporan
+        Telegram dikirim sekali untuk semua situs, bukan per situs.
+        """
         self._print_banner()
         self._print_config()
 
@@ -106,10 +112,13 @@ class AutoApplyEngine:
             self.bot.close()
             self._print_results()
 
-            try:
-                notifier.send_daily_report(db.get_stats())
-            except Exception as exc:
-                console.print(f"[yellow]Laporan harian gagal dikirim: {exc}[/]")
+            if laporan_harian:
+                try:
+                    notifier.send_daily_report(db.get_stats())
+                except Exception as exc:
+                    console.print(
+                        f"[yellow]Laporan harian gagal dikirim: {exc}[/]"
+                    )
 
     def _satu_halaman(self, keyword: str, page: int, location: str = ""):
         """Cari & saring satu halaman.
@@ -220,11 +229,11 @@ class AutoApplyEngine:
     def _peringatkan_logo(self, jobs: list):
         """Ingatkan bila semua kartu di satu halaman terbaca tanpa logo.
 
-        Bila di situs logonya terlihat, berarti aturan deteksi perlu
-        disesuaikan — tanpa peringatan ini filter akan diam-diam membuang
-        semua lowongan.
+        Logo **tidak** dipakai menyaring di JobStreet, Glints, maupun Indeed
+        (ada/tidaknya gambar bukan alasan melewati lowongan). Peringatan ini
+        hanya menandai kemungkinan deteksi gambar yang perlu disesuaikan.
         """
-        if not config.require_company_logo or self._logo_diingatkan:
+        if self._logo_diingatkan:
             return
 
         if len(jobs) < 3:
@@ -326,13 +335,11 @@ class AutoApplyEngine:
         return terkumpul
 
     def _batas_harian_tercapai(self) -> bool:
-        if (
-            config.max_apply_per_day > 0
-            and db.get_today_apply_count() >= config.max_apply_per_day
-        ):
+        """Satu aturan kuota untuk JobStreet dan Glints (modul `kuota`)."""
+        if kuota.habis(db):
             console.print(
-                f"[bold yellow]Batas harian tercapai "
-                f"({config.max_apply_per_day}).[/]"
+                f"[bold yellow]Batas lamaran harian tercapai "
+                f"({kuota.batas()}).[/]"
             )
             return True
 
@@ -340,10 +347,7 @@ class AutoApplyEngine:
 
     def _lamar(self, job: dict) -> bool:
         """Lamar satu lowongan. False = seluruh sesi harus berhenti."""
-        if (
-            config.max_apply_per_day > 0
-            and db.get_today_apply_count() >= config.max_apply_per_day
-        ):
+        if kuota.habis(db):
             console.print("[bold yellow]Batas lamaran harian tercapai.[/]")
             return False
 
@@ -614,29 +618,20 @@ class AutoApplyEngine:
         # Bandingkan dulu, baru lamar: ambil hanya yang terbaik sebanyak sisa
         # kuota hari ini, supaya batas harian dipakai untuk lowongan paling
         # cocok — bukan untuk yang kebetulan ditemukan lebih dulu.
-        if config.max_apply_per_day > 0:
-            sudah = db.get_today_apply_count()
-            sisa = max(0, config.max_apply_per_day - sudah)
+        console.print(f"[cyan]{kuota.ringkasan(db)}[/]")
 
+        if kuota.habis(db):
+            console.print(f"[bold yellow]{kuota.pesan_habis()}[/]")
+            return
+
+        sisa = kuota.sisa(db)
+        if sisa is not None and len(kandidat) > sisa:
             console.print(
-                f"[cyan]Kuota harian:[/] {sudah} sudah dilamar hari ini, "
-                f"sisa {sisa} dari {config.max_apply_per_day}."
+                f"[bold]{len(kandidat)} kandidat[/] (dari seluruh "
+                f"kategori & lokasi) bersaing untuk [bold]{sisa} slot[/] "
+                f"— diambil {sisa} yang paling cocok."
             )
-
-            if sisa == 0:
-                console.print(
-                    "[bold yellow]Kuota lamaran hari ini sudah habis. "
-                    "Tidak ada lamaran dikirim.[/]"
-                )
-                return
-
-            if len(kandidat) > sisa:
-                console.print(
-                    f"[bold]{len(kandidat)} kandidat[/] (dari seluruh "
-                    f"kategori & lokasi) bersaing untuk [bold]{sisa} slot[/] "
-                    f"— diambil {sisa} yang paling cocok."
-                )
-                kandidat = kandidat[:sisa]
+            kandidat = kuota.potong(kandidat, db)
 
         if not kandidat:
             console.print("[yellow]Tidak ada lowongan yang dilamar.[/]")
@@ -789,8 +784,7 @@ class AutoApplyEngine:
         )
         table.add_row(
             "Wajib ada logo perusahaan",
-            "Aktif (JobStreet & Glints)" if config.require_company_logo
-            else "Tidak aktif",
+            "Tidak dipakai (sama di JobStreet, Glints, Indeed)",
         )
         table.add_row("Gaji minimum", f"Rp {config.min_salary:,}")
         table.add_row("Batas pengalaman", f"{config.max_experience} tahun")

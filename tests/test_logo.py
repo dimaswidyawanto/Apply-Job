@@ -67,12 +67,12 @@ def make_job(**overrides):
     return job
 
 
-def test_tanpa_logo_ditolak_saat_aturan_aktif(filter_baru, monkeypatch):
+def test_tanpa_logo_tetap_layak_walau_aturan_aktif(filter_baru, monkeypatch):
+    """Gambar/logo perusahaan tidak pernah menjadi alasan melewati lowongan."""
     monkeypatch.setattr(config, "require_company_logo", True)
 
     layak, alasan = filter_baru.should_apply(make_job(has_logo=False))
-    assert layak is False
-    assert "logo" in alasan.lower()
+    assert layak is True, alasan
 
 
 def test_berlogo_tetap_dilamar(filter_baru, monkeypatch):

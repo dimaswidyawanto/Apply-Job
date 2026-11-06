@@ -193,33 +193,6 @@ def test_glints_memakai_teks_sukses_bahasa_indonesia():
 # ----------------------------------------------------------------------
 # Aturan gaji minimal
 # ----------------------------------------------------------------------
-@pytest.mark.parametrize(
-    "gaji, expected",
-    [
-        ("Rp 2-3jt", False),
-        ("Rp 4,2jt", False),
-        ("Rp 4-4,5jt", True),
-        ("Rp 4.500.000 - 6.000.000", True),
-        ("Rp 5jt", True),
-        ("Gaji Tidak Ditampilkan", True),
-        ("", True),
-    ],
-)
-def test_lolos_gaji(gaji, expected):
-    assert glints.lolos_gaji({"salary": gaji}, minimal=4_500_000) is expected
-
-
-def test_alasan_gaji_menyebut_angka_dan_isi_kartu():
-    alasan = glints.alasan_gaji({"salary": "Rp 2-3jt"}, minimal=4_500_000)
-
-    assert "4.500.000" in alasan
-    assert "Rp 2-3jt" in alasan
-
-
-def test_alasan_gaji_kosong_bila_lolos():
-    assert glints.alasan_gaji({"salary": "Rp 6jt"}, minimal=4_500_000) == ""
-
-
 # ----------------------------------------------------------------------
 # Waktu tunggu & pesan diagnostik (dari uji nyata di PC pengguna)
 # ----------------------------------------------------------------------

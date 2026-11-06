@@ -128,6 +128,24 @@ def rentang_gaji(teks: str) -> tuple[int, int]:
     return (int(min(nilai)), int(max(nilai)))
 
 
+def alasan_tidak_layak(job: Dict, saringan: Optional["JobFilter"] = None) -> str:
+    """Aturan kelayakan tunggal JobStreet, Glints, dan Indeed.
+
+    Kembalikan alasan penolakan, atau "" bila lowongan layak dilamar. Dipakai
+    ketiga situs supaya tidak ada kriteria yang berbeda antarplatform.
+    """
+    if job.get("sudah_dilamar"):
+        return "sudah pernah dilamar"
+
+    job_id = str(job.get("job_id") or "").strip()
+    if job_id and db.is_already_applied(job_id):
+        return "Sudah tercatat dilamar"
+
+    saringan = saringan or JobFilter()
+    lolos, kenapa = saringan.should_apply(job)
+    return "" if lolos else kenapa
+
+
 class JobFilter:
     def __init__(self):
         self.exclude_keywords = [
@@ -157,11 +175,9 @@ class JobFilter:
             if dikecualikan:
                 return False, f"Perusahaan di-blacklist: {dikecualikan}"
 
-        # JobStreet: hanya lamar lowongan yang kartunya menampilkan logo
-        # perusahaan. Situs lain (mis. Glints) tidak mengisi has_logo, jadi
-        # lowongannya tidak ikut tertolak.
-        if config.require_company_logo and job.get("has_logo") is False:
-            return False, "Tanpa logo perusahaan"
+        # Logo/gambar perusahaan TIDAK dipakai menyaring di situs mana pun.
+        # JobStreet, Glints, dan Indeed memakai aturan yang sama: ada gambar
+        # atau tidak, lowongan tetap diproses. `has_logo` hanya untuk tampilan.
 
         title_lower = title.lower()
 

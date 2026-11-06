@@ -113,10 +113,9 @@ def test_filter_logo_berlaku_di_glints(monkeypatch):
         "khusus_aplikasi": "",
     }
 
+    # Logo tidak pernah menjadi alasan menolak — sama seperti JobStreet.
     assert alasan_tidak_layak({**dasar, "has_logo": True}) == ""
-    assert alasan_tidak_layak({**dasar, "has_logo": False}) == (
-        "Tanpa logo perusahaan"
-    )
+    assert alasan_tidak_layak({**dasar, "has_logo": False}) == ""
 
 
 # ----------------------------------------------------------------------
@@ -262,7 +261,8 @@ def test_sesi_glints_menolak_tanpa_logo(monkeypatch):
 
     bot, _ = _siapkan_sesi(monkeypatch, kartu, kuota=0, logo=True)
 
-    assert bot.dilamar == ["glints:b"]
+    # Keduanya dilamar: ada/tidaknya gambar tidak menyaring apa pun.
+    assert bot.dilamar == ["glints:a", "glints:b"]
 
 
 def test_sesi_glints_berhenti_bila_kuota_habis(monkeypatch, db_kosong):
