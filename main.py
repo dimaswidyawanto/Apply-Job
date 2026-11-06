@@ -5,7 +5,10 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+import antrean
+import kendali
 import kuota
+import log_aktivitas
 from config import MAKS_HALAMAN_RISET, batas_halaman_riset, config
 from database import db
 from job_filter import dedupe_jobs, job_filter
@@ -211,9 +214,12 @@ class AutoApplyEngine:
                 continue
 
             if should_apply:
+                antrean.tandai_hasil(job.get("job_id", ""))
                 eligible_jobs.append(job)
             else:
                 title = job.get("title", "Tanpa judul")
+                antrean.tandai_hasil(job.get("job_id", ""), reason)
+                log_aktivitas.catat(f"Ditolak: {title[:60]} — {reason}")
                 console.print(f"[dim]Dilewati: {title[:50]} — {reason}[/]")
                 self.session_stats["skipped"] += 1
 
@@ -366,6 +372,14 @@ class AutoApplyEngine:
 
         title = (job.get("title") or "").strip()
 
+        # Jeda/berhenti dari dashboard (pasal 11.5).
+        kendali.periksa()
+
+        # Idempotensi: jangan pernah memproses lowongan yang sudah terkirim.
+        if not antrean.klaim(job.get("job_id", "")):
+            self.session_stats["already"] += 1
+            return True
+
         try:
             # Mode otomatis: bot mengirim lamaran sendiri.
             # Mode manual: halaman dibuka untuk Anda tinjau.
@@ -380,6 +394,8 @@ class AutoApplyEngine:
                 f"'{title}': {exc}[/]"
             )
             self.session_stats["errors"] += 1
+            antrean.selesai(job.get("job_id", ""), "failed", str(exc)[:200])
+            log_aktivitas.catat(f"Gagal: {title} — {exc}", "error")
             return True
 
         if hasil.status == "login_required":
@@ -394,14 +410,24 @@ class AutoApplyEngine:
 
         if hasil.applied:
             self.session_stats["applied"] += 1
+            antrean.selesai(job.get("job_id", ""), "applied", hasil.reason or "")
+            log_aktivitas.catat(f"Terkirim: {title} ({job.get('company') or '-'})")
             notifier.send_apply_success(job)
 
         elif hasil.status == "manual_required":
             self.session_stats["manual"] += 1
+            antrean.selesai(
+                job.get("job_id", ""), "review_required", hasil.reason or ""
+            )
             self.manual_jobs.append((job, hasil.reason))
 
         else:
             self.session_stats["skipped"] += 1
+            antrean.selesai(
+                job.get("job_id", ""),
+                antrean.status_gagal(hasil.reason or ""),
+                hasil.reason or "",
+            )
 
         # Jeda hanya untuk lamaran yang benar-benar diproses;
         # lowongan yang dilewati langsung lanjut ke berikutnya.
@@ -512,6 +538,7 @@ class AutoApplyEngine:
             jumlah_lokasi = 0
 
             for keyword in kata_kunci:
+                kendali.periksa()
                 keyword = keyword.strip()
 
                 if not keyword:

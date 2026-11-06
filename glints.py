@@ -25,7 +25,10 @@ from rich.table import Table
 from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.common.by import By
 
+import antrean
+import kendali
 import kuota
+import log_aktivitas
 from auto_apply import ApplyResult, AutoApplier
 from browser import buka_chrome, tutup_chrome
 from config import MAKS_HALAMAN_RISET, batas_halaman_riset, config
@@ -1315,6 +1318,7 @@ def jalankan_glints(max_pages: int = 0, keywords: Optional[List[str]] = None,
         selesai_kata_kunci = 0
 
         for keyword in kata_kunci:
+            kendali.periksa()
             console.print(
                 f"[cyan]Glints: '{keyword}' — muat sampai {halaman} kali[/]"
             )
@@ -1410,8 +1414,12 @@ def jalankan_glints(max_pages: int = 0, keywords: Optional[List[str]] = None,
             alasan = alasan_tidak_layak(job, bot.filters)
             if alasan:
                 laporan["dilewati"] += 1
+                antrean.tandai_hasil(job["job_id"], alasan)
+                log_aktivitas.catat(f"Ditolak: {job['title']} — {alasan}")
                 console.print(f"[dim]Lewati: {job['title']} — {alasan}[/]")
                 continue
+
+            antrean.tandai_hasil(job.get("job_id", ""))
 
             layak.append(job)
 
@@ -1446,6 +1454,8 @@ def jalankan_glints(max_pages: int = 0, keywords: Optional[List[str]] = None,
         batas_sesi = int(getattr(config, "auto_apply_max_per_session", 0) or 0)
 
         for job in dipilih:
+            kendali.periksa()
+
             if batas and laporan["dilamar"] >= batas:
                 console.print("[yellow]Batas lamaran sesi ini tercapai.[/]")
                 break
@@ -1459,11 +1469,16 @@ def jalankan_glints(max_pages: int = 0, keywords: Optional[List[str]] = None,
                 )
                 break
 
+            if not antrean.klaim(job.get("job_id", "")):
+                laporan["sudah"] += 1
+                continue
+
             try:
                 hasil = bot.lamar(job)
             except ChromeTertutup as exc:
                 console.print(f"[bold red]{exc}.[/] Sesi dihentikan.")
                 laporan["gagal"] += 1
+                antrean.selesai(job.get("job_id", ""), "failed", str(exc)[:200])
                 break
 
             if hasil.status == "login_required":
@@ -1477,19 +1492,36 @@ def jalankan_glints(max_pages: int = 0, keywords: Optional[List[str]] = None,
 
             if hasil.applied:
                 laporan["dilamar"] += 1
+                antrean.selesai(job.get("job_id", ""), "applied", hasil.reason or "")
+                log_aktivitas.catat(
+                    f"Terkirim: {job['title']} ({job.get('company') or '-'})"
+                )
                 notifier.send_apply_success(job)
                 console.print(f"[green]Terkirim: {job['title']}[/]")
             elif hasil.status == "already_applied":
                 laporan["sudah"] += 1
+                antrean.selesai(job.get("job_id", ""), "applied", hasil.reason or "")
             elif hasil.status == "manual_required":
                 laporan["perlu_manual"] += 1
+                antrean.selesai(
+                    job.get("job_id", ""), "review_required", hasil.reason or ""
+                )
                 console.print(
                     f"[yellow]Perlu manual: {job['title']} — {hasil.reason}[/]"
                 )
             elif hasil.status == "skipped":
                 laporan["dilewati"] += 1
+                antrean.selesai(job.get("job_id", ""), "filtered", hasil.reason or "")
             else:
                 laporan["gagal"] += 1
+                antrean.selesai(
+                    job.get("job_id", ""),
+                    antrean.status_gagal(hasil.reason or ""),
+                    hasil.reason or "",
+                )
+                log_aktivitas.catat(
+                    f"Gagal: {job['title']} — {hasil.reason}", "error"
+                )
                 console.print(f"[red]Gagal: {job['title']} — {hasil.reason}[/]")
 
             # Jeda hanya setelah lamaran benar-benar diproses, sama seperti

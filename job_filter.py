@@ -178,12 +178,15 @@ class JobFilter:
         # Logo/gambar perusahaan (pasal 6.1): WAJIB di JobStreet & Glints.
         # Indeed menandai `logo_diabaikan` karena kartunya tidak memuat logo,
         # jadi lowongan Indeed tidak ikut tertolak.
-        if (
-            config.require_company_logo
-            and not job.get("logo_diabaikan")
-            and job.get("has_logo") is False
-        ):
-            return False, "Tanpa logo perusahaan"
+        if config.require_company_logo and not job.get("logo_diabaikan"):
+            if job.get("has_logo") is False:
+                return False, "Tanpa logo perusahaan"
+            if "has_logo" in job and job["has_logo"] is None:
+                # Pasal 6.1: bila validitas gambar tidak dapat dipastikan,
+                # lowongan masuk REVIEW_REQUIRED dan tidak langsung dilamar.
+                # Field yang tidak ada sama sekali (sumber lama) tidak dihitung
+                # "tidak pasti" agar lowongan lama tidak ikut tertahan.
+                return False, "Logo tidak dapat dipastikan"
 
         title_lower = title.lower()
 
