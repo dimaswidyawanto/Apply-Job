@@ -131,6 +131,7 @@ Ringkasnya, berkas yang bisa diklik:
 | **`Lamar Glints.bat`** | satu klik: lamar otomatis **hanya di Glints** |
 | **`Lamar Indeed.bat`** | satu klik: lamar otomatis **hanya di Indeed** |
 | **`Lamar Otomatis.bat`** | satu klik: ketiganya berurutan (JobStreet → Glints → Indeed) |
+| `Dashboard.bat` | membuka dashboard monitoring + kontrol sesi |
 | `buat-pintasan.bat` | sekali jalan: menaruh keempat pintasan di Desktop |
 | `tarik.bat` | hanya menarik pembaruan kode |
 | `jalankan.bat` | menjalankan perintah CLI mana pun (mis. `jalankan.bat glints run`) |
@@ -938,6 +939,50 @@ JobStreet adalah **acuan**. Glints dan Indeed tidak punya kriteria sendiri.
 Perbedaan yang masih ada **hanya teknis**: cara membaca kartu, tombol Lamar,
 dan lowongan yang hanya bisa dilamar lewat aplikasi Glints (ditandai
 *perlu manual*, bukan dilewati). Dikunci oleh `tests/test_paritas_apply.py`.
+
+### Dashboard, CV, laporan, dan antrean
+
+```powershell
+.\jalankan.bat dashboard          # atau klik dua kali Dashboard.bat
+```
+
+Dashboard lokal di <http://127.0.0.1:8765> menampilkan kuota harian, jumlah
+lowongan tersimpan, sebaran status antrean, statistik per lokasi dan per
+kategori, serta log aktivitas yang menyegarkan diri setiap 2 detik. Tombolnya
+benar-benar bekerja:
+
+| Tombol | Yang terjadi |
+|---|---|
+| **Start** | menjalankan `cli.py lamar` di proses terpisah |
+| **Pause** | sesi menunggu di antara lowongan (`kendali.py`) |
+| **Resume** | sesi lanjut |
+| **Stop** | sesi berhenti dengan rapi (browser ditutup) |
+| **Retry failed** | lowongan berstatus `failed` kembali ke antrean |
+| **Clear queue** | menghapus lowongan yang **belum pernah** dilamar (pakai konfirmasi) |
+
+CV dan skor kecocokan:
+
+```powershell
+.\jalankan.bat cv --path "C:\Users\ASUS\Documents\cv.docx"
+.\jalankan.bat cv --pasang "C:\Users\ASUS\Documents\cv.docx"   # simpan ke .env
+.\jalankan.bat cv                                                # tampilkan profil
+```
+
+Format yang didukung: `.docx` dan `.txt`/`.md` tanpa pustaka tambahan, `.pdf`
+bila `pypdf` dipasang. Setelah `CV_PATH` terisi, peringkat memakai **skor 6
+parameter berbobot** (pengalaman 30 · keterampilan 25 · tanggung jawab 20 ·
+pendidikan 10 · jabatan 10 · lokasi 5) dengan kategori 90/80/70. Batas
+`MIN_SKOR_CV` (bawaan 0 = tanpa batas) bisa dipakai untuk menolak kandidat
+bermutu rendah; syarat wajib (logo, gaji, judul, blacklist) tetap berlaku.
+
+Tanpa CV, peringkat memakai skor lama — tidak ada nilai karangan.
+
+Laporan & antrean:
+
+```powershell
+.\jalankan.bat laporan            # angka kinerja + saran perbaikan
+.\jalankan.bat antrean --limit 20 # status antrean + lowongan perlu ditinjau
+```
 
 ### Aturan inti (master prompt)
 

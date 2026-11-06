@@ -355,6 +355,98 @@ class Database:
             )
             return cursor.rowcount > 0
 
+    def statistik_lokasi(self, batas: int = 20) -> list[dict]:
+        """Jumlah lowongan & lamaran per lokasi (untuk dashboard/laporan)."""
+        with self._get_conn() as conn:
+            baris = conn.execute(
+                """
+                SELECT COALESCE(NULLIF(TRIM(location), ''), '(tidak diketahui)')
+                           AS lokasi,
+                       COUNT(*) AS jumlah,
+                       SUM(CASE WHEN status_antrean = 'applied' THEN 1 ELSE 0 END)
+                           AS dilamar
+                  FROM jobs
+                 GROUP BY lokasi
+                 ORDER BY jumlah DESC
+                 LIMIT ?
+                """,
+                (max(1, batas),),
+            ).fetchall()
+
+        return [dict(item) for item in baris]
+
+    def statistik_kategori(self, batas: int = 20) -> list[dict]:
+        """Jumlah lowongan per kategori (diturunkan dari judul lowongan)."""
+        from config import config as _config
+
+        kata_kunci = [str(k).strip().lower() for k in _config.title_keywords if k]
+
+        with self._get_conn() as conn:
+            baris = conn.execute(
+                "SELECT title, status_antrean FROM jobs"
+            ).fetchall()
+
+        hitung: dict[str, dict] = {}
+        for item in baris:
+            judul = str(item["title"] or "").lower()
+            kategori = next(
+                (k for k in kata_kunci if k in judul), "(lainnya)"
+            )
+            data = hitung.setdefault(kategori, {"kategori": kategori,
+                                                "jumlah": 0, "dilamar": 0})
+            data["jumlah"] += 1
+            if item["status_antrean"] == "applied":
+                data["dilamar"] += 1
+
+        return sorted(
+            hitung.values(), key=lambda d: -d["jumlah"]
+        )[: max(1, batas)]
+
+    def alasan_tersering(self, batas: int = 10) -> list[dict]:
+        """Alasan penolakan yang paling sering muncul."""
+        with self._get_conn() as conn:
+            baris = conn.execute(
+                """
+                SELECT alasan, COUNT(*) AS jumlah
+                  FROM jobs
+                 WHERE status_antrean IN ('rejected', 'review_required',
+                                          'expired', 'failed')
+                   AND COALESCE(alasan, '') <> ''
+                 GROUP BY alasan
+                 ORDER BY jumlah DESC
+                 LIMIT ?
+                """,
+                (max(1, batas),),
+            ).fetchall()
+
+        return [dict(item) for item in baris]
+
+    def bersihkan_antrean(self) -> int:
+        """Hapus lowongan yang belum pernah dilamar (tombol Clear queue)."""
+        with self._get_conn() as conn:
+            cursor = conn.execute(
+                """
+                DELETE FROM jobs
+                 WHERE job_id NOT IN (
+                       SELECT DISTINCT job_id FROM applications
+                 )
+                """
+            )
+            return int(cursor.rowcount or 0)
+
+    def ulang_gagal(self) -> int:
+        """Kembalikan lowongan berstatus failed ke antrean (Retry failed)."""
+        with self._get_conn() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE jobs
+                   SET status_antrean = 'qualified',
+                       diperbarui_at = CURRENT_TIMESTAMP
+                 WHERE status_antrean = 'failed'
+                """
+            )
+            return int(cursor.rowcount or 0)
+
     def hitung_status_antrean(self) -> dict:
         """Jumlah lowongan per status antrean (untuk dashboard)."""
         hasil = {status: 0 for status in STATUS_ANTREAN}

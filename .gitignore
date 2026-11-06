@@ -31,3 +31,10 @@ debug/
 pantau.log
 *.log
 .pantau-terakhir
+
+# Berkas runtime (jangan di-commit)
+logs/
+.dimastes-sesi.lock
+.dimastes-kendali
+debug/
+.venv-lama/

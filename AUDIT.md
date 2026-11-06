@@ -125,8 +125,44 @@ dan semua fase dikerjakan berurutan.
 - **Kunci sesi tunggal** (`kunci.py`) mencegah dua peluncur melamar bersamaan.
 - Tes: `tests/test_antrean.py` (12) + penyesuaian tes aturan; 465 tes hijau.
 
-**Berikutnya (Fase 2):** status antrean dipakai penuh di alur 3 situs,
-klaim worker, resume setelah henti, dan `REVIEW_REQUIRED` untuk logo tak pasti.
+**Fase 2 — selesai (`7e448b2`):**
+- `antrean.py`: pemetaan alasan → status, `klaim()` idempoten sebelum melamar,
+  `selesai()` untuk applied/failed/review_required/expired.
+- Dipakai di **ketiga** alur (`main.py`, `glints.py`, `indeed.py`), termasuk
+  status penolakan, `applying` sebelum kirim, dan `expired` bila situs
+  menyatakan lowongan tutup.
+- `kendali.py`: berkas perintah `jeda`/`stop` yang diperiksa sesi di antara
+  lowongan dan kata kunci — dasar tombol Pause/Stop dashboard.
+- `REVIEW_REQUIRED` untuk logo yang **tidak dapat dipastikan** (pasal 6.1),
+  bukan hanya tanpa logo.
+
+**Fase 3 — selesai (`73f34b6`):**
+- `cv.py`: baca `.docx` (zip+XML, tanpa dependensi), `.txt`/`.md`, dan `.pdf`
+  (opsional lewat `pypdf`); profil berisi pengalaman, pendidikan, bidang,
+  keterampilan, sertifikasi.
+- `skor_cv.py`: skor 0–100 berbobot 30/25/20/10/10/5 + kategori 90/80/70 +
+  rincian per parameter + alasan cocok/kurang. `MIN_SKOR_CV` memotong kandidat
+  sebelum antrean apply. Tanpa CV, perilaku lama tidak berubah.
+
+**Fase 4 — selesai:**
+- `dashboard.py`: server HTTP pustaka standar (tanpa dependensi) di
+  `http://127.0.0.1:8765`, JSON status, log aktivitas, dan kontrol nyata
+  Start/Pause/Resume/Stop/Retry/Clear (Clear berkonfirmasi, dan tidak
+  menghapus lowongan yang pernah dilamar). Diuji live di sandbox.
+- `laporan.py` + `jalankan.bat laporan`: angka kinerja nyata dari database,
+  sebaran status, per lokasi/kategori, alasan penolakan tersering, tingkat
+  keberhasilan, serta saran yang **tidak** mengubah aturan otomatis.
+- `log_aktivitas.py`: log harian WIB di `logs/aktivitas.log`.
+- Perintah CLI baru: `cv`, `dashboard`, `laporan`, `antrean`; berkas
+  `Dashboard.bat`.
+
+**Batas yang perlu diketahui (jujur):**
+- Uji browser nyata (Selenium) tetap hanya bisa di PC Anda; semua tes di sini
+  memakai bot/driver palsu.
+- Pelacakan "kata kunci mana yang menghasilkan lamaran" belum disimpan per
+  lowongan, jadi saran pembelajaran masih berbasis lokasi/kategori/alasan.
+- Klaim worker memakai status di database + kunci sesi tunggal, bukan antrean
+  multi-mesin.
 
 ## 6. Yang TIDAK akan saya ubah tanpa persetujuan Anda
 

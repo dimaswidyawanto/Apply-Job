@@ -156,6 +156,159 @@ def diagnosa_indeed_cli(keyword: str = "", location: str = ""):
     diagnosa_indeed(keyword, location)
 
 
+def tampilkan_cv(path: str = "", pasang: bool = False):
+    """Baca CV, tampilkan profil, dan (opsional) simpan CV_PATH ke .env."""
+    import cv as modul_cv
+
+    if pasang and path.strip():
+        from env_tools import simpan_env
+
+        simpan_env({"CV_PATH": path.strip()})
+        print(f"CV_PATH disimpan ke .env: {path.strip()}")
+
+    target = path.strip()
+    if not target:
+        from config import config as _config
+
+        target = _config.cv_path
+
+    console.print(f"[cyan]Berkas CV:[/] {target or '(belum diisi)'}")
+
+    try:
+        profil = modul_cv.profil_cv(target)
+    except modul_cv.CvTidakTerbaca as exc:
+        console.print(f"[bold red]CV tidak terbaca:[/] {exc}")
+        return
+
+    console.print(f"[green]Terbaca:[/] {modul_cv.format_profil(profil)}")
+
+    table = Table(title="Profil CV")
+    table.add_column("Bagian", style="cyan")
+    table.add_column("Isi", overflow="fold")
+    table.add_row(
+        "Pengalaman",
+        f"{profil.get('pengalaman_tahun')} tahun"
+        if profil.get("pengalaman_tahun") is not None
+        else "tidak disebut",
+    )
+    table.add_row("Pendidikan", str(profil.get("pendidikan") or "tidak disebut"))
+    table.add_row("Bidang", ", ".join(profil.get("bidang") or []) or "-")
+    table.add_row(
+        "Keterampilan", ", ".join(profil.get("keterampilan") or []) or "-"
+    )
+    table.add_row("Sertifikasi", ", ".join(profil.get("sertifikasi") or []) or "-")
+    console.print(table)
+    console.print(
+        "[dim]Skor 6 parameter otomatis aktif selama CV_PATH terisi.[/]"
+    )
+
+
+def tampilkan_antrean(batas: int = 20):
+    """Lihat isi antrean: sebaran status + lowongan yang perlu ditinjau."""
+    from database import db as _db
+
+    hitung = _db.hitung_status_antrean()
+
+    ringkas = Table(title="Antrean lowongan")
+    ringkas.add_column("Status", style="cyan")
+    ringkas.add_column("Jumlah", justify="right")
+    for nama, jumlah in hitung.items():
+        if jumlah:
+            ringkas.add_row(nama, str(jumlah))
+    console.print(ringkas)
+
+    perhatian = []
+    with _db._get_conn() as conn:  # noqa: SLF001 (pembacaan langsung, aman)
+        for status in ("review_required", "failed", "expired"):
+            for baris in conn.execute(
+                """
+                SELECT title, company, url, alasan, status_antrean
+                  FROM jobs
+                 WHERE status_antrean = ?
+                 ORDER BY diperbarui_at DESC, id DESC
+                 LIMIT ?
+                """,
+                (status, max(1, batas)),
+            ):
+                perhatian.append(dict(baris))
+
+    if not perhatian:
+        console.print("[dim]Tidak ada lowongan yang perlu ditinjau.[/]")
+        return
+
+    table = Table(title=f"{len(perhatian)} lowongan perlu perhatian")
+    table.add_column("Status", style="yellow")
+    table.add_column("Posisi", style="cyan", overflow="fold")
+    table.add_column("Perusahaan", overflow="fold")
+    table.add_column("Alasan", overflow="fold")
+    table.add_column("URL", style="dim", overflow="fold")
+
+    for job in perhatian:
+        table.add_row(
+            job["status_antrean"],
+            str(job["title"])[:40],
+            str(job["company"] or "-")[:24],
+            str(job["alasan"] or "-")[:46],
+            str(job["url"] or ""),
+        )
+
+    console.print(table)
+
+
+def tampilkan_laporan():
+    """Laporan kinerja + saran (master prompt pasal 12.4)."""
+    import laporan
+
+    data = laporan.ringkasan()
+
+    table = Table(title="Laporan kinerja")
+    table.add_column("Ukuran", style="cyan")
+    table.add_column("Nilai", justify="right")
+    table.add_row("Lowongan tersimpan", str(data["lowongan_tersimpan"]))
+    table.add_row("Lamaran terkirim", str(data["lamaran_terkirim"]))
+    table.add_row("Lamaran hari ini (WIB)", str(data["lamaran_hari_ini"]))
+    table.add_row(
+        "Sisa kuota",
+        "tanpa batas" if data["sisa_kuota"] is None else str(data["sisa_kuota"]),
+    )
+    table.add_row("Tingkat berhasil", f"{data['tingkat_berhasil']}%")
+    console.print(table)
+
+    antre = Table(title="Status antrean")
+    antre.add_column("Status", style="cyan")
+    antre.add_column("Jumlah", justify="right")
+    for nama, jumlah in data["status_antrean"].items():
+        if jumlah:
+            antre.add_row(nama, str(jumlah))
+    console.print(antre)
+
+    if data["per_lokasi"]:
+        lokasi = Table(title="Per lokasi")
+        lokasi.add_column("Lokasi", style="cyan")
+        lokasi.add_column("Lowongan", justify="right")
+        lokasi.add_column("Dilamar", justify="right")
+        for item in data["per_lokasi"]:
+            lokasi.add_row(
+                item["lokasi"], str(item["jumlah"]), str(item["dilamar"])
+            )
+        console.print(lokasi)
+
+    saran = laporan.saran(data)
+    if saran:
+        console.print("[bold cyan]Saran:[/]")
+        for satu in saran:
+            console.print(f"  - {satu}")
+
+
+def buka_dashboard(port: int = 0, tanpa_browser: bool = False):
+    """Jalankan dashboard monitoring lokal."""
+    import dashboard
+
+    dashboard.jalankan(
+        port=port or dashboard.PORT_BAKU, buka_browser=not tanpa_browser
+    )
+
+
 def kelola_jawaban(hapus: str = "", reset: bool = False,
                    isi: str = ""):
     """Lihat, tambah, atau hapus ingatan jawaban formulir."""
@@ -1040,6 +1193,35 @@ if __name__ == "__main__":
         "simulasi", help="Simulasi alur lamaran Glints (tanpa Chrome)"
     )
 
+    cv_parser = subparsers.add_parser(
+        "cv", help="Baca CV dan tampilkan profil untuk skor kecocokan"
+    )
+    cv_parser.add_argument(
+        "--path", default="", help="Berkas CV (.pdf/.docx/.txt/.md)"
+    )
+    cv_parser.add_argument(
+        "--pasang", action="store_true", help="Simpan path ini ke CV_PATH di .env"
+    )
+
+    dash_parser = subparsers.add_parser(
+        "dashboard", help="Dashboard monitoring + kontrol Start/Pause/Stop"
+    )
+    dash_parser.add_argument(
+        "--port", type=int, default=0, help=f"Port (bawaan {8765})"
+    )
+    dash_parser.add_argument(
+        "--tanpa-browser", action="store_true", help="Jangan buka browser"
+    )
+
+    subparsers.add_parser("laporan", help="Laporan kinerja + saran perbaikan")
+
+    antre_parser = subparsers.add_parser(
+        "antrean", help="Lihat antrean: status dan lowongan yang perlu ditinjau"
+    )
+    antre_parser.add_argument(
+        "--limit", type=int, default=20, help="Jumlah per status (20)"
+    )
+
     lamar_parser = subparsers.add_parser(
         "lamar",
         help="Sekali jalan: JobStreet, Glints, dan Indeed (untuk .bat)",
@@ -1210,6 +1392,14 @@ if __name__ == "__main__":
             simulasi_glints()
         else:
             glints_parser.print_help()
+    elif args.command == "cv":
+        tampilkan_cv(args.path, args.pasang)
+    elif args.command == "dashboard":
+        buka_dashboard(args.port, args.tanpa_browser)
+    elif args.command == "laporan":
+        tampilkan_laporan()
+    elif args.command == "antrean":
+        tampilkan_antrean(args.limit)
     elif args.command == "lamar":
         lamar_semua_situs(
             args.situs, args.max_pages, args.limit, not args.tanpa_perbarui
