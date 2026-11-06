@@ -194,6 +194,17 @@ dan semua fase dikerjakan berurutan.
   jumlah lowongan + lamaran per kata kunci dan per sumber, lalu menyarankan
   kata kunci yang tidak produktif.
 
+**Optimasi kecepatan (revisi ini):**
+- `jalankan.bat` memakai jalur cepat: bila `.venv` siap (penanda
+  `.venv\.python-baik` + `.deps-terpasang`), pencarian `py -3.13/3.12/...`
+  dilewati sehingga setiap perintah tidak lagi menunggu beberapa detik.
+- Dashboard tidak merender ulang bila datanya sama dan menyegarkan tiap 3 detik
+  (sebelumnya 2 detik, selalu render).
+- Port 8765 yang masih dipakai memberi pesan jelas (bukan layar memuat terus).
+- Perintah baru `performa`: mengukur database, tulis berkas, dashboard, dan
+  jaringan ke tiga situs, lalu memberi saran (folder OneDrive, antivirus,
+  ukuran database).
+
 **Batas yang perlu diketahui (jujur):**
 - Uji browser nyata (Selenium) tetap hanya bisa di PC Anda; semua tes di sini
   memakai bot/driver palsu.

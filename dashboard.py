@@ -306,8 +306,10 @@ function baris(id,obj){document.getElementById(id).innerHTML=Object.entries(obj)
 function tabel(id,rows,kolom){const el=document.getElementById(id);
  el.innerHTML='<tr>'+kolom.map(k=>`<th>${k}</th>`).join('')+'</tr>'+
  rows.map(r=>'<tr>'+kolom.map(k=>`<td>${r[k]??''}</td>`).join('')+'</tr>').join('')}
+let terakhir='';
 async function segarkan(){
  try{const r=await fetch('api/status');const d=await r.json();
+  const teks=JSON.stringify(d);if(teks===terakhir)return;terakhir=teks;
   baris('kuota',{Batas:d.kuota.batas,Terpakai:d.kuota.terpakai,
    Sisa:d.kuota.sisa,Sesi:d.sesi.berjalan?'berjalan':d.sesi.kendali});
   const g=d.ringkasan;
@@ -369,7 +371,7 @@ async function simpanKonf(){
  const d=await r.json();
  document.getElementById('konf-pesan').textContent=d.pesan||'';
 }
-segarkan();muatRiwayat();setInterval(segarkan,2000);setInterval(muatRiwayat,10000);
+segarkan();muatRiwayat();setInterval(segarkan,3000);setInterval(muatRiwayat,10000);
 </script></body></html>
 """
 

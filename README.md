@@ -984,6 +984,27 @@ bermutu rendah; syarat wajib (logo, gaji, judul, blacklist) tetap berlaku.
 
 Tanpa CV, peringkat memakai skor lama — tidak ada nilai karangan.
 
+### Kalau terasa lambat
+
+```powershell
+.\jalankan.bat performa
+```
+
+Perintah ini mengukur di komputer Anda: baca database, tulis berkas 1 MB
+(untuk melihat dampak antivirus), respons dashboard, dan waktu sambung ke
+JobStreet/Glints/Indeed — lalu memberi saran. Angka di atas ±80 ms untuk
+database, atau ±4 detik untuk jaringan, biasanya penyebab utamanya.
+
+Penyebab umum dan penanganannya:
+
+| Gejala | Penyebab | Penanganan |
+|---|---|---|
+| Setiap `.bat` butuh beberapa detik sebelum jalan | pencarian Python (`py -3.13`, `py -3.12`, …) | sudah diperbaiki: bila `.venv` siap, skrip langsung jalan |
+| Semua terasa lambat, database kecil | folder proyek di OneDrive | pindahkan ke `C:\Dimas\...` |
+| Python/Chrome lambat dibuka | antivirus memindai tiap berkas | kecualikan folder proyek + `.venv` di Windows Defender |
+| Halaman dashboard berputar lama | port 8765 masih dipakai dashboard lama | pesan sekarang menyebutkannya; pakai `--port 8766` |
+| Riset lama (30–50 menit) | 14 kata kunci × 7 lokasi × 3 halaman = 294 halaman | `RESEARCH_MAX_PAGES=1`, kurangi `LOCATIONS`, atau `--limit 10` |
+
 ### Prioritas lokasi × kategori
 
 ```powershell
