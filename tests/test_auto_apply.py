@@ -80,6 +80,12 @@ class FakeSelect:
             raise ValueError(text)
         self.element._attrs["value"] = text
 
+    @property
+    def first_selected_option(self):
+        """Selaras dengan selenium: opsi yang sedang terpilih."""
+        teks = self.element._attrs.get("value", "")
+        return FakeElement(text=teks)
+
 
 class FakeDriver:
     def __init__(self, elements=None, body="", url="https://id.jobstreet.com/job/1"):
@@ -710,14 +716,15 @@ def test_radio_ya_tidak_dijawab(monkeypatch):
 
     diklik = {}
 
-    ya = FakeElement(
-        attrs={"id": "r1", "name": "bersedia", "value": "ya"},
-        on_click=lambda: diklik.setdefault("ya", True),
-    )
-    tidak = FakeElement(
-        attrs={"id": "r2", "name": "bersedia", "value": "tidak"},
-        on_click=lambda: diklik.setdefault("tidak", True),
-    )
+    ya = FakeElement(attrs={"id": "r1", "name": "bersedia", "value": "ya"})
+    tidak = FakeElement(attrs={"id": "r2", "name": "bersedia", "value": "tidak"})
+
+    def pilih(item, nama):
+        item._selected = True
+        diklik[nama] = True
+
+    ya._on_click = lambda: pilih(ya, "ya")
+    tidak._on_click = lambda: pilih(tidak, "tidak")
     ya.parent = wadah
     tidak.parent = wadah
 
@@ -1176,3 +1183,72 @@ def test_kuesioner_diisi_pengguna_lalu_terkirim(monkeypatch):
     assert panggilan["tunggu"] >= 1, "jalur tunggu pengguna tidak dipakai"
     assert hasil.applied is True
     assert hasil.status == "applied"
+
+
+# ---------------------------------------------- radio tersembunyi (JobStreet) ---
+def test_radio_tersembunyi_tetap_dijawab(monkeypatch):
+    """JobStreet menyembunyikan input asli; labelnya yang terlihat.
+
+    Tanpa toleransi ini, pertanyaan "do you have ... experience?" tidak pernah
+    dijawab dan lamaran berakhir di daftar manual.
+    """
+    monkeypatch.setattr(config, "auto_answer_yes", True)
+
+    wadah = FakeElement(
+        text="Do you have production support experience?\nYes\nNo"
+    )
+    ya = FakeElement(
+        attrs={"id": "a1", "name": "dukungan", "value": "yes"}, visible=False
+    )
+    tidak = FakeElement(
+        attrs={"id": "a2", "name": "dukungan", "value": "no"}, visible=False
+    )
+    label_ya = FakeElement(text="Yes")
+    label_tidak = FakeElement(text="No")
+
+    ya.parent = tidak.parent = wadah
+    label_ya._on_click = lambda: setattr(ya, "_selected", True)
+    label_tidak._on_click = lambda: setattr(tidak, "_selected", True)
+
+    applier = AutoApplier(FakeDriver())
+    monkeypatch.setattr(
+        applier,
+        "_find_all",
+        lambda selector: {
+            "input[type='radio']": [ya, tidak],
+            "label[for='a1']": [label_ya],
+            "label[for='a2']": [label_tidak],
+        }.get(selector, []),
+    )
+    monkeypatch.setattr(
+        applier, "_label_untuk", lambda el: "Yes" if el is ya else "No"
+    )
+
+    gagal = applier.jawab_pertanyaan()
+
+    assert gagal == []
+    assert ya.is_selected() is True
+
+
+def test_pilih_opsi_mengirim_event_perubahan(monkeypatch):
+    """Nilai dropdown harus disertai event input+change agar form React ikut."""
+    monkeypatch.setattr(auto_apply, "Select", FakeSelect)
+
+    skrip = []
+
+    class DriverEvent(FakeDriver):
+        def execute_script(self, *args, **kwargs):
+            skrip.append(args[0] if args else "")
+            return None
+
+    select = FakeElement(attrs={"name": "q"}, options=[])
+    select.options = [
+        FakeElement(text=teks) for teks in ("0 years", "2 years", "3 years")
+    ]
+
+    applier = AutoApplier(DriverEvent())
+    berhasil = applier._pilih_opsi(select, "3 years")
+
+    assert berhasil is True
+    assert select.get_attribute("value") == "3 years"
+    assert any("dispatchEvent" in str(item) for item in skrip)

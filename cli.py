@@ -209,6 +209,29 @@ def tampilkan_cv(path: str = "", pasang: bool = False):
     )
 
 
+def diagnosa_form(berkas: str = "", semua: bool = False):
+    """Tunjukkan pertanyaan formulir yang belum terisi dari berkas debug."""
+    import diagnosa_form as df
+
+    jalur = berkas or str(df.berkas_terakhir() or "")
+
+    if not jalur:
+        console.print(
+            "[yellow]Belum ada berkas debug.[/] Berkas ini dibuat otomatis "
+            "saat bot menemui formulir yang tidak dikenali "
+            "(folder debug/)."
+        )
+        return
+
+    try:
+        hasil = df.baca(jalur)
+    except FileNotFoundError as exc:
+        console.print(f"[yellow]{exc}[/]")
+        return
+
+    console.print(df.teks_laporan(hasil, semua=semua))
+
+
 def tampilkan_antrean(batas: int = 20):
     """Lihat isi antrean: sebaran status + lowongan yang perlu ditinjau."""
     from database import db as _db
@@ -1383,6 +1406,19 @@ if __name__ == "__main__":
         "--pulihkan", default="", help="Nama berkas backup yang dipulihkan"
     )
 
+    diag_parser = subparsers.add_parser(
+        "diagnosa-form",
+        help="Baca berkas debug HTML: pertanyaan mana yang belum terisi",
+    )
+    diag_parser.add_argument(
+        "berkas", nargs="?", default="",
+        help="Berkas debug (kosong = berkas debug terbaru di folder debug/)",
+    )
+    diag_parser.add_argument(
+        "--semua", action="store_true",
+        help="Tampilkan juga pertanyaan yang sudah terisi",
+    )
+
     antre_parser = subparsers.add_parser(
         "antrean", help="Lihat antrean: status dan lowongan yang perlu ditinjau"
     )
@@ -1580,6 +1616,8 @@ if __name__ == "__main__":
         tampilkan_performa()
     elif args.command == "backup":
         tampilkan_backup(args.daftar, args.pulihkan)
+    elif args.command == "diagnosa-form":
+        diagnosa_form(args.berkas, args.semua)
     elif args.command == "antrean":
         tampilkan_antrean(args.limit)
     elif args.command == "lamar":

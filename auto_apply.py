@@ -790,6 +790,62 @@ class AutoApplier:
 
         return "\n".join(baris)
 
+    def _label_terlihat(self, element) -> bool:
+        """True bila label/induk input terlihat.
+
+        JobStreet menyembunyikan `<input type="radio">` asli (opacity 0 /
+        ukuran 1 px) dan hanya menampilkan label-nya. Tanpa pemeriksaan ini,
+        seluruh pertanyaan pilihan dianggap tidak ada.
+        """
+        with contextlib.suppress(Exception):
+            id_el = (element.get_attribute("id") or "").strip()
+            if id_el:
+                for label in self._find_all(f"label[for='{id_el}']"):
+                    if self._visible(label):
+                        return True
+
+        with contextlib.suppress(Exception):
+            induk = element.find_element(By.XPATH, "..")
+            if induk is not None and self._visible(induk):
+                return True
+
+        return False
+
+    def _picu_perubahan(self, element) -> None:
+        """Kirim event input+change (formulir React tidak membaca nilai diam-diam)."""
+        with contextlib.suppress(Exception):
+            self.driver.execute_script(
+                "arguments[0].dispatchEvent(new Event('input', {bubbles: true}));"
+                "arguments[0].dispatchEvent(new Event('change', {bubbles: true}));",
+                element,
+            )
+
+    def _pilih_radio(self, element, pilihan: str = "") -> bool:
+        """Klik satu opsi radio dan pastikan benar-benar terpilih.
+
+        Urutan: klik input → klik label for=id → klik elemen induk. Dipakai
+        karena input asli sering tidak bisa diklik langsung.
+        """
+        if self._click(element) and self._selected(element):
+            self._picu_perubahan(element)
+            return True
+
+        with contextlib.suppress(Exception):
+            id_el = (element.get_attribute("id") or "").strip()
+            if id_el:
+                for label in self._find_all(f"label[for='{id_el}']"):
+                    if self._click(label) and self._selected(element):
+                        self._picu_perubahan(element)
+                        return True
+
+        with contextlib.suppress(Exception):
+            induk = element.find_element(By.XPATH, "..")
+            if induk is not None and self._click(induk) and self._selected(element):
+                self._picu_perubahan(element)
+                return True
+
+        return self._selected(element)
+
     def _label_untuk(self, element) -> str:
         """Teks label untuk satu input (radio/checkbox)."""
         try:
@@ -851,9 +907,14 @@ class AutoApplier:
             id_el = ""
 
         if id_el:
+            kunci_opsi = {_norm(item) for item in opsi if item}
+
             for label_el in self._find_all(f"label[for='{id_el}']"):
                 teks = " ".join(self._raw_text(label_el).split())
-                if teks:
+
+                # Label milik input radio biasanya adalah TEKS OPSI ("Ya"),
+                # bukan pertanyaan. Jangan sampai dipakai sebagai pertanyaan.
+                if teks and _norm(teks) not in kunci_opsi:
                     return teks
 
         # 4. teks di sekitar input (naik maksimum empat tingkat)
@@ -895,21 +956,61 @@ class AutoApplier:
 
         return hasil
 
-    def _pilih_opsi(self, element, teks: str) -> bool:
+    def _teks_terpilih(self, element) -> str:
+        """Teks opsi yang saat ini benar-benar terpilih di sebuah dropdown."""
         try:
-            Select(element).select_by_visible_text(teks)
-            return True
+            opsi = Select(element).first_selected_option
+            return " ".join((opsi.text or "").split())
+        except Exception:
+            return ""
+
+    def _pilih_opsi(self, element, teks: str) -> bool:
+        """Pilih opsi dropdown dan pastikan nilainya benar-benar berubah."""
+        target = " ".join(str(teks or "").split())
+
+        try:
+            Select(element).select_by_visible_text(target)
+            if _norm(self._teks_terpilih(element)) == _norm(target):
+                self._picu_perubahan(element)
+                return True
         except Exception:
             pass
 
         try:
             for item in element.find_elements(By.TAG_NAME, "option"):
-                if " ".join((item.text or "").split()) == teks:
-                    return self._click(item)
+                if " ".join((item.text or "").split()) == target:
+                    self._click(item)
+                    if _norm(self._teks_terpilih(element)) == _norm(target):
+                        self._picu_perubahan(element)
+                        return True
+                    break
         except Exception:
             pass
 
-        return False
+        # Jalan terakhir: set nilai + kirim event supaya state formulir ikut.
+        try:
+            berhasil = self.driver.execute_script(
+                """
+                const el = arguments[0], cari = arguments[1];
+                const opsi = Array.from(el.options || []).find(
+                    (o) => (o.textContent || '').trim() === cari);
+                if (!opsi) { return false; }
+                el.value = opsi.value;
+                el.dispatchEvent(new Event('input', {bubbles: true}));
+                el.dispatchEvent(new Event('change', {bubbles: true}));
+                return true;
+                """,
+                element,
+                target,
+            )
+        except Exception:
+            return False
+
+        if not berhasil:
+            return False
+
+        return _norm(self._teks_terpilih(element)) in ("", _norm(target))
+
 
     @staticmethod
     def _dari_ingatan(pertanyaan: str, opsi) -> tuple:
@@ -1076,7 +1177,11 @@ class AutoApplier:
         grup = {}
 
         for element in self._find_all("input[type='radio']"):
-            if not self._visible(element) or not self._enabled(element):
+            if not self._enabled(element):
+                continue
+
+            # Input asli boleh tersembunyi selama labelnya terlihat.
+            if not self._visible(element) and not self._label_terlihat(element):
                 continue
 
             try:
@@ -1125,7 +1230,7 @@ class AutoApplier:
             diklik = False
             for item in element_grup:
                 if _norm(self._label_untuk(item)) == _norm(pilihan):
-                    diklik = self._click(item)
+                    diklik = self._pilih_radio(item, pilihan)
                     break
 
             if diklik:

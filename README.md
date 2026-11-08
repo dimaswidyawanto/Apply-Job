@@ -681,6 +681,24 @@ Tips: jalankan tanpa `HEADLESS_MODE` (bawaan) supaya jendela Chrome terlihat
 dan bisa Anda isi. Di mode headless tidak ada yang bisa diklik, jadi biarkan
 `AUTO_ANSWER_WAIT=0`.
 
+Bila masih ada lowongan yang berakhir dengan pesan
+`please address the following issues: ...`, lihat penyebabnya tanpa membuka
+Chrome:
+
+```powershell
+.\jalankan.bat diagnosa-form
+```
+
+Perintah ini membaca berkas debug terbaru di folder `debug/` (dibuat otomatis
+saat bot menemui formulir yang tidak dikenali) lalu menampilkan pertanyaan mana
+yang **KOSONG** beserta opsinya. Untuk berkas tertentu:
+
+```powershell
+.\jalankan.bat diagnosa-form "debug\20261108-175559-95464155.html"
+```
+
+Tambahkan `--semua` bila ingin melihat pertanyaan yang sudah terisi juga.
+
 ### Ingatan jawaban: sekali diisi, selamanya otomatis
 
 Setiap isian yang **Anda** lakukan sendiri di formulir dicatat, lalu dipakai
