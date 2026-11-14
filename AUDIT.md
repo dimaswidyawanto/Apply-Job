@@ -715,3 +715,22 @@ resmi skrip (3.10-3.13). Instalasi berhasil atau tidak pada 3.15 belum
 terverifikasi; disarankan memasang Python 3.12.
 
 Tes: 777 → **784 passed, 1 skipped**, gate ruff bersih.
+
+---
+
+## 20. `chrome-debug.bat` selalu membuka Glints
+
+Gejala: pengguna menjalankan `chrome-debug.bat` untuk menguji **Indeed**, tetapi
+jendela Chrome yang terbuka memuat halaman Glints. URL-nya memang ditulis tetap
+di skrip (`glints.com/id/opportunities/jobs/explore?...`), sisa dari saat skrip
+ini dibuat khusus untuk Glints.
+
+| Perubahan | Rincian |
+|---|---|
+| Argumen situs | `chrome-debug.bat [port] [situs]`, bawaan **indeed** |
+| Pilihan | `indeed`, `glints`, `jobstreet`, `kosong` (about:blank), atau URL penuh |
+| Petunjuk ikut situs | Perintah `diagnosa`/`run` yang dicetak menyesuaikan situs |
+| Tetap sama | Port debug (bawaan 9222) dan profil `~/.dimastes/chrome-debug` yang terpisah dari profil bot |
+
+Tes: `tests/test_skrip_windows.py` +4 (bawaan Indeed, situs lain, URL penuh,
+perintah uji per situs). Gate ruff bersih.

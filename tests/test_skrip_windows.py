@@ -242,3 +242,44 @@ def test_jalankan_memperingatkan_jangan_dihentikan_saat_pasang():
 
     assert "JANGAN tekan Ctrl+C" in isi
     assert "pip install --quiet" not in isi
+
+
+# ------------------------------------------------- chrome-debug.bat situs ---
+def _chrome_debug() -> str:
+    return (AKAR / "chrome-debug.bat").read_text(encoding="utf-8")
+
+
+def test_chrome_debug_bawaan_membuka_indeed():
+    """Dulu selalu Glints, jadi saat menguji Indeed yang terbuka Glints."""
+    isi = _chrome_debug()
+
+    assert 'set "SITUS=indeed"' in isi
+    assert 'set "URL=https://id.indeed.com"' in isi
+
+
+def test_chrome_debug_mendukung_situs_lain():
+    isi = _chrome_debug()
+
+    assert 'if /I "%SITUS%"=="glints"' in isi
+    assert 'if /I "%SITUS%"=="jobstreet"' in isi
+    assert 'if /I "%SITUS%"=="kosong"' in isi
+    assert "glints.com/id/opportunities/jobs/explore" in isi
+    assert "id.jobstreet.com" in isi
+    assert "about:blank" in isi
+
+
+def test_chrome_debug_menerima_url_penuh():
+    isi = _chrome_debug()
+
+    assert 'set "AWALAN=%SITUS:~0,4%"' in isi
+    assert 'if /I "%AWALAN%"=="http" set "URL=%SITUS%"' in isi
+
+
+def test_chrome_debug_perintah_uji_ikut_situs():
+    isi = _chrome_debug()
+
+    assert "jalankan.bat indeed diagnosa" in isi
+    assert "jalankan.bat glints diagnosa" in isi
+    # Port debug tetap sama dan profil tetap terpisah dari profil bot.
+    assert "--remote-debugging-port=%PORT%" in isi
+    assert ".dimastes\\chrome-debug" in isi

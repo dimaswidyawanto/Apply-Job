@@ -1614,15 +1614,23 @@ diminta verifikasi. Dua cara:
 2. Paling stabil — pakai Chrome Anda sendiri, lalu bot menempel ke situ:
 
 ```powershell
-# buka Chrome khusus bot (port debug 9222) + halaman Glints
-.\chrome-debug.bat
-# selesaikan "Just a moment..." di jendela itu (sekali saja)
+# Chrome khusus bot (port debug 9222). Halaman awal mengikuti situs:
+#   chrome-debug.bat              -> Indeed
+#   chrome-debug.bat 9222 glints  -> Glints
+#   chrome-debug.bat 9222 jobstreet
+#   chrome-debug.bat 9222 https://id.indeed.com/jobs?q=inventory+staff
+.\chrome-debug.bat indeed
+# selesaikan "Just a moment..."/"Security Check" di jendela itu (sekali saja)
 
 # suruh bot menempel, bukan membuka Chrome sendiri
 .\jalankan.bat set-env CHROME_DEBUG_PORT=9222
-.\jalankan.bat glints diagnosa --keyword "inventory staff"
-.\jalankan.bat glints run
+.\jalankan.bat indeed diagnosa --keyword "inventory staff" --location Bandung
 ```
+
+Selama ini `chrome-debug.bat` selalu membuka halaman **Glints**, jadi saat
+menguji Indeed yang terbuka justru Glints. Sekarang argumen kedua menentukan
+situs (`indeed`, `glints`, `jobstreet`, `kosong`, atau URL penuh) dan perintah
+uji yang dicetak ikut menyesuaikan.
 
 Setelah selesai, kembalikan ke mode biasa dengan
 `set-env CHROME_DEBUG_PORT=0`. Jangan tutup jendela Chrome dari
