@@ -2,7 +2,7 @@
 
 import contextlib
 import re
-from typing import Dict, List, Optional
+from typing import Optional
 
 from config import config
 from database import db
@@ -128,7 +128,7 @@ def rentang_gaji(teks: str) -> tuple[int, int]:
     return (int(min(nilai)), int(max(nilai)))
 
 
-def alasan_tidak_layak(job: Dict, saringan: Optional["JobFilter"] = None) -> str:
+def alasan_tidak_layak(job: dict, saringan: Optional["JobFilter"] = None) -> str:
     """Aturan kelayakan tunggal JobStreet, Glints, dan Indeed.
 
     Kembalikan alasan penolakan, atau "" bila lowongan layak dilamar. Dipakai
@@ -156,7 +156,7 @@ class JobFilter:
             "chief", "vp ", "vice president", "manager",
         ]
 
-    def should_apply(self, job: Dict) -> tuple[bool, str]:
+    def should_apply(self, job: dict) -> tuple[bool, str]:
         job_id = str(job.get("job_id") or "").strip()
         title = str(job.get("title") or "").strip()
         company = str(job.get("company") or "").strip()
@@ -348,7 +348,7 @@ class JobFilter:
 
         return salary
 
-    def _extract_experience(self, text: str) -> Optional[int]:
+    def _extract_experience(self, text: str) -> int | None:
         patterns = [
             (
                 r"(\d+)\+?\s*(?:years?|tahun)\s*(?:of\s+)?"
@@ -368,7 +368,7 @@ class JobFilter:
 
         return min_years
 
-    def _peringkat_prioritas(self, job: Dict) -> tuple[int, int]:
+    def _peringkat_prioritas(self, job: dict) -> tuple[int, int]:
         """(peringkat lokasi, peringkat kategori) — angka kecil lebih utama.
 
         Prioritas hanya memutuskan urutan; tidak pernah menolak lowongan.
@@ -394,8 +394,8 @@ class JobFilter:
         return p_lokasi, p_kategori
 
     def rank_jobs(
-        self, jobs: List[Dict], prefer_newest: Optional[bool] = None
-    ) -> List[Dict]:
+        self, jobs: list[dict], prefer_newest: bool | None = None
+    ) -> list[dict]:
         """Urutkan lowongan. Bila prefer_newest, yang paling baru didahulukan."""
         if prefer_newest is None:
             prefer_newest = config.prefer_newest and bool(config.sort_mode)
@@ -446,11 +446,11 @@ class JobFilter:
 
         return scored_jobs
 
-    def _calculate_score(self, job: Dict) -> int:
+    def _calculate_score(self, job: dict) -> int:
         """Total skor kecocokan (jumlah seluruh dimensi)."""
         return sum(self.score_breakdown(job).values())
 
-    def score_breakdown(self, job: Dict) -> Dict[str, int]:
+    def score_breakdown(self, job: dict) -> dict[str, int]:
         """Nilai kecocokan per dimensi.
 
         Dimensi mengikuti permintaan pengguna: posisi, lokasi, kualifikasi,
@@ -597,7 +597,7 @@ def _angka_rupiah(teks: str) -> int:
     return int(nilai)
 
 
-def _peringkat_pendidikan(teks: str) -> Optional[int]:
+def _peringkat_pendidikan(teks: str) -> int | None:
     """Jenjang pendidikan yang disebut pada teks: 1=SMA/SMK ... 4=S2."""
     teks = str(teks or "").lower()
 
@@ -613,7 +613,7 @@ def _peringkat_pendidikan(teks: str) -> Optional[int]:
     return None
 
 
-def kunci_duplikat(job: Dict) -> str:
+def kunci_duplikat(job: dict) -> str:
     """Kunci untuk mengenali lowongan yang sama dari pencarian berbeda."""
     job_id = str(job.get("job_id") or "").strip()
     if job_id:
@@ -630,7 +630,7 @@ def kunci_duplikat(job: Dict) -> str:
     return f"isi:{judul}|{perusahaan}|{lokasi}"
 
 
-def kunci_isi(job: Dict) -> str:
+def kunci_isi(job: dict) -> str:
     """Kunci isi lowongan (judul + perusahaan + lokasi), lintas situs."""
     judul = normalisasi_judul(job.get("title"))
     perusahaan = normalisasi_perusahaan(job.get("company"))
@@ -642,26 +642,26 @@ def kunci_isi(job: Dict) -> str:
     return f"{judul}|{perusahaan}|{lokasi}"
 
 
-def _situs(job: Dict) -> str:
+def _situs(job: dict) -> str:
     """Nama situs dari URL lowongan ("" bila tidak diketahui)."""
     url = str(job.get("url") or "").strip().lower()
     if not url:
         return ""
     tanpa_skema = url.split("://", 1)[-1]
     host = tanpa_skema.split("/", 1)[0].split(":", 1)[0]
-    return host[4:] if host.startswith("www.") else host
+    return host.removeprefix("www.")
 
 
-def dedupe_jobs(jobs: List[Dict]) -> List[Dict]:
+def dedupe_jobs(jobs: list[dict]) -> list[dict]:
     """Buang lowongan duplikat dari gabungan semua kategori & lokasi.
 
     Urutan pertama dipertahankan; lowongan berikutnya dengan kunci sama
     dilewati. Bila yang pertama datanya kurang lengkap, kekurangannya
     diisi dari duplikatnya.
     """
-    unik: List[Dict] = []
-    terlihat: Dict[str, Dict] = {}
-    terlihat_isi: Dict[str, Dict] = {}
+    unik: list[dict] = []
+    terlihat: dict[str, dict] = {}
+    terlihat_isi: dict[str, dict] = {}
 
     for job in jobs:
         if not isinstance(job, dict):

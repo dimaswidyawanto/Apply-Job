@@ -222,6 +222,10 @@ class Config:
     # 0 = tanpa batas jumlah lowongan hasil riset (pengaman opsional).
     research_max_jobs: int = max(0, _int_setting("RESEARCH_MAX_JOBS", 0))
 
+    # Cache hasil riset per kombinasi situs + kata kunci + lokasi + halaman
+    # (audit E-13). 0 = selalu ambil ulang dari situs.
+    cache_riset_menit: int = max(0, _int_setting("CACHE_RISET_MENIT", 60))
+
     # Kata kunci keterampilan untuk menilai kesesuaian keterampilan pada
     # deskripsi kartu lowongan (satu poin per keterampilan yang disebut).
     skill_keywords: list[str] = field(default_factory=lambda: _list_setting(
@@ -247,8 +251,9 @@ class Config:
     # 0 = tanpa batas umur. Nilai yang didukung JobStreet: 1, 3, 7, 14, 31.
     max_age_days: int = _int_setting("MAX_AGE_DAYS", 0)
 
-    # 0 = tanpa batas harian.
-    max_apply_per_day: int = max(0, _int_setting("MAX_APPLY_PER_DAY", 5))
+    # Target sekaligus batas harian PER SITUS (JobStreet/Glints/Indeed
+    # masing-masing 50). 0 = tanpa batas harian.
+    max_apply_per_day: int = max(0, _int_setting("MAX_APPLY_PER_DAY", 50))
     delay_between_apply: int = _int_setting("DELAY_BETWEEN_APPLY", 3)
 
     # Auto recovery (master prompt pasal 10): kegagalan SEMENTARA (timeout,

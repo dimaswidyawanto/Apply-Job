@@ -100,7 +100,7 @@ def test_cari_memakai_pembaca_cadangan_bila_skrip_gagal(monkeypatch):
     """JavaScript tidak menemukan kartu -> dibaca langsung dari elemen <a>."""
     driver = DriverPalsu(tautan_default=[URL_LOWONGAN])
     bot = bot_dengan(driver)
-    monkeypatch.setattr(bot, "buka_pencarian", lambda keyword: True)
+    monkeypatch.setattr(bot, "buka_pencarian", lambda keyword, location="": True)
     monkeypatch.setattr(bot, "urutkan_terbaru", lambda: False)
     monkeypatch.setattr(bot, "muat_lebih", lambda: False)
 

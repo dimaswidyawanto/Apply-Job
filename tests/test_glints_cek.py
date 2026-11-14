@@ -92,7 +92,9 @@ def _siapkan(monkeypatch, kandidat=None, kartu=None, cloudflare=False):
     monkeypatch.setattr(glints_module, "GlintsBot", BotPalsu)
     monkeypatch.setattr(
         glints_module, "kumpulkan_lowongan",
-        lambda bot, kata, halaman: list(KANDIDAT if kandidat is None else kandidat),
+        lambda bot, kata, halaman, lokasi=None: list(
+            KANDIDAT if kandidat is None else kandidat
+        ),
     )
     monkeypatch.setattr(
         glints_module, "pilih_kandidat",

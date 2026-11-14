@@ -59,6 +59,8 @@ def status() -> dict:
             "terpakai": kuota.terpakai(db),
             "sisa": kuota.sisa(db),
             "ringkasan": kuota.ringkasan(db),
+            # Kuota dihitung per situs: masing-masing punya target sendiri.
+            "per_situs": kuota.ringkasan_situs(db),
         },
         "sesi": {
             "berjalan": sesi_berjalan(),

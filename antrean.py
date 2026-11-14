@@ -4,7 +4,6 @@ Satu tempat untuk memetakan hasil penyaringan/lamaran menjadi status antrean,
 supaya JobStreet, Glints, dan Indeed mencatat hal yang sama ke database.
 """
 
-from typing import Optional
 
 from database import STATUS_ANTREAN, db
 
@@ -32,7 +31,7 @@ def status_untuk(alasan: str) -> str:
 
 
 def tandai(job_id: str, status: str, alasan: str = "",
-           skor: Optional[float] = None) -> bool:
+           skor: float | None = None) -> bool:
     """Simpan status antrean tanpa pernah menggagalkan sesi lamar."""
     if str(status or "").lower() not in STATUS_ANTREAN:
         return False
@@ -43,7 +42,7 @@ def tandai(job_id: str, status: str, alasan: str = "",
         return False
 
 
-def tandai_hasil(job_id: str, alasan: str = "", skor: Optional[float] = None) -> str:
+def tandai_hasil(job_id: str, alasan: str = "", skor: float | None = None) -> str:
     """Tandai hasil penyaringan; kembalikan status yang dipakai."""
     status = status_untuk(alasan)
     tandai(job_id, status, alasan, skor)

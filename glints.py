@@ -17,7 +17,6 @@ import contextlib
 import re
 import time
 from pathlib import Path
-from typing import Dict, List, Optional
 from urllib.parse import quote_plus
 
 from rich.console import Console
@@ -26,6 +25,7 @@ from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.common.by import By
 
 import antrean
+import cache_riset
 import kendali
 import kuota
 import log_aktivitas
@@ -82,6 +82,16 @@ SEARCH_URL_CANDIDATES = (
     BASE + "/id/opportunities/jobs/explore?keyword={keyword}&sortBy=LATEST",
 )
 SEARCH_URL = SEARCH_URL_CANDIDATES[0]
+
+# Glints memakai satu halaman pencarian untuk seluruh Indonesia. Bila parameter
+# lokasi dikenali, kombinasi riset bisa sama seperti JobStreet (kata kunci x
+# lokasi). Kalau ternyata diabaikan, bot kembali ke pencarian tanpa lokasi dan
+# lokasi tetap disaring dari teks kartu (`STRICT_LOCATION`).
+SEARCH_URL_LOKASI = (
+    BASE + "/id/opportunities/jobs/explore"
+    "?keyword={keyword}&countryCode=ID&location={location}",
+    BASE + "/id/opportunities/jobs/explore?keyword={keyword}&location={location}",
+)
 LOGIN_URL = BASE + "/id/login"
 
 # Pola tautan lowongan Glints. UUID boleh berada setelah slug
@@ -146,6 +156,13 @@ SUKSES_GLINTS = (
     "lamaran terkirim",
     "lamaran kamu sudah terkirim",
     "lamaran anda sudah terkirim",
+    # Banner yang muncul di halaman lowongan setelah lamaran masuk.
+    "kamu sudah melamar",
+    "anda sudah melamar",
+    "sudah melamar pekerjaan ini",
+    "cek lamaran saya",
+    "you have already applied",
+    "already applied",
     "application submitted",
     "application sent",
     "you have successfully applied",
@@ -170,6 +187,8 @@ SIBUK_TEXTS = (
     "sudah pernah melamar",
     "kamu sudah melamar",
     "anda sudah melamar",
+    "sudah melamar pekerjaan ini",
+    "cek lamaran saya",
     "you have already applied",
 )
 
@@ -295,7 +314,7 @@ def halaman_per_kata_kunci(max_pages: int = 0) -> int:
     )
 
 
-def pilih_teratas(lowongan: List[Dict], batas: int = 0) -> List[Dict]:
+def pilih_teratas(lowongan: list[dict], batas: int = 0) -> list[dict]:
     """Urutkan kandidat seperti di JobStreet, lalu batasi sesuai sisa kuota.
 
     `RANK_BY=relevance` (bawaan) = kecocokan tertinggi dulu, `newest` =
@@ -321,7 +340,7 @@ def pilih_teratas(lowongan: List[Dict], batas: int = 0) -> List[Dict]:
     return lolos
 
 
-def tampilkan_rincian_skor(kandidat: List[Dict], maksimal: int = 3,
+def tampilkan_rincian_skor(kandidat: list[dict], maksimal: int = 3,
                            situs: str = "Glints"):
     """Rincian skor per dimensi (sama seperti tabel JobStreet)."""
     if not kandidat:
@@ -350,7 +369,7 @@ def tampilkan_rincian_skor(kandidat: List[Dict], maksimal: int = 3,
     console.print(table)
 
 
-def tampilkan_perbandingan(kandidat: List[Dict], maksimal: int = 10,
+def tampilkan_perbandingan(kandidat: list[dict], maksimal: int = 10,
                            situs: str = "Glints"):
     """Tabel kandidat teratas beserta skor kecocokannya."""
     if not kandidat:
@@ -396,7 +415,7 @@ _POLA_UMUR = (
 )
 
 
-def umur_dari_teks(teks: str) -> Optional[int]:
+def umur_dari_teks(teks: str) -> int | None:
     """Umur lowongan (hari) dari teks kartu Glints; None bila tak terbaca.
 
     Kartu Glints menulis hal seperti "3 hari lalu", "2 minggu lalu",
@@ -423,7 +442,7 @@ def umur_dari_teks(teks: str) -> Optional[int]:
     return None
 
 
-def label_umur(umur: Optional[int]) -> str:
+def label_umur(umur: int | None) -> str:
     """Teks tanggal publikasi untuk laporan & penyortiran."""
     if umur is None:
         return ""
@@ -432,7 +451,7 @@ def label_umur(umur: Optional[int]) -> str:
     return f"{umur} hari lalu"
 
 
-def rapikan_kartu(data: dict) -> Optional[Dict]:
+def rapikan_kartu(data: dict) -> dict | None:
     """Ubah hasil skrip kartu menjadi dict lowongan; None bila tidak layak."""
     if not isinstance(data, dict):
         return None
@@ -477,7 +496,7 @@ def khusus_aplikasi(teks: str) -> str:
 
     return ""
 
-def lokasi_cocok(lokasi: str, daftar: List[str]) -> bool:
+def lokasi_cocok(lokasi: str, daftar: list[str]) -> bool:
     """True bila teks lokasi kartu cocok dengan salah satu lokasi dicari."""
     if not daftar:
         return True
@@ -490,7 +509,7 @@ def lokasi_cocok(lokasi: str, daftar: List[str]) -> bool:
     return any(item.lower().strip() in teks for item in daftar if item.strip())
 
 
-def alasan_tidak_layak(job: Dict, saringan: Optional[JobFilter] = None) -> str:
+def alasan_tidak_layak(job: dict, saringan: JobFilter | None = None) -> str:
     """Alasan lowongan tidak dicoba dilamar ('' bila layak).
 
     Memakai aturan tunggal JobStreet (`job_filter.alasan_tidak_layak`): tidak
@@ -663,8 +682,11 @@ class GlintsBot:
         self.login_expired = False
         # Pola URL pencarian yang terbukti menghasilkan kartu.
         self.search_url = ""
+        # None = belum dicoba; True/False = apakah Glints memakai parameter
+        # lokasi di URL pencarian.
+        self.lokasi_didukung: bool | None = None
         # Ringkasan diagnosa terakhir (dipakai tes & laporan).
-        self.diagnosa_terakhir: Dict = {}
+        self.diagnosa_terakhir: dict = {}
 
     # ------------------------------ browser ---------------------------
     def init_browser(self):
@@ -737,7 +759,7 @@ class GlintsBot:
             return " ".join(str(self.driver.title or "").split())
         return ""
 
-    def _tautan_kartu(self) -> List[str]:
+    def _tautan_kartu(self) -> list[str]:
         """Semua href yang mengarah ke halaman lowongan di halaman ini."""
         try:
             elemen = self.driver.find_elements(
@@ -794,7 +816,7 @@ class GlintsBot:
         )
         return False
 
-    def _tunggu_kartu(self, detik: Optional[int] = None) -> int:
+    def _tunggu_kartu(self, detik: int | None = None) -> int:
         """Tunggu sampai tautan lowongan muncul (SEARCH_WAIT detik)."""
         batas = time.time() + max(
             3, int(detik if detik is not None else config.search_wait)
@@ -817,7 +839,7 @@ class GlintsBot:
 
         return jumlah
 
-    def simpan_diagnosa(self, awalan: str = "glints", keyword: str = "") -> Dict:
+    def simpan_diagnosa(self, awalan: str = "glints", keyword: str = "") -> dict:
         """Simpan HTML + screenshot dan cetak ringkasan penyebab 0 kartu."""
         folder = folder_debug()
         cap = f"{awalan}-{time.strftime('%Y%m%d-%H%M%S')}"
@@ -901,8 +923,51 @@ class GlintsBot:
         return info
 
     # ----------------------------- pencarian --------------------------
-    def buka_pencarian(self, keyword: str) -> bool:
-        """Buka halaman hasil pencarian Glints; coba beberapa bentuk URL."""
+    def _buka_url_lokasi(self, keyword: str, location: str) -> bool:
+        """Coba URL pencarian Glints yang memuat lokasi; True bila ada kartu."""
+        for pola in SEARCH_URL_LOKASI:
+            url = pola.format(
+                keyword=quote_plus(keyword), location=quote_plus(location)
+            )
+            self.driver.get(url)
+
+            if self.kena_cloudflare():
+                self._tunggu_cloudflare()
+
+            if self._tunggu_kartu():
+                console.print(
+                    f"[dim]Halaman pencarian Glints (lokasi {location}): "
+                    f"{url}[/]"
+                )
+                return True
+
+            if "/login" in self._url().lower():
+                return False
+
+        return False
+
+    def buka_pencarian(self, keyword: str, location: str = "") -> bool:
+        """Buka halaman hasil pencarian Glints; coba beberapa bentuk URL.
+
+        Bila `location` diisi, URL dengan parameter lokasi dicoba lebih dulu
+        supaya kombinasi riset Glints sama seperti JobStreet. Bila parameter
+        itu ternyata diabaikan Glints (tidak ada kartu), bot kembali ke
+        pencarian biasa untuk semua kata kunci berikutnya.
+        """
+        lokasi = str(location or "").strip()
+
+        if lokasi and self.lokasi_didukung is not False:
+            if self._buka_url_lokasi(keyword, lokasi):
+                self.lokasi_didukung = True
+                return True
+
+            self.lokasi_didukung = False
+            console.print(
+                "[dim]Glints mengabaikan parameter lokasi di URL pencarian; "
+                "pencarian tetap nasional dan lokasi disaring dari teks "
+                "kartu.[/]"
+            )
+
         kandidat = ([self.search_url] if self.search_url else [])
         kandidat += [u for u in SEARCH_URL_CANDIDATES if u not in kandidat]
 
@@ -976,9 +1041,10 @@ class GlintsBot:
 
         return hasil if isinstance(hasil, list) else []
 
-    def cari(self, keyword: str, halaman: int = 0) -> List[Dict]:
-        """Kembalikan daftar lowongan Glints untuk satu kata kunci."""
-        if not self.buka_pencarian(keyword):
+    def cari(self, keyword: str, halaman: int = 0,
+             location: str = "") -> list[dict]:
+        """Kembalikan daftar lowongan Glints untuk satu kata kunci (+lokasi)."""
+        if not self.buka_pencarian(keyword, location):
             return []
 
         # Urutkan dari yang paling baru setiap kali mencari, berapa pun
@@ -1241,11 +1307,14 @@ class GlintsBot:
 # Alur utama
 # ----------------------------------------------------------------------
 def _batas_harian_tercapai() -> bool:
-    """Sama seperti JobStreet: satu aturan di modul `kuota`."""
-    if not kuota.habis(db):
+    """Kuota harian Glints saja — tidak memakai jatah JobStreet/Indeed."""
+    if not kuota.habis(db, situs="glints"):
         return False
 
-    console.print("[bold yellow]Batas lamaran harian tercapai.[/]")
+    console.print(
+        "[bold yellow]Target/kuota harian Glints tercapai "
+        f"({kuota.batas()} lamaran).[/]"
+    )
     return True
 
 
@@ -1253,7 +1322,11 @@ def tampilkan_konfigurasi_glints() -> None:
     """Ringkasan pengaturan aktif, isinya sama dengan banner JobStreet."""
     mode = "otomatis" if config.auto_apply else "manual (tinjau sendiri)"
     batas_harian = kuota.batas()
-    teks_kuota = f"{batas_harian} per hari" if batas_harian else "tanpa batas"
+    teks_kuota = (
+        f"{batas_harian} per hari (khusus Glints)"
+        if batas_harian
+        else "tanpa batas"
+    )
     batas_sesi = int(getattr(config, "auto_apply_max_per_session", 0) or 0)
     port = int(getattr(config, "chrome_debug_port", 0) or 0)
 
@@ -1278,6 +1351,12 @@ def tampilkan_konfigurasi_glints() -> None:
         if config.locations
         else "semua lokasi",
     )
+    jumlah_lokasi = len(config.locations) or 1
+    tabel.add_row(
+        "Kombinasi riset",
+        f"{len(kata_kunci)} kata kunci x {jumlah_lokasi} lokasi = "
+        f"{len(kata_kunci) * jumlah_lokasi} (sama seperti JobStreet)",
+    )
     tabel.add_row("Wajib logo perusahaan", "ya (seperti JobStreet)")
     tabel.add_row("Urutan kandidat", getattr(config, "rank_by", "relevance"))
     tabel.add_row("Jeda antar lamaran", f"{config.delay_between_apply} detik")
@@ -1295,7 +1374,7 @@ def tampilkan_konfigurasi_glints() -> None:
     console.print(tabel)
 
 
-def jalankan_glints(max_pages: int = 0, keywords: Optional[List[str]] = None,
+def jalankan_glints(max_pages: int = 0, keywords: list[str] | None = None,
                     batas: int = 0, laporan_harian: bool = True) -> dict:
     """Cari, saring, lalu lamar lowongan Glints secara otomatis."""
     kata_kunci = list(keywords) if keywords else config.keywords_riset
@@ -1325,57 +1404,71 @@ def jalankan_glints(max_pages: int = 0, keywords: Optional[List[str]] = None,
             console.print("[red]Login Glints belum selesai — dihentikan.[/]")
             return laporan
 
-        lowongan: List[Dict] = []
+        lowongan: list[dict] = []
         terlihat = set()
         duplikat = 0
 
+        daftar_lokasi = list(config.locations) or [""]
+
         console.print(
-            f"[bold blue]RISET GLINTS[/] — {len(kata_kunci)} kata kunci, "
-            f"maksimal {halaman} muat per kata kunci "
-            f"(batas tetap {MAKS_HALAMAN_RISET}), urut 'Baru Ditambahkan'."
+            f"[bold blue]RISET GLINTS[/] — {len(kata_kunci)} kata kunci x "
+            f"{len(daftar_lokasi)} lokasi = {len(kata_kunci) * len(daftar_lokasi)} "
+            f"kombinasi (sama seperti JobStreet), maksimal {halaman} muat per "
+            f"kombinasi (batas tetap {MAKS_HALAMAN_RISET}), urut "
+            "'Baru Ditambahkan'. Bila Glints mengabaikan parameter lokasi, "
+            "riset kembali ke satu pencarian per kata kunci."
         )
 
         mulai_riset = time.monotonic()
-        total_kata_kunci = len(kata_kunci)
-        selesai_kata_kunci = 0
+        total_kombinasi = len(kata_kunci) * len(daftar_lokasi)
+        selesai_kombinasi = 0
 
-        for keyword in kata_kunci:
-            kendali.periksa()
-            console.print(
-                f"[cyan]Glints: '{keyword}' — muat sampai {halaman} kali[/]"
-            )
-            # Sekali buka per kata kunci: `cari` sendiri yang mengklik "Muat
-            # lebih banyak" sampai tombolnya habis, lalu mengembalikan semua
-            # kartu yang sudah termuat. Jauh lebih cepat daripada membuka
-            # ulang halaman untuk setiap nomor halaman.
-            kartu = bot.cari(keyword, max(0, halaman - 1))
-
-            baru = 0
-            for job in kartu:
-                if job["job_id"] in terlihat:
-                    duplikat += 1
-                    continue
-                terlihat.add(job["job_id"])
-                lowongan.append(job)
-                baru += 1
-
-            if baru == 0:
+        for urutan_lokasi, location in enumerate(daftar_lokasi):
+            if urutan_lokasi and getattr(bot, "lokasi_didukung", None) is False:
                 console.print(
-                    "[dim]Tidak ada lowongan baru untuk kata kunci ini.[/]"
+                    "[dim]Glints mengabaikan lokasi: sisa lokasi dilewati agar "
+                    "tidak mengulang kartu yang sama.[/]"
                 )
+                break
 
-            selesai_kata_kunci += 1
-            lama_riset = time.monotonic() - mulai_riset
-            per_kata_kunci = lama_riset / max(1, selesai_kata_kunci)
-            sisa = per_kata_kunci * (
-                total_kata_kunci - selesai_kata_kunci
-            )
-            console.print(
-                f"[dim]Kemajuan riset Glints: {selesai_kata_kunci}/"
-                f"{total_kata_kunci} kata kunci, {len(lowongan)} lowongan, "
-                f"{lama_riset:.0f} detik berlalu — perkiraan sisa "
-                f"{sisa:.0f} detik.[/]"
-            )
+            for keyword in kata_kunci:
+                kendali.periksa()
+                console.print(
+                    f"[cyan]Glints: '{keyword}'"
+                    + (f" — lokasi {location}" if location else " — semua lokasi")
+                    + f" — muat sampai {halaman} kali[/]"
+                )
+                # Sekali buka per kombinasi: `cari` sendiri yang mengklik "Muat
+                # lebih banyak" sampai tombolnya habis, lalu mengembalikan semua
+                # kartu yang sudah termuat.
+                kartu = bot.cari(keyword, max(0, halaman - 1), location)
+
+                baru = 0
+                for job in kartu:
+                    if job["job_id"] in terlihat:
+                        duplikat += 1
+                        continue
+                    terlihat.add(job["job_id"])
+                    lowongan.append(job)
+                    baru += 1
+
+                if baru == 0:
+                    console.print(
+                        "[dim]Tidak ada lowongan baru untuk kombinasi ini.[/]"
+                    )
+
+                selesai_kombinasi += 1
+                lama_riset = time.monotonic() - mulai_riset
+                per_kombinasi = lama_riset / max(1, selesai_kombinasi)
+                sisa = per_kombinasi * (
+                    total_kombinasi - selesai_kombinasi
+                )
+                console.print(
+                    f"[dim]Kemajuan riset Glints: {selesai_kombinasi}/"
+                    f"{total_kombinasi} kombinasi, {len(lowongan)} lowongan, "
+                    f"{lama_riset:.0f} detik berlalu — perkiraan sisa "
+                    f"{sisa:.0f} detik.[/]"
+                )
 
             if batas_riset and len(lowongan) >= batas_riset:
                 console.print(
@@ -1397,7 +1490,7 @@ def jalankan_glints(max_pages: int = 0, keywords: Optional[List[str]] = None,
         )
 
         # --- Saring dulu semuanya, baru bandingkan dan pilih yang terbaik ---
-        layak: List[Dict] = []
+        layak: list[dict] = []
 
         for job in lowongan:
             if job.get("khusus_aplikasi"):
@@ -1455,15 +1548,19 @@ def jalankan_glints(max_pages: int = 0, keywords: Optional[List[str]] = None,
             return laporan
 
         # Sisa kuota harian — modul `kuota` yang sama dengan JobStreet.
-        console.print(f"[cyan]{kuota.ringkasan(db)}[/]")
+        console.print(f"[cyan]{kuota.ringkasan(db, situs='glints')}[/]")
 
-        if kuota.habis(db):
-            console.print(f"[bold yellow]{kuota.pesan_habis()}[/]")
+        if kuota.habis(db, situs="glints"):
+            console.print(
+                f"[bold yellow]{kuota.pesan_habis('glints')}[/]"
+            )
             return laporan
 
-        dipilih = pilih_teratas(layak, kuota.sisa(db) or 0)
+        dipilih = pilih_teratas(
+            layak, kuota.sisa(db, situs="glints") or 0
+        )
 
-        sisa = kuota.sisa(db)
+        sisa = kuota.sisa(db, situs="glints")
         if sisa is not None and len(layak) > sisa:
             console.print(
                 f"[bold]{len(layak)} kandidat[/] bersaing untuk "
@@ -1575,27 +1672,61 @@ def jalankan_glints(max_pages: int = 0, keywords: Optional[List[str]] = None,
     return laporan
 
 
-def kumpulkan_lowongan(bot, kata_kunci, halaman: int) -> List[Dict]:
-    """Baca semua kartu dari daftar kata kunci, tanpa duplikat."""
-    lowongan: List[Dict] = []
+def kumpulkan_lowongan(bot, kata_kunci, halaman: int,
+                       lokasi: list[str] | None = None) -> list[dict]:
+    """Baca semua kartu untuk setiap kombinasi kata kunci x lokasi.
+
+    Kombinasi sama dengan JobStreet (kata kunci x lokasi). Bila Glints
+    mengabaikan parameter lokasi, hasilnya memang nasional — lokasi tetap
+    disaring dari teks kartu oleh `JobFilter`.
+    """
+    daftar_lokasi = list(lokasi if lokasi is not None else config.locations)
+    if not daftar_lokasi:
+        daftar_lokasi = [""]
+
+    lowongan: list[dict] = []
     terlihat = set()
 
-    for keyword in kata_kunci:
-        console.print(
-            f"[cyan]Glints: '{keyword}' — muat sampai {max(1, halaman)} kali[/]"
-        )
-        for job in bot.cari(keyword, max(0, halaman - 1)):
-            if job["job_id"] in terlihat:
-                continue
-            terlihat.add(job["job_id"])
-            job.setdefault("kata_kunci", keyword)
-            lowongan.append(job)
+    for urutan, location in enumerate(daftar_lokasi):
+        # Glints mengabaikan parameter lokasi: mengulang 9 lokasi hanya
+        # menghasilkan kartu yang sama (dan memakan 9x waktu). Cukup sekali.
+        if urutan and getattr(bot, "lokasi_didukung", None) is False:
+            break
+
+        for keyword in kata_kunci:
+            console.print(
+                f"[cyan]Glints: '{keyword}'"
+                + (f" — lokasi {location}" if location else " — semua lokasi")
+                + f" — muat sampai {max(1, halaman)} kali[/]"
+            )
+            kunci_cache = cache_riset.kunci(
+                "glints", keyword, location, halaman
+            )
+            kartu = cache_riset.ambil(kunci_cache, situs="glints")
+
+            if kartu is None:
+                kartu = list(
+                    bot.cari(keyword, max(0, halaman - 1), location)
+                )
+                cache_riset.simpan(kunci_cache, kartu, situs="glints")
+            else:
+                console.print(
+                    f"[dim]Cache riset Glints dipakai '{keyword}' "
+                    f"({len(kartu)} lowongan).[/]"
+                )
+
+            for job in kartu:
+                if job["job_id"] in terlihat:
+                    continue
+                terlihat.add(job["job_id"])
+                job.setdefault("kata_kunci", keyword)
+                lowongan.append(job)
 
     return dedupe_jobs(lowongan)
 
 
-def pilih_kandidat(lowongan: List[Dict], batas: int = 0,
-                   semuanya: bool = False) -> List[Dict]:
+def pilih_kandidat(lowongan: list[dict], batas: int = 0,
+                   semuanya: bool = False) -> list[dict]:
     """Saring lowongan yang layak dicoba (urutan tetap seperti di situs)."""
     saringan = JobFilter()
     hasil = []
@@ -1609,7 +1740,7 @@ def pilih_kandidat(lowongan: List[Dict], batas: int = 0,
 
     return hasil
 
-def diagnosa_glints(keyword: str = "") -> Dict:
+def diagnosa_glints(keyword: str = "") -> dict:
     """Periksa mengapa kartu lowongan Glints tidak terbaca.
 
     Membuka satu kata kunci di Chrome, mencoba semua bentuk URL pencarian,
@@ -1621,7 +1752,7 @@ def diagnosa_glints(keyword: str = "") -> Dict:
         kata = config.keywords[0] if config.keywords else "inventory"
 
     bot = GlintsBot()
-    info: Dict = {}
+    info: dict = {}
 
     try:
         bot.init_browser()
@@ -1697,9 +1828,9 @@ def pesan_url_salah(url: str) -> str:
     )
 
 
-def daftar_kandidat(keywords: Optional[List[str]] = None,
+def daftar_kandidat(keywords: list[str] | None = None,
                     max_pages: int = 1, batas: int = 10,
-                    semuanya: bool = False) -> List[Dict]:
+                    semuanya: bool = False) -> list[dict]:
     """Cari lowongan Glints lalu kembalikan yang layak dilamar (tanpa melamar)."""
     kata_kunci = list(keywords or config.keywords)
     bot = GlintsBot()
@@ -1714,7 +1845,7 @@ def daftar_kandidat(keywords: Optional[List[str]] = None,
     return pilih_kandidat(lowongan, batas=batas, semuanya=semuanya)
 
 
-def uji_otomatis(keywords: Optional[List[str]] = None,
+def uji_otomatis(keywords: list[str] | None = None,
                  max_pages: int = 1) -> tuple:
     """Pilih sendiri satu lowongan yang layak, lalu uji lamar di sana.
 
@@ -1786,7 +1917,7 @@ def uji_glints(url: str) -> ApplyResult:
 # ----------------------------------------------------------------------
 # Periksa kesehatan Glints (satu perintah, berurutan)
 # ----------------------------------------------------------------------
-def _setuju_lamar(jumlah: int, kandidat: List[Dict]) -> bool:
+def _setuju_lamar(jumlah: int, kandidat: list[dict]) -> bool:
     """Tanya sekali sebelum mengirim lamaran sungguhan saat `glints cek`."""
     console.print(
         f"[bold]Uji kirim {jumlah} lamaran SUNGGUHAN ke Glints.[/] "
@@ -1815,7 +1946,7 @@ def cek_glints(keyword: str = "", max_pages: int = 1, lamar: int = 0,
     if not kata:
         kata = (config.keywords_riset or ["inventory"])[0]
     halaman = max(1, min(int(max_pages or 1), MAKS_HALAMAN_RISET))
-    tahap: List[tuple] = []
+    tahap: list[tuple] = []
 
     def catat(nama: str, lulus: bool, keterangan: str) -> None:
         tahap.append((nama, bool(lulus), keterangan))
@@ -1824,7 +1955,7 @@ def cek_glints(keyword: str = "", max_pages: int = 1, lamar: int = 0,
             f"[{warna}]{'OK' if lulus else 'GAGAL'}[/] {nama} — {keterangan}"
         )
 
-    kandidat: List[Dict] = []
+    kandidat: list[dict] = []
     cloudflare = False
 
     console.print(
@@ -1887,7 +2018,11 @@ def cek_glints(keyword: str = "", max_pages: int = 1, lamar: int = 0,
             catat("2. Saring kandidat", False, "dilewati (Cloudflare)")
         else:
             try:
-                lowongan = kumpulkan_lowongan(bot, [kata], halaman)
+                # Cek cepat: satu kombinasi saja, bukan seluruh lokasi.
+                lowongan = kumpulkan_lowongan(
+                    bot, [kata], halaman,
+                    lokasi=(list(config.locations) or [""])[:1],
+                )
                 kandidat = pilih_kandidat(lowongan, batas=10)
                 if not lowongan:
                     catat("2. Saring kandidat", False, "0 lowongan terkumpul")

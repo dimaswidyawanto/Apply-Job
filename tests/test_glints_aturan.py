@@ -201,7 +201,7 @@ class BotPalsu:
     def login(self):
         return True
 
-    def cari(self, keyword, nomor=0):
+    def cari(self, keyword, nomor=0, location=""):
         return list(self.kartu.get((keyword, nomor), []))
 
     def lamar(self, job):
@@ -268,10 +268,11 @@ def test_sesi_glints_menolak_tanpa_logo(monkeypatch):
 
 
 def test_sesi_glints_berhenti_bila_kuota_habis(monkeypatch, db_kosong):
+    """Kuota Glints kini dihitung sendiri (tidak memakai jatah JobStreet)."""
     kartu = {("inventory", 0): [glints_job("a", "Inventory Staff")]}
 
-    db_kosong.record_application("lain-1", "applied")
-    db_kosong.record_application("lain-2", "applied")
+    db_kosong.record_application("glints:lain-1", "applied")
+    db_kosong.record_application("glints:lain-2", "applied")
 
     bot, laporan = _siapkan_sesi(monkeypatch, kartu, kuota=2)
 

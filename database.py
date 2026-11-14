@@ -1,11 +1,11 @@
 """Akses database SQLite untuk lowongan, lamaran, dan blacklist."""
 
 import contextlib
+import json
 import sqlite3
 import threading
 from contextlib import contextmanager, suppress
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import UTC, datetime, timedelta, timezone
 
 from config import config
 
@@ -23,7 +23,7 @@ TITLE_FALLBACK = "(judul tidak tersedia)"
 WIB = timezone(timedelta(hours=7))
 
 
-def rentang_hari_wib(sekarang: Optional[datetime] = None) -> tuple[str, str]:
+def rentang_hari_wib(sekarang: datetime | None = None) -> tuple[str, str]:
     """Awal dan akhir hari ini menurut WIB, dalam teks UTC (format SQLite)."""
     kini = sekarang or datetime.now(WIB)
     kini = (
@@ -35,9 +35,82 @@ def rentang_hari_wib(sekarang: Optional[datetime] = None) -> tuple[str, str]:
 
     format_ = "%Y-%m-%d %H:%M:%S"
     return (
-        mulai.astimezone(timezone.utc).strftime(format_),
-        selesai.astimezone(timezone.utc).strftime(format_),
+        mulai.astimezone(UTC).strftime(format_),
+        selesai.astimezone(UTC).strftime(format_),
     )
+
+
+# Satu siklus kuota berlangsung 24 jam sejak lamaran pertama di siklus itu.
+DURASI_SIKLUS = timedelta(hours=24)
+
+_FORMAT_WAKTU = "%Y-%m-%d %H:%M:%S"
+
+
+def _waktu(teks) -> datetime | None:
+    """Baca cap waktu SQLite (UTC) menjadi datetime sadar-zona."""
+    try:
+        return datetime.strptime(str(teks)[:19], _FORMAT_WAKTU).replace(tzinfo=UTC)
+    except (TypeError, ValueError):
+        return None
+
+
+def bentuk_siklus(
+    waktu_lamaran: list[datetime],
+    sekarang: datetime | None = None,
+    durasi: timedelta = DURASI_SIKLUS,
+) -> dict:
+    """Hitung siklus kuota bergulir dari daftar waktu lamaran (urut naik).
+
+    Aturan pemakai: 50 lamaran per situs, dan hitungan baru dimulai **24 jam
+    setelah lamaran pertama** siklus itu — bukan tengah malam.
+
+    Contoh: lamaran pertama 20:30 hari ini; lamaran ke-51 baru boleh dikirim
+    besok 20:30, bukan besok 00:00.
+    """
+    kini = sekarang or datetime.now(UTC)
+    mulai = None
+    jumlah = 0
+
+    for waktu in waktu_lamaran:
+        if waktu is None:
+            continue
+        if mulai is None or (waktu - mulai) >= durasi:
+            mulai = waktu
+            jumlah = 1
+        else:
+            jumlah += 1
+
+    if mulai is None:
+        return {
+            "mulai_at": "",
+            "berakhir_at": "",
+            "jumlah": 0,
+            "sisa_detik": None,
+            "aktif": False,
+        }
+
+    berakhir = mulai + durasi
+
+    if kini >= berakhir:
+        # Siklus terakhir sudah lewat dan belum ada lamaran di siklus baru:
+        # slot kembali penuh (50) dan siklus baru dimulai pada lamaran berikut.
+        return {
+            "mulai_at": "",
+            "berakhir_at": "",
+            "jumlah": 0,
+            "sisa_detik": None,
+            "aktif": False,
+        }
+
+    sisa_detik = max(0.0, (berakhir - kini).total_seconds())
+
+    return {
+        "mulai_at": mulai.strftime(_FORMAT_WAKTU),
+        "berakhir_at": berakhir.strftime(_FORMAT_WAKTU),
+        "jumlah": jumlah,
+        "sisa_detik": sisa_detik,
+        "aktif": sisa_detik > 0,
+    }
 
 
 # Status antrean lowongan (master prompt pasal 4.2).
@@ -68,8 +141,7 @@ def sumber_dari_url(url: str) -> str:
     """Nama situs dari URL (jobstreet / glints / indeed / lainnya)."""
     host = str(url or "").strip().lower().split("://", 1)[-1]
     host = host.split("/", 1)[0].split(":", 1)[0]
-    if host.startswith("www."):
-        host = host[4:]
+    host = host.removeprefix("www.")
 
     for nama in ("jobstreet", "glints", "indeed", "linkedin", "kalibrr",
                  "jobsdb", "karir"):
@@ -77,6 +149,45 @@ def sumber_dari_url(url: str) -> str:
             return nama
 
     return host or "lainnya"
+
+
+def _situs_aplikasi_sql(alias_jobs: str = "j") -> str:
+    """Ekspresi SQL nama situs untuk tabel `applications`.
+
+    Baris lama bisa belum punya `jobs.sumber` (lowongan sudah dihapus), jadi
+    URL dan awalan `job_id` (`glints:…`, `indeed:…`) dipakai sebagai cadangan.
+    Lamaran tanpa penanda apa pun dianggap JobStreet — situs asal aplikasi ini.
+    """
+    j = alias_jobs
+
+    return (
+        f"CASE"
+        f" WHEN TRIM(COALESCE({j}.sumber, '')) <> ''"
+        f" THEN LOWER(TRIM({j}.sumber))"
+        f" WHEN {j}.url LIKE '%glints.%' THEN 'glints'"
+        f" WHEN a.job_id LIKE 'glints:%' THEN 'glints'"
+        f" WHEN {j}.url LIKE '%indeed.%' THEN 'indeed'"
+        f" WHEN a.job_id LIKE 'indeed:%' THEN 'indeed'"
+        " ELSE 'jobstreet' END"
+    )
+
+
+def _situs_sql(alias: str = "") -> str:
+    """Ekspresi SQL nama situs: kolom `sumber`, URL sebagai cadangan.
+
+    Baris lama bisa belum punya `sumber`, jadi URL dipakai untuk menebak
+    situsnya. Hasilnya selalu salah satu dari jobstreet/glints/indeed atau
+    nama host lain.
+    """
+    awalan = f"{alias}." if alias else ""
+    return (
+        f"COALESCE(NULLIF(LOWER(TRIM({awalan}sumber)), ''), CASE"
+        f" WHEN {awalan}url LIKE '%indeed.%' THEN 'indeed'"
+        f" WHEN {awalan}url LIKE '%glints.%' THEN 'glints'"
+        f" WHEN {awalan}url LIKE '%jobstreet.%'"
+        f" OR {awalan}url LIKE '%jobsdb.%' THEN 'jobstreet'"
+        " ELSE 'lainnya' END)"
+    )
 
 
 class Database:
@@ -114,6 +225,10 @@ class Database:
                 self.db_path, check_same_thread=False
             )
             self._conn.row_factory = sqlite3.Row
+            # SQLite mematikan pemaksaan foreign key secara bawaan. Skema
+            # sekarang belum memakai FOREIGN KEY, tetapi PRAGMA ini menjaga
+            # integritas bila nanti ditambahkan dan tidak berbiaya.
+            self._conn.execute("PRAGMA foreign_keys=ON")
         return self._conn
 
     @contextmanager
@@ -155,6 +270,14 @@ class Database:
                     applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     response TEXT,
                     notes TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS riset_cache (
+                    kunci TEXT PRIMARY KEY,
+                    situs TEXT,
+                    jumlah INTEGER DEFAULT 0,
+                    isi TEXT NOT NULL,
+                    dibuat_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
 
                 CREATE TABLE IF NOT EXISTS blacklist (
@@ -307,7 +430,7 @@ class Database:
             )
         return True
 
-    def cari_jawaban(self, kunci: str) -> Optional[dict]:
+    def cari_jawaban(self, kunci: str) -> dict | None:
         """Ambil satu jawaban berdasarkan kuncinya (None bila belum ada)."""
         with self._get_conn() as conn:
             row = conn.execute(
@@ -407,7 +530,7 @@ class Database:
                 return False
 
     def set_status_antrean(self, job_id: str, status: str,
-                           alasan: str = "", skor: Optional[float] = None) -> bool:
+                           alasan: str = "", skor: float | None = None) -> bool:
         """Ubah status antrean satu lowongan (pasal 4.2)."""
         job_id = str(job_id or "").strip()
         status = str(status or "").strip().lower()
@@ -628,20 +751,69 @@ class Database:
             )
             return int(cursor.rowcount or 0)
 
-    def hitung_status_antrean(self) -> dict:
-        """Jumlah lowongan per status antrean (untuk dashboard)."""
+    def hitung_status_antrean(self, situs: str = "") -> dict:
+        """Jumlah lowongan per status antrean (untuk dashboard).
+
+        `situs` (opsional) membatasi hitungan pada satu situs saja.
+        """
         hasil = {status: 0 for status in STATUS_ANTREAN}
+        situs = str(situs or "").strip().lower()
+
+        saringan = ""
+        parameter: list = []
+        if situs:
+            saringan = f"WHERE {_situs_sql()} = ?"
+            parameter.append(situs)
 
         with self._get_conn() as conn:
             for row in conn.execute(
-                """
+                f"""
                 SELECT COALESCE(NULLIF(status_antrean, ''), 'found') AS status,
                        COUNT(*) AS jumlah
                   FROM jobs
+                {saringan}
                  GROUP BY status
-                """
+                """,
+                parameter,
             ):
                 hasil[str(row["status"])] = int(row["jumlah"])
+
+        return hasil
+
+    def ringkasan_per_situs(self) -> list[dict]:
+        """Ringkasan tiap situs terpisah: lowongan, terkirim, perlu manual, dsb."""
+        situs = _situs_sql()
+
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT {situs} AS situs,
+                       COUNT(*) AS total,
+                       SUM(CASE WHEN status_antrean = 'applied'
+                                THEN 1 ELSE 0 END) AS terkirim,
+                       SUM(CASE WHEN status_antrean = 'review_required'
+                                THEN 1 ELSE 0 END) AS perlu_manual,
+                       SUM(CASE WHEN status_antrean = 'qualified'
+                                THEN 1 ELSE 0 END) AS siap,
+                       SUM(CASE WHEN status_antrean = 'failed'
+                                THEN 1 ELSE 0 END) AS gagal,
+                       SUM(CASE WHEN status_antrean = 'rejected'
+                                THEN 1 ELSE 0 END) AS ditolak,
+                       SUM(CASE WHEN status_antrean = 'expired'
+                                THEN 1 ELSE 0 END) AS kedaluwarsa
+                  FROM jobs
+                 GROUP BY situs
+                 ORDER BY total DESC, situs
+                """
+            ).fetchall()
+
+        hasil = []
+        for row in rows:
+            item = dict(row)
+            for kunci, nilai in list(item.items()):
+                if kunci != "situs":
+                    item[kunci] = int(nilai or 0)
+            hasil.append(item)
 
         return hasil
 
@@ -715,46 +887,179 @@ class Database:
                 (job_id, status, notes),
             )
 
-    def get_today_apply_count(self) -> int:
-        """Jumlah lamaran terkirim hari ini (dipakai untuk batas harian).
+    def siklus_kuota(self, situs: str = "",
+                     sekarang: datetime | None = None,
+                     durasi_hari: int = 7) -> dict:
+        """Siklus kuota bergulir 24 jam untuk satu situs.
+
+        Menghitung dari data yang sudah ada (tabel `applications`), tanpa
+        tabel tambahan: lamaran diurutkan menurut waktu, lalu siklus baru
+        dimulai setiap kali jarak ke lamaran pertama siklus berjalan sudah
+        mencapai 24 jam.
+        """
+        kini = sekarang or datetime.now(UTC)
+        batas_awal = (kini - timedelta(days=durasi_hari)).strftime(_FORMAT_WAKTU)
+
+        placeholders = ", ".join("?" for _ in QUOTA_STATUSES)
+        parameter: list = [batas_awal, *QUOTA_STATUSES]
+
+        saringan = ""
+        situs = str(situs or "").strip().lower()
+        if situs:
+            saringan = f"AND {_situs_aplikasi_sql()} = ?"
+            parameter.append(situs)
+
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT a.applied_at
+                FROM applications a
+                LEFT JOIN jobs j ON a.job_id = j.job_id
+                WHERE a.applied_at >= ?
+                  AND a.status IN ({placeholders})
+                  {saringan}
+                ORDER BY a.applied_at ASC, a.id ASC
+                """,
+                parameter,
+            ).fetchall()
+
+        waktu = [_waktu(baris["applied_at"]) for baris in rows]
+        hasil = bentuk_siklus(
+            [item for item in waktu if item is not None], kini
+        )
+        hasil["situs"] = situs
+        return hasil
+
+    # ------------------------------------------------------------ cache riset
+    def cache_riset_ambil(self, kunci: str, ttl_detik: int,
+                          sekarang: datetime | None = None):
+        """Isi cache riset bila masih segar; None bila kosong/kedaluwarsa."""
+        if ttl_detik <= 0:
+            return None
+
+        with self._get_conn() as conn:
+            baris = conn.execute(
+                "SELECT isi, dibuat_at FROM riset_cache WHERE kunci = ?",
+                (kunci,),
+            ).fetchone()
+
+        if not baris:
+            return None
+
+        dibuat = _waktu(baris["dibuat_at"])
+        kini = sekarang or datetime.now(UTC)
+
+        if dibuat is None or (kini - dibuat).total_seconds() > ttl_detik:
+            return None
+
+        try:
+            return json.loads(baris["isi"])
+        except (TypeError, ValueError):
+            return None
+
+    def cache_riset_simpan(self, kunci: str, situs: str, isi,
+                           sekarang: datetime | None = None) -> None:
+        """Simpan hasil riset satu kombinasi kata kunci."""
+        kini = sekarang or datetime.now(UTC)
+        teks = json.dumps(isi, ensure_ascii=False, default=str)
+
+        with self._get_conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO riset_cache (kunci, situs, jumlah, isi, dibuat_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(kunci) DO UPDATE SET
+                    situs = excluded.situs,
+                    jumlah = excluded.jumlah,
+                    isi = excluded.isi,
+                    dibuat_at = excluded.dibuat_at
+                """,
+                (
+                    kunci,
+                    situs,
+                    len(isi) if isinstance(isi, list) else 0,
+                    teks,
+                    kini.strftime(_FORMAT_WAKTU),
+                ),
+            )
+
+    def cache_riset_bersih(self, hari: int = 3,
+                           sekarang: datetime | None = None) -> int:
+        """Buang cache yang lebih tua dari `hari` hari. Kembalikan jumlahnya."""
+        kini = sekarang or datetime.now(UTC)
+        batas = (kini - timedelta(days=max(1, hari))).strftime(_FORMAT_WAKTU)
+
+        with self._get_conn() as conn:
+            cur = conn.execute(
+                "DELETE FROM riset_cache WHERE dibuat_at < ?", (batas,)
+            )
+            return cur.rowcount or 0
+
+    def get_today_apply_count(self, situs: str = "") -> int:
+        """Jumlah lamaran terkirim hari ini (dipakai untuk kuota harian).
 
         Hari dihitung menurut WIB (pasal 9.2), bukan zona waktu komputer.
+        Sejak kuota dihitung per situs, `situs` (jobstreet/glints/indeed)
+        membatasi hitungan pada situs itu saja; kosong = semua situs.
         """
         placeholders = ", ".join("?" for _ in QUOTA_STATUSES)
         mulai, selesai = rentang_hari_wib()
+        situs = str(situs or "").strip().lower()
+
+        saringan = ""
+        parameter: list = [mulai, selesai, *QUOTA_STATUSES]
+        if situs:
+            saringan = f"AND {_situs_aplikasi_sql()} = ?"
+            parameter.append(situs)
 
         with self._get_conn() as conn:
             result = conn.execute(
                 f"""
                 SELECT COUNT(*) AS count
-                FROM applications
-                WHERE applied_at >= ? AND applied_at < ?
-                  AND status IN ({placeholders})
+                FROM applications a
+                LEFT JOIN jobs j ON a.job_id = j.job_id
+                WHERE a.applied_at >= ? AND a.applied_at < ?
+                  AND a.status IN ({placeholders})
+                  {saringan}
                 """,
-                (mulai, selesai, *QUOTA_STATUSES),
+                parameter,
             ).fetchone()
 
             return int(result["count"])
 
-    def get_recent_applications(self, limit: int = 50) -> list[dict]:
-        """Riwayat lamaran; judul/perusahaan kosong diberi teks pengganti."""
+    def get_recent_applications(self, limit: int = 50,
+                                situs: str = "") -> list[dict]:
+        """Riwayat lamaran; judul/perusahaan kosong diberi teks pengganti.
+
+        `situs` (opsional) menyaring satu situs saja: jobstreet/glints/indeed.
+        """
         limit = max(1, int(limit))
+        situs = str(situs or "").strip().lower()
+
+        saringan = ""
+        parameter: list = [TITLE_FALLBACK]
+        if situs:
+            saringan = f"WHERE {_situs_aplikasi_sql()} = ?"
+            parameter.append(situs)
+        parameter.append(limit)
 
         with self._get_conn() as conn:
             rows = conn.execute(
-                """
+                f"""
                 SELECT a.applied_at,
                        COALESCE(NULLIF(TRIM(j.title), ''), ?) AS title,
                        COALESCE(NULLIF(TRIM(j.company), ''), 'Tidak diketahui')
                            AS company,
                        a.status,
+                       COALESCE(a.notes, '') AS notes,
                        COALESCE(j.url, '') AS url
                 FROM applications a
                 LEFT JOIN jobs j ON a.job_id = j.job_id
+                {saringan}
                 ORDER BY a.applied_at DESC, a.id DESC
                 LIMIT ?
                 """,
-                (TITLE_FALLBACK, limit),
+                parameter,
             ).fetchall()
 
         result = []

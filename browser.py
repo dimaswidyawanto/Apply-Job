@@ -16,8 +16,10 @@ pesan galatnya berisi langkah perbaikan yang bisa langsung dijalankan.
 
 import contextlib
 import shutil
+import subprocess
+import sys
+import time
 from pathlib import Path
-from typing import List, Optional
 
 from rich.console import Console
 from selenium import webdriver
@@ -47,12 +49,12 @@ TANDA_DRIVER_MANUAL = (
 )
 
 
-def bersihkan_kunci_profil(profile: Path) -> List[str]:
+def bersihkan_kunci_profil(profile: Path) -> list[str]:
     """Hapus berkas kunci sisa Chrome yang mati.
 
     Kembalikan daftar nama berkas yang dihapus (kosong bila tidak ada).
     """
-    dihapus: List[str] = []
+    dihapus: list[str] = []
 
     if not profile.exists():
         return dihapus
@@ -70,6 +72,44 @@ def bersihkan_kunci_profil(profile: Path) -> List[str]:
             dihapus.append(nama)
 
     return dihapus
+
+
+def profil_terkunci(profile: Path) -> bool:
+    """True bila profil Chrome masih memegang berkas kunci (Chrome lain jalan)."""
+    if not profile.exists():
+        return False
+
+    for nama in BERKAS_KUNCI:
+        berkas = profile / nama
+        if berkas.exists() or berkas.is_symlink():
+            return True
+
+    return False
+
+
+def tunggu_profil_bebas(profile: Path, batas_detik: float = 8.0,
+                        jeda: float = 1.0) -> bool:
+    """Tunggu sampai profil tidak dikunci lagi; True bila akhirnya bebas.
+
+    Chrome yang baru ditutup butuh beberapa detik untuk melepas profil. Tanpa
+    jeda ini, situs berikutnya (Glints/Indeed) gagal membuka profil yang sama,
+    lalu turun ke profil baru yang belum login — sesi login hilang.
+    """
+    if not profil_terkunci(profile):
+        return True
+
+    batas = max(0.0, float(batas_detik))
+    langkah = max(0.1, float(jeda))
+    menunggu = 0.0
+
+    while menunggu < batas:
+        time.sleep(langkah)
+        menunggu += langkah
+
+        if not profil_terkunci(profile):
+            return True
+
+    return False
 
 
 def sembunyikan_otomasi(driver):
@@ -113,21 +153,35 @@ def tempel_chrome(port: int):
     return webdriver.Chrome(options=options)
 
 
-def tutup_chrome(driver) -> None:
-    """Tutup browser bot; saat menempel, jangan tutup Chrome milik pengguna."""
+def tutup_chrome(driver) -> bool:
+    """Tutup browser bot; saat menempel, jangan tutup Chrome milik pengguna.
+
+    Hasil: True bila Chrome benar-benar ditutup, False bila sengaja dibiarkan
+    (Chrome milik pengguna sedang ditempeli).
+
+    Penentuannya dari **hasil** menempel (`driver._dimastes_tertempel`), bukan
+    dari nilai CHROME_DEBUG_PORT. Dulu, saat menempel gagal (Chrome belum
+    dibuka) bot lalu membuka Chrome sendiri — tetapi tetap dianggap "mode
+    tempel" sehingga Chromenya dibiarkan hidup. Akibatnya profil Chrome tetap
+    terkunci dan situs berikutnya (Glints, Indeed) gagal dibuka: seluruh
+    sesinya hangus walau kuota masih penuh.
+    """
     if driver is None:
-        return
-    if int(getattr(config, "chrome_debug_port", 0) or 0) > 0:
+        return False
+
+    if getattr(driver, "_dimastes_tertempel", False):
         console.print(
             "[dim]Mode tempel: Chrome milik Anda dibiarkan terbuka. "
             "Tutup sendiri setelah selesai.[/]"
         )
-        return
+        return False
+
     with contextlib.suppress(Exception):
         driver.quit()
+    return True
 
 
-def _opsi(headless: bool, profile: Optional[Path]) -> Options:
+def _opsi(headless: bool, profile: Path | None) -> Options:
     """Opsi Chrome yang dipakai semua percobaan."""
     options = Options()
     options.add_argument("--window-size=1400,900")
@@ -203,10 +257,62 @@ def _pesan_gagal(detail: str) -> str:
     )
 
 
+def _pid_chrome_pakai_profil(profil: Path) -> list[int]:
+    """PID Chrome (Windows) yang memakai folder profil ini; [] bila tak ada."""
+    if sys.platform != "win32":
+        return []
+
+    skrip = (
+        "Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" | "
+        "Where-Object { $_.CommandLine -like '*" + str(profil) + "*' } | "
+        "Select-Object -ExpandProperty ProcessId"
+    )
+    try:
+        hasil = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", skrip],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+
+    pid = []
+    for baris in (hasil.stdout or "").splitlines():
+        baris = baris.strip()
+        if baris.isdigit():
+            pid.append(int(baris))
+    return pid
+
+
+def tutup_chrome_bot_tertinggal(profil: Path) -> int:
+    """Tutup Chrome sisa sesi sebelumnya yang masih memegang `profil`.
+
+    Hanya proses yang baris perintahnya memuat folder profil bot, jadi Chrome
+    pribadi pengguna (profil lain) tidak tersentuh. Hasil: jumlah PID ditutup.
+    """
+    jumlah = 0
+    for pid in _pid_chrome_pakai_profil(profil):
+        try:
+            hasil = subprocess.run(
+                ["taskkill", "/PID", str(pid), "/F"],
+                capture_output=True,
+                text=True,
+                timeout=20,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if hasil.returncode == 0:
+            jumlah += 1
+    return jumlah
+
+
 def buka_chrome(
     profile_dir: str = "",
     use_profile: bool = True,
-    headless: Optional[bool] = None,
+    headless: bool | None = None,
     label: str = "Chrome",
 ):
     """Buka Chrome dan kembalikan driver-nya.
@@ -214,7 +320,7 @@ def buka_chrome(
     Melempar RuntimeError berisi langkah perbaikan bila semua percobaan gagal.
     """
     mode_headless = config.headless if headless is None else headless
-    profil: Optional[Path] = None
+    profil: Path | None = None
 
     if use_profile:
         teks_profil = str(profile_dir or config.profile_dir or "").strip()
@@ -253,7 +359,13 @@ def buka_chrome(
             f"[cyan]Menempel ke Chrome yang berjalan di port {port}...[/]"
         )
         try:
-            return sembunyikan_otomasi(tempel_chrome(port))
+            driver = sembunyikan_otomasi(tempel_chrome(port))
+            # Ditandai supaya `tutup_chrome` tahu Chrome ini milik pengguna
+            # dan tidak boleh ditutup — beda dengan Chrome yang dibuka bot
+            # walau CHROME_DEBUG_PORT diisi (menempel gagal).
+            with contextlib.suppress(Exception):
+                driver._dimastes_tertempel = True
+            return driver
         except Exception as exc:
             console.print(
                 f"[yellow]Gagal menempel ke port {port}: "
@@ -282,6 +394,35 @@ def buka_chrome(
 
         if path_profil is not None:
             console.print(f"[dim]Profil Chrome: {path_profil}[/]")
+
+            if not bersihkan and profil_terkunci(path_profil):
+                console.print(
+                    "[yellow]Profil Chrome masih dipakai Chrome lain — "
+                    "menunggu sampai tertutup...[/]"
+                )
+                # Chrome butuh waktu melepas profil setelah ditutup; 8 detik
+                # sering kurang (log 2026-11-13: terkunci 2x), dan kegagalan
+                # di sini membuat bot pindah ke profil cadangan tanpa sesi
+                # login sehingga seluruh situs sesudahnya hangus.
+                batas_tunggu = 20.0
+                bebas = tunggu_profil_bebas(path_profil, batas_detik=batas_tunggu)
+                if not bebas:
+                    # Chrome sisa sesi sebelumnya (mis. JobStreet yang tidak
+                    # pernah ditutup) memegang profil. Tanpa langkah ini bot
+                    # turun ke profil cadangan tanpa sesi login.
+                    jumlah = tutup_chrome_bot_tertinggal(path_profil)
+                    if jumlah:
+                        console.print(
+                            f"[yellow]{jumlah} proses Chrome sisa sesi "
+                            "sebelumnya ditutup; menunggu profil bebas.[/]"
+                        )
+                        bebas = tunggu_profil_bebas(path_profil, 10.0)
+                if not bebas:
+                    console.print(
+                        f"[yellow]Profil masih terkunci setelah "
+                        f"{batas_tunggu:.0f} detik. Tutup semua jendela Chrome "
+                        "lalu jalankan lagi agar sesi login tidak hilang.[/]"
+                    )
 
         try:
             driver = _buka(_opsi(headless_ke, path_profil))

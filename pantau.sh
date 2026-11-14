@@ -9,7 +9,7 @@ cd "$(dirname "$0")"
 
 JEDA="${1:-60}"
 REMOTE_ARENA="${ARENA_REMOTE:-arena}"
-CABANG_ARENA="${ARENA_CABANG:-arena/4ab2b9fa-dimastes}"
+CABANG_ARENA="${ARENA_CABANG:-main}"
 URL_ARENA="${ARENA_URL:-https://github.com/dimasw1997/dimastes.git}"
 
 if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then

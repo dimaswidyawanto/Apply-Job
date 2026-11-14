@@ -4,7 +4,7 @@ Mengacu master prompt pasal 4.1–4.3 (antrean persisten) dan 9.2 (kuota harian
 memakai zona waktu Asia/Jakarta).
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -78,10 +78,10 @@ def test_kuota_menghitung_lamaran_hari_ini_wib(db):
         conn.execute(
             "INSERT INTO applications (job_id, status, applied_at) "
             "VALUES ('a1', 'applied', ?)",
-            (datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),),
+            (datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S"),),
         )
         # 2 hari lalu: tidak boleh ikut dihitung.
-        lama = (datetime.now(timezone.utc) - timedelta(days=2)).strftime(
+        lama = (datetime.now(UTC) - timedelta(days=2)).strftime(
             "%Y-%m-%d %H:%M:%S"
         )
         conn.execute(

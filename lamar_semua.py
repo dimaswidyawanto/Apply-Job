@@ -4,8 +4,8 @@ Dipakai oleh "Lamar Otomatis.bat". Alur:
 
 1. (opsional) tarik pembaruan kode dari repo pengembangan,
 2. jalankan sesi JobStreet → Glints → Indeed berurutan,
-3. kuota harian tetap satu hitungan (`kuota.py`), jadi situs berikutnya hanya
-   memakai sisa jatah,
+3. kuota harian dihitung PER SITUS (`kuota.py`): JobStreet 50, Glints 50,
+   Indeed 50 — target satu situs tidak mengurangi jatah situs lain,
 4. kirim **satu** laporan harian Telegram di akhir, bukan tiga.
 
 Semua aturan per situs tetap milik modulnya masing-masing; berkas ini hanya
@@ -18,11 +18,11 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Dict, List
 
 from rich.console import Console
 from rich.table import Table
 
+import cache_riset
 import kuota
 from config import config
 from database import db
@@ -40,7 +40,7 @@ NAMA_SITUS = {
 }
 
 REMOTE_BAKU = "arena"
-CABANG_BAKU = "arena/4ab2b9fa-dimastes"
+CABANG_BAKU = "main"
 URL_ARENA = "https://github.com/dimasw1997/dimastes.git"
 
 
@@ -100,9 +100,31 @@ def perbarui_kode(remote: str = "", cabang: str = "") -> tuple[bool, str]:
         if disimpan:
             _git("stash", "pop")
 
+        # Cabang yang diminta bisa saja sudah usang atau sudah dihapus di
+        # GitHub (mis. sisa sesi pengembangan lama). Dulu sesi berhenti di
+        # "kode sudah paling baru" padahal perbaikan terbaru ada di `main`
+        # sehingga PC ini tetap menjalankan kode lama. Sekarang dibandingkan
+        # dengan `main` dan ditarik bila tertinggal.
+        tertinggal = _git("rev-list", "--count", f"HEAD..{remote}/main")
+        jumlah = (tertinggal.stdout or "0").strip()
+        if tertinggal.returncode == 0 and jumlah.isdigit() and int(jumlah) > 0:
+            console.print(
+                f"[cyan]Ada {jumlah} pembaruan di {remote}/main — "
+                "menarik juga.[/]"
+            )
+            tambahan = _git("merge", "--no-edit", f"{remote}/main")
+            if tambahan.returncode != 0:
+                _git("merge", "--abort")
+                return False, (
+                    f"penggabungan {remote}/main bentrok — jalankan tarik.bat"
+                )
+            versi = _git("rev-parse", "--short", "HEAD").stdout.strip()
+            return True, f"kode diperbarui ke {versi}"
+
+        versi = _git("rev-parse", "--short", "HEAD").stdout.strip()
         if "Already up to date" in (gabung.stdout or ""):
-            return True, "kode sudah paling baru"
-        return True, "kode diperbarui"
+            return True, f"kode sudah paling baru ({versi})"
+        return True, f"kode diperbarui ke {versi}"
     except subprocess.TimeoutExpired:
         return False, "pembaruan kelamaan — dilewati"
     except (OSError, subprocess.SubprocessError) as exc:
@@ -110,7 +132,7 @@ def perbarui_kode(remote: str = "", cabang: str = "") -> tuple[bool, str]:
 
 
 # ------------------------------------------------------------------ situs ---
-def situs_terpilih(teks: str = "") -> List[str]:
+def situs_terpilih(teks: str = "") -> list[str]:
     """Daftar situs yang akan dijalankan, urut dan tanpa duplikat."""
     mentah = teks or getattr(config, "situs_aktif", "") or ",".join(SITUS_BAKU)
     diminta = [bagian.strip().lower() for bagian in str(mentah).split(",")]
@@ -128,7 +150,7 @@ def situs_terpilih(teks: str = "") -> List[str]:
     return [nama for nama in SITUS_BAKU if nama in hasil]
 
 
-def _jalankan_situs(nama: str, max_pages: int, batas: int) -> Dict:
+def _jalankan_situs(nama: str, max_pages: int, batas: int) -> dict:
     """Jalankan satu situs tanpa laporan harian sendiri."""
     if nama == "jobstreet":
         from main import AutoApplyEngine
@@ -158,8 +180,44 @@ def _jalankan_situs(nama: str, max_pages: int, batas: int) -> Dict:
     return jalankan_indeed(max_pages=max_pages, batas=batas, laporan_harian=False)
 
 
+def _lepas_profil_sebelum_situs_berikut() -> None:
+    """Pastikan Chrome situs sebelumnya sudah melepas profil bersama.
+
+    Ketiga situs memakai folder profil yang sama (`config.profile_dir`). Bila
+    Chrome situs sebelumnya belum benar-benar tertutup, situs berikutnya tidak
+    bisa membukanya dan turun ke profil baru tanpa sesi login — persis yang
+    membuat Glints "Login belum selesai" dan Indeed 0 lowongan pada log
+    2026-11-13.
+    """
+    from pathlib import Path as _Path
+
+    teks = str(getattr(config, "profile_dir", "") or "").strip()
+    if not teks:
+        return
+
+    import browser
+
+    profil = _Path(teks).expanduser()
+    if not browser.profil_terkunci(profil):
+        return
+
+    console.print(
+        "[dim]Chrome situs sebelumnya masih memegang profil; menunggu...[/]"
+    )
+    if browser.tunggu_profil_bebas(profil, batas_detik=20.0):
+        return
+
+    jumlah = browser.tutup_chrome_bot_tertinggal(profil)
+    if jumlah:
+        console.print(
+            f"[yellow]{jumlah} proses Chrome sisa ditutup agar situs "
+            "berikutnya bisa memakai profil yang sama.[/]"
+        )
+        browser.tunggu_profil_bebas(profil, batas_detik=10.0)
+
+
 # --------------------------------------------------------------- ringkasan ---
-def _tabel(hasil: Dict[str, Dict], dilewati: Dict[str, str]) -> None:
+def _tabel(hasil: dict[str, dict], dilewati: dict[str, str]) -> None:
     tabel = Table(title="Ringkasan lamar otomatis")
     tabel.add_column("Situs", style="cyan")
     tabel.add_column("Terbaca", justify="right")
@@ -198,7 +256,7 @@ def jalankan(
     max_pages: int = 0,
     batas: int = 0,
     perbarui: bool = True,
-) -> Dict[str, Dict]:
+) -> dict[str, dict]:
     """Jalankan seluruh situs terpilih dan kembalikan hasil per situs."""
     console.print("[bold cyan]Lamar otomatis — JobStreet · Glints · Indeed[/]")
     mulai_sesi = time.monotonic()
@@ -226,14 +284,29 @@ def jalankan(
 
     urutan = ", ".join(NAMA_SITUS[nama] for nama in daftar)
     console.print(f"[cyan]Situs yang dijalankan:[/] {urutan}")
-    console.print(f"[cyan]{kuota.ringkasan()}[/]")
+    console.print(
+        "[cyan]Kuota:[/] "
+        f"{kuota.batas()} lamaran per situs per siklus 24 jam "
+        "(hitungan tiap situs terpisah, reset 24 jam sejak lamaran pertama)"
+    )
+    for baris in kuota.ringkasan_situs(daftar=daftar):
+        sisa_teks = (
+            f" — reset {baris['berakhir']}" if baris["berakhir"] else ""
+        )
+        console.print(
+            f"[dim]   {baris['nama']}: {baris['terpakai']}/"
+            f"{baris['batas']} pada siklus ini{sisa_teks}[/]"
+        )
 
-    hasil: Dict[str, Dict] = {}
-    dilewati: Dict[str, str] = {}
+    hasil: dict[str, dict] = {}
+    dilewati: dict[str, str] = {}
 
-    for nama in daftar:
-        if kuota.habis():
-            pesan = kuota.pesan_habis()
+    for urutan_ke, nama in enumerate(daftar):
+        if urutan_ke:
+            _lepas_profil_sebelum_situs_berikut()
+
+        if kuota.habis(situs=nama):
+            pesan = kuota.pesan_habis(nama)
             dilewati[nama] = pesan
             console.print(f"[yellow]Lewati {NAMA_SITUS[nama]}: {pesan}[/]")
             continue
@@ -257,7 +330,28 @@ def jalankan(
 
     terkirim = sum(data.get("dilamar", 0) for data in hasil.values())
     console.print(f"[bold green]Total terkirim sesi ini: {terkirim}[/]")
-    console.print(f"[bold]{kuota.ringkasan()}[/]")
+
+    # Target harian dihitung per situs: JobStreet 50, Glints 50, Indeed 50.
+    kurang_target = []
+    for baris in kuota.ringkasan_situs(daftar=daftar):
+        console.print(
+            f"[bold]{baris['nama']}:[/] {baris['terpakai']}/{baris['batas']} "
+            "lamaran pada siklus ini"
+            + (f" (reset {baris['berakhir']})" if baris["berakhir"] else "")
+        )
+        if baris["sisa"]:
+            kurang_target.append(
+                f"{baris['nama']} kurang {baris['sisa']}"
+            )
+
+    if kurang_target:
+        console.print(
+            "[yellow]Target 50 belum tercapai:[/] "
+            + ", ".join(kurang_target)
+            + ". Jalankan sesi lagi dalam siklus yang sama, atau tambah "
+            "kata kunci/halaman riset. Slot baru dibuka setelah 24 jam dari "
+            "lamaran pertama siklus ini."
+        )
 
     # Ringkasan sesi gabungan semua situs (evaluasi berkala pasal 12.4).
     with contextlib.suppress(Exception):
@@ -303,7 +397,15 @@ def main() -> int:
                         help="Batas lamaran sesi ini (0 = tanpa batas)")
     parser.add_argument("--tanpa-perbarui", action="store_true",
                         help="Jangan tarik pembaruan kode dari GitHub")
+    parser.add_argument("--segar", action="store_true",
+                        help="Abaikan cache riset, ambil ulang dari situs")
     arg = parser.parse_args()
+
+    if arg.segar:
+        cache_riset.paksa_segar()
+        console.print(
+            "[cyan]Cache riset dimatikan untuk sesi ini (--segar).[/]"
+        )
 
     jalankan(
         situs=arg.situs,

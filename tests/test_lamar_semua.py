@@ -137,3 +137,93 @@ def test_perbarui_tidak_pernah_melempar_galat(monkeypatch, tmp_path):
 
     assert berhasil is False
     assert "pembaruan gagal" in pesan
+
+
+# ---------------------------------------------- tarik pembaruan yang benar ---
+class _Hasil:
+    def __init__(self, stdout="", returncode=0):
+        self.stdout = stdout
+        self.returncode = returncode
+
+
+def _git_palsu(monkeypatch, tmp_path, jawaban):
+    """_git palsu: `jawaban` memetakan potongan argumen → hasil."""
+    (tmp_path / ".git").mkdir(exist_ok=True)
+    jejak = []
+
+    def palsu(*argumen, **kwargs):
+        kunci = " ".join(argumen)
+        jejak.append(kunci)
+        for pola, hasil in jawaban.items():
+            if pola in kunci:
+                return hasil
+        return _Hasil()
+
+    monkeypatch.setattr(lamar_semua, "AKAR", tmp_path)
+    monkeypatch.setattr(lamar_semua, "_git", palsu)
+    return jejak
+
+
+def test_perbarui_menarik_main_bila_cabang_usang(monkeypatch, tmp_path):
+    """ARENA_CABANG menunjuk cabang lama → tetap tarik main (bug nyata)."""
+    jejak = _git_palsu(
+        monkeypatch,
+        tmp_path,
+        {
+            "rev-list --count HEAD..arena/main": _Hasil("3\n"),
+            "merge --no-edit arena/arena/4ab2b9fa-dimastes": _Hasil(
+                "Already up to date.\n"
+            ),
+            "merge --no-edit arena/main": _Hasil("ok\n"),
+            "rev-parse --short HEAD": _Hasil("d72da3a\n"),
+        },
+    )
+
+    berhasil, pesan = lamar_semua.perbarui_kode(
+        cabang="arena/4ab2b9fa-dimastes"
+    )
+
+    assert berhasil is True
+    assert "d72da3a" in pesan
+    assert any("merge --no-edit arena/main" in k for k in jejak)
+
+
+def test_perbarui_tidak_menggabung_dua_kali_bila_sudah_sama(
+    monkeypatch, tmp_path
+):
+    jejak = _git_palsu(
+        monkeypatch,
+        tmp_path,
+        {
+            "rev-list --count HEAD..arena/main": _Hasil("0\n"),
+            "rev-parse --short HEAD": _Hasil("d72da3a\n"),
+        },
+    )
+
+    berhasil, pesan = lamar_semua.perbarui_kode(cabang="main")
+
+    assert berhasil is True
+    assert "d72da3a" in pesan
+    # Hanya satu penggabungan: cabang baku itu sendiri, tanpa pengulangan.
+    assert jejak.count("merge --no-edit arena/main") == 1
+
+
+def test_perbarui_main_bentrok_dilaporkan(monkeypatch, tmp_path):
+    _git_palsu(
+        monkeypatch,
+        tmp_path,
+        {
+            "rev-list --count HEAD..arena/main": _Hasil("2\n"),
+            "merge --no-edit arena/main": _Hasil("", returncode=1),
+        },
+    )
+
+    berhasil, pesan = lamar_semua.perbarui_kode()
+
+    assert berhasil is False
+    assert "bentrok" in pesan
+
+
+def test_cabang_baku_adalah_main():
+    """Bawaan harus `main`; cabang sesi lama tidak selalu ada di GitHub."""
+    assert lamar_semua.CABANG_BAKU == "main"

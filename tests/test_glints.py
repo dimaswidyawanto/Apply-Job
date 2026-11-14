@@ -346,3 +346,57 @@ def test_tombol_kirim_lamaran_tetap_ditemukan():
 
     assert tombol is not None
     assert tombol.text == "Kirim"
+
+
+# ---------------------------------------------- banner "sudah melamar" (Glints) ---
+def test_banner_sudah_melamar_dihitung_terkirim(monkeypatch):
+    """Kasus nyata 2026-11-11: Kirim diklik, Glints menampilkan banner
+
+    "Kamu sudah melamar pekerjaan ini. Silakan cek aplikasi..." Sebelum
+    diperbaiki, bot menunggu 45 detik lalu menandai lowongan "perlu manual"
+    padahal lamarannya sudah masuk.
+    """
+    monkeypatch.setattr(auto_apply.config, "auto_apply_submit_timeout", 45)
+
+    driver = Driver()
+    banner = (
+        "Kamu sudah melamar pekerjaan ini. Silakan cek aplikasi untuk "
+        "pantau statusnya. Cek lamaran saya"
+    )
+
+    def kirim():
+        driver.body = banner
+
+    driver.elements = {
+        GlintsApplier.apply_selectors[0]: [
+            Elemen(text="Lamar", on_click=lambda: None)
+        ],
+        "button[type='submit']": [Elemen(text="Kirim", on_click=kirim)],
+    }
+
+    hasil = GlintsApplier(driver).apply(
+        {"url": URL_UJI, "title": "PPIC", "job_id": "glints:abc"}
+    )
+
+    assert hasil.applied is True
+    assert hasil.status == "applied"
+
+
+def test_banner_sudah_melamar_dikenali_sebagai_sukses():
+    driver = Driver(body="Kamu sudah melamar pekerjaan ini. Cek lamaran saya")
+    applier = GlintsApplier(driver)
+
+    assert applier._is_success() is True
+    assert applier.is_already_applied() is True
+
+
+def test_already_applied_tetap_dilewati_sebelum_klik():
+    """Banner yang sudah ada sejak awal tetap "sudah dilamar", bukan "terkirim"."""
+    driver = Driver(
+        body="Kamu sudah melamar pekerjaan ini. Cek lamaran saya"
+    )
+
+    hasil = GlintsApplier(driver).apply({"url": URL_UJI, "title": "PPIC"})
+
+    assert hasil.applied is False
+    assert hasil.status == "already_applied"

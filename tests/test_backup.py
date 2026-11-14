@@ -25,7 +25,7 @@ def db_berisi(tmp_path):
 
 
 def test_backup_membuat_salinan_dan_daftar(db_berisi, tmp_path):
-    database, jalur = db_berisi
+    _database, jalur = db_berisi
     folder = tmp_path / "backups"
 
     berkas = backup.buat(str(jalur), folder)

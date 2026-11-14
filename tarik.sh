@@ -5,7 +5,7 @@ set -uo pipefail
 cd "$(dirname "$0")"
 
 ARENA_REMOTE="${ARENA_REMOTE:-arena}"
-ARENA_CABANG="${ARENA_CABANG:-arena/4ab2b9fa-dimastes}"
+ARENA_CABANG="${ARENA_CABANG:-main}"
 ARENA_URL="${ARENA_URL:-https://github.com/dimasw1997/dimastes.git}"
 
 if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then

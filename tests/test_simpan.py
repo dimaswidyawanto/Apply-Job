@@ -54,7 +54,7 @@ def test_pulih_dari_sisa_rebase_dan_log_tidak_terlacak(tmp_path):
 
     hasil = subprocess.run(
         ["./simpan.sh", "Uji pemulihan"], cwd=kerja,
-        capture_output=True, text=True, timeout=120,
+        capture_output=True, text=True, timeout=120, check=False,
     )
 
     assert hasil.returncode == 0, hasil.stdout + hasil.stderr
@@ -83,7 +83,7 @@ def test_menggabungkan_perubahan_dari_klon_lain(tmp_path):
 
     hasil = subprocess.run(
         ["./simpan.sh", "Uji gabung"], cwd=kerja,
-        capture_output=True, text=True, timeout=120,
+        capture_output=True, text=True, timeout=120, check=False,
     )
 
     assert hasil.returncode == 0, hasil.stdout + hasil.stderr

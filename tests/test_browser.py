@@ -187,14 +187,34 @@ def test_tutup_chrome_tidak_menutup_chrome_saat_menempel(monkeypatch, capsys):
     dipanggil = {"quit": 0}
 
     class Driver:
+        def __init__(self, tertempel=False):
+            self._dimastes_tertempel = tertempel
+
         def quit(self):
             dipanggil["quit"] += 1
 
     monkeypatch.setattr(config, "chrome_debug_port", 9222)
-    browser_module.tutup_chrome(Driver())
+    browser_module.tutup_chrome(Driver(tertempel=True))
     assert dipanggil["quit"] == 0
     assert "tempel" in capsys.readouterr().out.lower()
 
     monkeypatch.setattr(config, "chrome_debug_port", 0)
+    browser_module.tutup_chrome(Driver())
+    assert dipanggil["quit"] == 1
+
+
+def test_chrome_bot_tetap_ditutup_saat_menempel_gagal(monkeypatch):
+    """CHROME_DEBUG_PORT diisi tetapi menempel gagal → Chrome milik bot.
+
+    Bug 2026-11-13: Chrome itu dibiarkan hidup, profil tetap terkunci, Glints
+    dan Indeed tidak bisa dibuka sama sekali.
+    """
+    dipanggil = {"quit": 0}
+
+    class Driver:
+        def quit(self):
+            dipanggil["quit"] += 1
+
+    monkeypatch.setattr(config, "chrome_debug_port", 9222)
     browser_module.tutup_chrome(Driver())
     assert dipanggil["quit"] == 1

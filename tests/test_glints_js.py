@@ -21,6 +21,7 @@ def test_skrip_pembaca_kartu_glints():
             capture_output=True,
             text=True,
             timeout=60,
+            check=False,
         )
     except (OSError, subprocess.SubprocessError):
         pytest.skip("node tidak bisa dijalankan")
@@ -34,6 +35,7 @@ def test_skrip_pembaca_kartu_glints():
         text=True,
         timeout=120,
         cwd=str(SKRIP.parent),
+        check=False,
     )
 
     assert hasil.returncode == 0, hasil.stdout + hasil.stderr

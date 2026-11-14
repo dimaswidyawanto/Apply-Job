@@ -11,7 +11,7 @@ set "JEDA=%~1"
 if "%JEDA%"=="" set "JEDA=60"
 
 if "%ARENA_REMOTE%"=="" set "ARENA_REMOTE=arena"
-if "%ARENA_CABANG%"=="" set "ARENA_CABANG=arena/4ab2b9fa-dimastes"
+if "%ARENA_CABANG%"=="" set "ARENA_CABANG=main"
 if "%ARENA_URL%"=="" set "ARENA_URL=https://github.com/dimasw1997/dimastes.git"
 
 git rev-parse --is-inside-work-tree >nul 2>&1

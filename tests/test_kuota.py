@@ -55,7 +55,7 @@ def test_ringkasan_memuat_angka_yang_sama_untuk_kedua_situs():
     cfg = ConfigPalsu(50)
     teks = kuota.ringkasan(DbPalsu(4), cfg)
 
-    assert "4 sudah dilamar hari ini" in teks
+    assert "4 sudah dilamar pada siklus ini" in teks
     assert "sisa 46 dari 50" in teks
     # JobStreet dan Glints memakai fungsi ini, jadi teksnya pasti identik.
     assert kuota.ringkasan(DbPalsu(4), cfg) == teks

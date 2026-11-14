@@ -318,3 +318,145 @@ def test_cari_tidak_mengembalikan_jawaban_untuk_persetujuan(monkeypatch):
     monkeypatch.setattr(jawaban, "db", DatabaseIsi())
 
     assert jawaban.cari("Saya menyetujui pernyataan ini") is None
+
+
+# ----------------------------------------------------------------------
+# Kasus Glints: formulir skala per keahlian (bukti sesi 2026-11-11)
+# ----------------------------------------------------------------------
+class ElemenKartu:
+    """Kartu satu keahlian; hanya berisi teks nama keahlian."""
+
+    def __init__(self, teks):
+        self.text = teks
+
+    def find_element(self, by, selector):
+        from selenium.common.exceptions import NoSuchElementException
+
+        raise NoSuchElementException(selector)
+
+
+class ElemenSkala(ElemenPalsu):
+    """Radio skala yang input aslinya tersembunyi dan tanpa atribut name."""
+
+    def __init__(self, label, kartu):
+        super().__init__(label, "", "")
+        self.kartu = kartu
+
+    def get_attribute(self, nama):
+        return ""
+
+    def find_element(self, by, selector):
+        from selenium.common.exceptions import NoSuchElementException
+
+        if selector == "..":
+            return self.kartu
+        raise NoSuchElementException(selector)
+
+
+SKALA = ("Tidak Berpengalaman", "Dasar", "Menengah", "Ahli")
+
+
+def _applier_skala(monkeypatch, elemen, pertanyaan):
+    applier = _applier(monkeypatch, elemen)
+    monkeypatch.setattr(applier, "_visible", lambda *_: False)
+    monkeypatch.setattr(applier, "_enabled", lambda *_: True)
+    monkeypatch.setattr(applier, "_label_terlihat", lambda *_: True)
+    monkeypatch.setattr(
+        applier, "_pertanyaan", lambda e, opsi=(): pertanyaan
+    )
+    monkeypatch.setattr(applier, "_picu_perubahan", lambda *_: None)
+    return applier
+
+
+JUDUL_SKALA = "Seberapa mahir kamu dengan keahlian berikut ini?"
+
+
+def test_jawaban_skala_tersembunyi_tanpa_name_tetap_terekam(monkeypatch):
+    """Radio Glints tersembunyi dan tanpa `name` — dulu tidak pernah terekam."""
+    db = _siapkan(monkeypatch)
+
+    kartu = ElemenKartu("Microsoft Excel")
+    opsi = [ElemenSkala(label, kartu) for label in SKALA]
+    applier = _applier_skala(monkeypatch, opsi, JUDUL_SKALA)
+
+    sebelum = applier._potret_jawaban()
+    assert sebelum == {}
+
+    # Pengguna menjawab sendiri di Chrome.
+    opsi[2].selected = True
+    assert applier._rekam_jawaban_pengguna(sebelum) == 1
+
+    assert db.baris
+    satu = next(iter(db.baris.values()))
+    assert satu["jawaban"] == "Menengah"
+    assert "microsoft excel" in satu["kunci"]
+
+
+def test_dua_keahlian_tidak_saling_menimpa(monkeypatch):
+    """Judul sama, keahlian berbeda → dua ingatan terpisah, bukan satu."""
+    db = _siapkan(monkeypatch)
+
+    excel = [ElemenSkala(label, ElemenKartu("Microsoft Excel")) for label in SKALA]
+    layanan = [
+        ElemenSkala(label, ElemenKartu("Pelayanan Pelanggan")) for label in SKALA
+    ]
+    semua = excel + layanan
+
+    applier = _applier_skala(monkeypatch, semua, JUDUL_SKALA)
+
+    sebelum = applier._potret_jawaban()
+    excel[3].selected = True       # Excel → Ahli
+    layanan[1].selected = True     # Pelayanan Pelanggan → Dasar
+
+    assert applier._rekam_jawaban_pengguna(sebelum) == 2
+    assert len(db.baris) == 2
+
+    nilai = {baris["jawaban"] for baris in db.baris.values()}
+    assert nilai == {"Ahli", "Dasar"}
+
+    kunci = " ".join(db.baris)
+    assert "microsoft excel" in kunci
+    assert "pelayanan pelanggan" in kunci
+
+
+def test_keahlian_diisi_dari_ingatan_pada_lamaran_berikutnya(monkeypatch):
+    _siapkan(monkeypatch)
+    jawaban.ingat(f"{JUDUL_SKALA} — Microsoft Excel", "Ahli")
+    jawaban.ingat(f"{JUDUL_SKALA} — Pelayanan Pelanggan", "Dasar")
+
+    excel = [ElemenSkala(label, ElemenKartu("Microsoft Excel")) for label in SKALA]
+    layanan = [
+        ElemenSkala(label, ElemenKartu("Pelayanan Pelanggan")) for label in SKALA
+    ]
+
+    applier = _applier_skala(monkeypatch, excel + layanan, JUDUL_SKALA)
+    gagal = applier._jawab_radio()
+
+    assert gagal == []
+    assert [item.label for item in excel if item.selected] == ["Ahli"]
+    assert [item.label for item in layanan if item.selected] == ["Dasar"]
+
+
+def test_kotak_centang_diisi_dari_ingatan(monkeypatch):
+    """Jawaban centang yang pernah diberikan dipakai ulang, bukan ditebak."""
+    _siapkan(monkeypatch)
+    jawaban.ingat("Keahlian yang kamu kuasai", "Excel; SAP")
+
+    opsi = [
+        ElemenPalsu("Excel", "keahlian", "keahlian[]"),
+        ElemenPalsu("SAP", "keahlian", "keahlian[]"),
+        ElemenPalsu("AutoCAD", "keahlian", "keahlian[]"),
+    ]
+    applier = _applier(monkeypatch, opsi)
+    monkeypatch.setattr(
+        applier, "_find_all", lambda sel: opsi if "checkbox" in sel else []
+    )
+    monkeypatch.setattr(
+        applier, "_pertanyaan", lambda e, opsi=(): "Keahlian yang kamu kuasai"
+    )
+    monkeypatch.setattr(applier, "_picu_perubahan", lambda *_: None)
+
+    gagal = applier._jawab_checkbox()
+
+    assert gagal == []
+    assert [item.label for item in opsi if item.selected] == ["Excel", "SAP"]

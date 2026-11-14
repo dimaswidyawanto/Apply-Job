@@ -13,7 +13,6 @@ Dipakai perintah `laporan` dan dashboard.
 
 from datetime import date
 from pathlib import Path
-from typing import Dict, List, Optional
 
 import kuota
 from config import config
@@ -21,7 +20,34 @@ from database import db
 from notifier import notifier
 
 
-def ringkasan() -> Dict:
+def _teks_kuota(kuota_situs: list[dict]) -> str:
+    """Ringkasan kuota per situs untuk berkas Markdown."""
+    if not kuota_situs:
+        return "tanpa batas"
+
+    bagian = []
+    for baris in kuota_situs:
+        sisa = baris.get("sisa")
+        sisa_teks = "tanpa batas" if sisa is None else f"sisa {sisa}"
+        bagian.append(
+            f"{baris.get('nama') or baris.get('situs')} "
+            f"{baris.get('terpakai', 0)}/{baris.get('batas', 0)} ({sisa_teks})"
+        )
+
+    return " · ".join(bagian)
+
+
+def _sisa_gabungan() -> int | None:
+    """Total sisa slot semua situs; None bila tidak ada batas sama sekali."""
+    sisa = [baris["sisa"] for baris in kuota.ringkasan_situs(db)]
+
+    if all(item is None for item in sisa):
+        return None
+
+    return sum(item or 0 for item in sisa)
+
+
+def ringkasan() -> dict:
     """Angka utama untuk laporan satu halaman."""
     stats = db.get_stats()
     status = db.hitung_status_antrean()
@@ -34,7 +60,10 @@ def ringkasan() -> Dict:
         "lowongan_tersimpan": int(stats.get("total_jobs_found", 0)),
         "lamaran_terkirim": terkirim,
         "lamaran_hari_ini": int(stats.get("today_applied", 0)),
-        "sisa_kuota": kuota.sisa(db),
+        # Kuota dihitung per situs: JobStreet/Glints/Indeed masing-masing
+        # punya target harian sendiri.
+        "kuota_situs": kuota.ringkasan_situs(db),
+        "sisa_kuota": _sisa_gabungan(),
         "status_antrean": status,
         "per_lokasi": db.statistik_lokasi(10),
         "per_kategori": db.statistik_kategori(10),
@@ -52,7 +81,7 @@ def ringkasan() -> Dict:
 FOLDER_LAPORAN = Path(__file__).resolve().parent / "reports"
 
 
-def teks_markdown(data: Optional[Dict] = None) -> str:
+def teks_markdown(data: dict | None = None) -> str:
     """Laporan dalam bentuk teks Markdown (untuk berkas harian)."""
     data = data or ringkasan()
     hari = date.today().isoformat()
@@ -66,8 +95,8 @@ def teks_markdown(data: Optional[Dict] = None) -> str:
         f"- Lowongan tersimpan: {data['lowongan_tersimpan']}",
         f"- Lamaran terkirim: {data['lamaran_terkirim']}",
         f"- Lamaran hari ini (WIB): {data['lamaran_hari_ini']}",
-        "- Sisa kuota: "
-        + ("tanpa batas" if data["sisa_kuota"] is None else str(data["sisa_kuota"])),
+        "- Kuota per situs: "
+        + _teks_kuota(data.get("kuota_situs") or []),
         f"- Tingkat berhasil: {data['tingkat_berhasil']}%",
         f"- Rasio duplikat (semua sesi): {rasio_duplikat}%",
         "",
@@ -156,8 +185,8 @@ def teks_markdown(data: Optional[Dict] = None) -> str:
     return "\n".join(baris) + "\n"
 
 
-def simpan(folder: Optional[str | Path] = None,
-           data: Optional[Dict] = None) -> Path:
+def simpan(folder: str | Path | None = None,
+           data: dict | None = None) -> Path:
     """Simpan laporan harian ke `reports/laporan-YYYY-MM-DD.md`.
 
     Berkas hari yang sama ditimpa, jadi menjalankan beberapa kali dalam sehari
@@ -171,13 +200,13 @@ def simpan(folder: Optional[str | Path] = None,
     return berkas
 
 
-def saran(data: Dict) -> List[str]:
+def saran(data: dict) -> list[str]:
     """Saran singkat dari angka — bagian "continuous improvement" yang aman.
 
     Hanya berupa anjuran; tidak mengubah aturan apa pun secara otomatis
     (pasal 12.5).
     """
-    hasil: List[str] = []
+    hasil: list[str] = []
     status = data.get("status_antrean") or {}
 
     revisi = int(status.get("review_required", 0))
@@ -263,7 +292,7 @@ def saran(data: Dict) -> List[str]:
     return hasil
 
 
-def kirim_telegram(data: Dict) -> bool:
+def kirim_telegram(data: dict) -> bool:
     """Kirim ringkasan ke Telegram (opsional)."""
     try:
         notifier.send_daily_report(db.get_stats())

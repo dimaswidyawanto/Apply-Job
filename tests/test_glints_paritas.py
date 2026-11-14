@@ -94,7 +94,7 @@ class BotPalsu:
     def login(self):
         return True
 
-    def cari(self, keyword, halaman=0):
+    def cari(self, keyword, halaman=0, location=""):
         return [dict(job) for job in KARTU]
 
     def lamar(self, job):

@@ -67,7 +67,7 @@ def test_urutkan_terbaru_dipakai_walau_memuat_beberapa_kali(monkeypatch):
     muat_dipanggil = []
 
     monkeypatch.setattr(config, "prefer_newest", True)
-    monkeypatch.setattr(bot, "buka_pencarian", lambda keyword: True)
+    monkeypatch.setattr(bot, "buka_pencarian", lambda keyword, location="": True)
     monkeypatch.setattr(
         bot, "urutkan_terbaru", lambda: urut_dipanggil.append(1) or True
     )
@@ -148,7 +148,7 @@ def test_kartu_tanpa_logo_dilewati_di_glints(monkeypatch, capsys):
         def login(self):
             return True
 
-        def cari(self, keyword, nomor=0):
+        def cari(self, keyword, nomor=0, location=""):
             return [dict(kartu)] if nomor == 0 else []
 
         def lamar(self, job):

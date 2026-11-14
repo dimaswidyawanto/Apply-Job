@@ -111,7 +111,7 @@ def test_kumpulkan_lowongan_tanpa_duplikat():
     satu = {"job_id": "glints:aaa", "title": "A", "url": "u"}
     dua = {"job_id": "glints:bbb", "title": "B", "url": "u"}
 
-    def cari(keyword, halaman=0):
+    def cari(keyword, halaman=0, location=""):
         return [satu, dua] if keyword == "x" else [satu]
 
     bot.cari = cari

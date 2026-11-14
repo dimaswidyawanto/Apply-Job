@@ -10,8 +10,8 @@ import shutil
 import socket
 import sqlite3
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, List
 
 from config import BASE_DIR, config
 
@@ -91,7 +91,7 @@ def _catatan(lokasi: str, nilai: float, saran: str = "") -> dict:
             "saran": saran}
 
 
-def kumpulkan(port: int = 8765, folder_uji: Path | None = None) -> List[dict]:
+def kumpulkan(port: int = 8765, folder_uji: Path | None = None) -> list[dict]:
     """Semua pengukuran, siap ditampilkan sebagai tabel."""
     import laporan
     from database import db
@@ -133,7 +133,7 @@ def kumpulkan(port: int = 8765, folder_uji: Path | None = None) -> List[dict]:
     return hasil
 
 
-def saran_umum() -> List[str]:
+def saran_umum() -> list[str]:
     """Saran yang tidak bergantung pada hasil angka."""
     saran = []
     dasar = str(BASE_DIR).lower()

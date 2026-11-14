@@ -13,7 +13,6 @@ import re
 import zipfile
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
 
 from config import config
 
@@ -128,7 +127,7 @@ def baca_berkas(path: str | Path) -> str:
 
 
 # ---------------------------------------------------------------- profil ----
-def pengalaman_tahun(teks: str) -> Optional[int]:
+def pengalaman_tahun(teks: str) -> int | None:
     """Tahun pengalaman kerja tertinggi yang disebut di CV.
 
     Dua bentuk dikenali: angka eksplisit ("8 tahun pengalaman") dan rentang
@@ -149,7 +148,7 @@ def _tahun_sekarang() -> int:
     return datetime.now().year
 
 
-def pengalaman_dari_rentang(teks: str) -> Optional[int]:
+def pengalaman_dari_rentang(teks: str) -> int | None:
     """Total tahun kerja dari rentang tanggal (irisan dihitung sekali)."""
     sekarang = _tahun_sekarang()
     selang = []
@@ -169,8 +168,7 @@ def pengalaman_dari_rentang(teks: str) -> Optional[int]:
             if not (1970 <= mulai <= sekarang) or selesai < mulai:
                 continue
 
-            if selesai > sekarang:
-                selesai = sekarang
+            selesai = min(selesai, sekarang)
 
             selang.append((mulai, selesai))
 
@@ -191,7 +189,7 @@ def pengalaman_dari_rentang(teks: str) -> Optional[int]:
     return min(45, total) if total > 0 else None
 
 
-def pendidikan(teks: str) -> Optional[str]:
+def pendidikan(teks: str) -> str | None:
     """Jenjang pendidikan tertinggi yang disebut di CV."""
     isi = teks.lower()
     terbaik = None
@@ -202,11 +200,11 @@ def pendidikan(teks: str) -> Optional[str]:
     return terbaik
 
 
-def peringkat_pendidikan(jenjang: Optional[str]) -> int:
+def peringkat_pendidikan(jenjang: str | None) -> int:
     return PERINGKAT_PENDIDIKAN.get(str(jenjang or "").lower(), 0)
 
 
-def bidang(teks: str) -> List[str]:
+def bidang(teks: str) -> list[str]:
     """Kelompok bidang yang muncul di CV (inventory, ppic, supply, ...)."""
     isi = teks.lower()
     return [
@@ -216,7 +214,7 @@ def bidang(teks: str) -> List[str]:
     ]
 
 
-def keterampilan(teks: str) -> List[str]:
+def keterampilan(teks: str) -> list[str]:
     """Kata kunci keterampilan yang dikenal dan muncul di CV."""
     isi = teks.lower()
     hasil = []
@@ -227,7 +225,7 @@ def keterampilan(teks: str) -> List[str]:
     return hasil
 
 
-def profil_dari_teks(teks: str) -> Dict:
+def profil_dari_teks(teks: str) -> dict:
     """Profil terstruktur dari teks CV."""
     isi = str(teks or "")
     return {
@@ -241,7 +239,7 @@ def profil_dari_teks(teks: str) -> Dict:
     }
 
 
-def _sertifikasi(teks: str) -> List[str]:
+def _sertifikasi(teks: str) -> list[str]:
     """Sertifikat/pelatihan resmi — bukan nama aplikasi."""
     isi = teks.lower()
     daftar = (
@@ -257,14 +255,14 @@ def _sertifikasi(teks: str) -> List[str]:
     return hasil
 
 
-def _alat(teks: str) -> List[str]:
+def _alat(teks: str) -> list[str]:
     """Aplikasi/perangkat yang dikuasai (SAP, Excel, WMS, ...)."""
     isi = teks.lower()
     daftar = ("sap", "erp", "excel", "wms", "accurate", "odoo", "oracle")
     return [kata for kata in daftar if kata in isi]
 
 
-def profil_cv(path: str | Path = "") -> Dict:
+def profil_cv(path: str | Path = "") -> dict:
     """Baca CV dari path (bawaan `CV_PATH`) dan kembalikan profilnya."""
     teks = baca_berkas(path or config.cv_path)
     profil = profil_dari_teks(teks)
@@ -273,7 +271,7 @@ def profil_cv(path: str | Path = "") -> Dict:
     return profil
 
 
-def format_profil(profil: Dict) -> str:
+def format_profil(profil: dict) -> str:
     """Ringkasan satu blok untuk ditampilkan di CLI."""
     pengalaman = profil.get("pengalaman_tahun")
     return (

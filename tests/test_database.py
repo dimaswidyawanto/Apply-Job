@@ -186,3 +186,13 @@ def test_migrasi_mengisi_status_dan_sumber(tmp_path):
     assert job["sumber"] == "jobstreet"
     assert basis.hitung_status_antrean()["found"] == 1
     assert sum(basis.hitung_status_antrean().values()) == 1
+
+
+def test_foreign_key_dipaksa_aktif(database):
+    """E-5: koneksi harus memakai PRAGMA foreign_keys=ON.
+
+    Skema sekarang belum memakai FOREIGN KEY, tetapi pengaturan ini mencegah
+    baris yatim bila relasi ditambahkan di kemudian hari.
+    """
+    with database._get_conn() as conn:
+        assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1

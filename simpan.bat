@@ -5,6 +5,11 @@ rem          simpan.bat "Perbaiki filter judul"
 rem Skrip ini: bersihkan sisa rebase -> git add -A -> commit -> tarik -> push.
 rem Aman dipakai berkali-kali: kalau tidak ada perubahan, hanya mengirim saja.
 setlocal enabledelayedexpansion
+
+rem Jangan pernah membuka editor teks (Vim): semua commit memakai -m,
+rem dan penggabungan memakai --no-edit. Tanpa ini skrip menggantung.
+set "GIT_EDITOR=echo"
+set "GIT_MERGE_AUTOEDIT=no"
 cd /d "%~dp0"
 
 set "PESAN=%~1"
@@ -65,12 +70,12 @@ if errorlevel 1 (
     echo [4/5] Menarik perubahan terbaru dari GitHub...
     rem Gabung, bukan rebase: riwayat berisi commit gabungan dari tarik.bat,
     rem dan rebase pada commit gabungan sering gagal.
-    git pull --no-rebase --autostash origin %CABANG%
+    git pull --no-rebase --autostash --no-edit origin %CABANG%
     if errorlevel 1 (
         echo.
         echo [GAGAL] Penggabungan bentrok.
         echo   1. Ketik:  git status   lalu periksa berkas yang bertanda konflik.
-        echo   2. Perbaiki, lalu:  git add -A ^&^& git commit
+        echo   2. Perbaiki, lalu:  git add -A ^&^& git commit --no-edit
         echo   3. Jalankan lagi:  simpan.bat
         exit /b 1
     )

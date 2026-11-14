@@ -17,7 +17,6 @@ import shutil
 import sqlite3
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
 
 from config import BASE_DIR, config
 
@@ -26,7 +25,7 @@ AWALAN = "jobstreet_auto"
 MAKS_SIMPAN = 20
 
 
-def folder(path: Optional[str | Path] = None) -> Path:
+def folder(path: str | Path | None = None) -> Path:
     """Folder penyimpanan backup (dibuat bila belum ada)."""
     tujuan = Path(path) if path else (Path(BASE_DIR) / FOLDER_BAKU)
     tujuan.mkdir(parents=True, exist_ok=True)
@@ -43,8 +42,8 @@ def _nama_unik(tujuan: Path) -> str:
     return nama
 
 
-def buat(path_db: Optional[str] = None,
-         path_folder: Optional[str | Path] = None) -> Path:
+def buat(path_db: str | None = None,
+         path_folder: str | Path | None = None) -> Path:
     """Buat salinan database; kembalikan path berkas backup."""
     sumber = Path(path_db or config.db_path)
     if not sumber.exists():
@@ -68,8 +67,8 @@ def buat(path_db: Optional[str] = None,
     return sasaran
 
 
-def pastikan_harian(path_db: Optional[str] = None,
-                    path_folder: Optional[str | Path] = None) -> Optional[Path]:
+def pastikan_harian(path_db: str | None = None,
+                    path_folder: str | Path | None = None) -> Path | None:
     """Buat backup bila hari ini (WIB) belum ada; None bila sudah ada.
 
     Dipanggil di awal sesi supaya data aman tanpa perlu diingat pengguna
@@ -98,7 +97,7 @@ def _bersihkan(tujuan: Path) -> None:
             lama.unlink()
 
 
-def daftar(path_folder: Optional[str | Path] = None) -> List[dict]:
+def daftar(path_folder: str | Path | None = None) -> list[dict]:
     """Daftar backup terbaru lebih dulu: nama, ukuran, waktu."""
     tujuan = folder(path_folder)
     hasil = []
@@ -134,8 +133,8 @@ def _periksa(berkas: Path) -> None:
         raise ValueError(f"Backup rusak atau bukan database SQLite: {berkas.name}")
 
 
-def pulihkan(nama: str, path_db: Optional[str] = None,
-             path_folder: Optional[str | Path] = None) -> Path:
+def pulihkan(nama: str, path_db: str | None = None,
+             path_folder: str | Path | None = None) -> Path:
     """Kembalikan database dari backup. Database lama disimpan sebagai .bak."""
     tujuan = folder(path_folder)
     berkas = tujuan / Path(str(nama)).name  # cegah path keluar folder

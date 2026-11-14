@@ -12,7 +12,6 @@ tanpa perlu membuka Chrome.
 
 import re
 from pathlib import Path
-from typing import Dict, List, Optional
 
 _LABEL_FOR = re.compile(
     r"<label\b[^>]*\bfor=[\"']([^\"']+)[\"'][^>]*>(.*?)</label>",
@@ -40,11 +39,11 @@ def _bersih(teks: str) -> str:
     return " ".join(_TAG.sub(" ", str(teks or "")).split())
 
 
-def _atribut(tag: str) -> Dict[str, str]:
+def _atribut(tag: str) -> dict[str, str]:
     return {kunci.lower(): nilai for kunci, nilai in _ATTR.findall(tag)}
 
 
-def _label_untuk(html: str) -> Dict[str, str]:
+def _label_untuk(html: str) -> dict[str, str]:
     """Peta id -> teks label (`<label for="id">teks</label>`)."""
     hasil = {}
     for id_el, isi in _LABEL_FOR.findall(html):
@@ -54,7 +53,7 @@ def _label_untuk(html: str) -> Dict[str, str]:
     return hasil
 
 
-def _opsi_dari(html: str) -> List[Dict]:
+def _opsi_dari(html: str) -> list[dict]:
     """Opsi dari sekumpulan input radio/checkbox atau select."""
     peta = _label_untuk(html)
     opsi = []
@@ -89,7 +88,7 @@ def _opsi_dari(html: str) -> List[Dict]:
     return opsi
 
 
-def baca(berkas: str | Path) -> Dict:
+def baca(berkas: str | Path) -> dict:
     """Baca satu berkas debug dan kembalikan daftar pertanyaan."""
     path = Path(berkas)
     if not path.exists():
@@ -97,7 +96,7 @@ def baca(berkas: str | Path) -> Dict:
 
     html = path.read_text(encoding="utf-8", errors="ignore")
     peta = _label_untuk(html)
-    pertanyaan: List[Dict] = []
+    pertanyaan: list[dict] = []
 
     for blok in _FIELDSET.findall(html):
         cocok_legend = _LEGEND.search(blok)
@@ -127,7 +126,7 @@ def baca(berkas: str | Path) -> Dict:
 
     if not pertanyaan:
         # Tidak ada <fieldset>: kelompokkan radio berdasarkan atribut name.
-        nama_grup: Dict[str, List[Dict]] = {}
+        nama_grup: dict[str, list[dict]] = {}
         for cocok in _INPUT.finditer(html):
             tag = cocok.group(0)
             atribut = _atribut(tag)
@@ -163,7 +162,7 @@ def baca(berkas: str | Path) -> Dict:
     }
 
 
-def teks_laporan(hasil: Dict, semua: bool = False) -> str:
+def teks_laporan(hasil: dict, semua: bool = False) -> str:
     """Ringkasan yang mudah dibaca di terminal."""
     baris = [
         f"Berkas: {hasil['berkas']}",
@@ -189,7 +188,7 @@ def teks_laporan(hasil: Dict, semua: bool = False) -> str:
     return "\n".join(baris)
 
 
-def berkas_terakhir(folder: str | Path = "debug") -> Optional[Path]:
+def berkas_terakhir(folder: str | Path = "debug") -> Path | None:
     """Berkas debug terbaru (None bila belum ada)."""
     path = Path(folder)
     if not path.is_dir():

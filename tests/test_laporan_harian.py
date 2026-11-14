@@ -45,8 +45,13 @@ def test_simpan_menimpa_hari_yang_sama(tmp_path):
     assert len(list(tmp_path.glob("laporan-*.md"))) == 1
 
 
-def test_sisa_kuota_tanpa_batas():
+def test_kuota_per_situs_tanpa_batas():
     data = _data()
-    data["sisa_kuota"] = None
+    data["kuota_situs"] = [
+        {"situs": "glints", "nama": "Glints", "terpakai": 3, "batas": 50,
+         "sisa": 47},
+    ]
 
-    assert "Sisa kuota: tanpa batas" in laporan.teks_markdown(data)
+    teks = laporan.teks_markdown(data)
+
+    assert "Kuota per situs: Glints 3/50 (sisa 47)" in teks

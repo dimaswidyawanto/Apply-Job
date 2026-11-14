@@ -85,9 +85,14 @@ if "%PERLU%"=="0" (
 )
 
 if "%PERLU%"=="1" (
-    echo [2/3] Memasang dependensi ^(sekali saja, mohon tunggu^)...
-    ".venv\Scripts\python.exe" -m pip install --quiet --upgrade pip
-    ".venv\Scripts\python.exe" -m pip install --quiet -r requirements.txt
+    for /f %%V in ('".venv\Scripts\python.exe" -c "import sys;print(sys.version.split()[0])" 2^>nul') do set "PYVERSI=%%V"
+    echo [2/3] Memasang dependensi dengan Python %PYVERSI% ^(sekali saja^).
+    echo   Proses ini butuh 2-5 menit dan TIDAK menampilkan banyak tulisan.
+    echo   JANGAN tekan Ctrl+C; biarkan selesai. Setelah itu setiap perintah
+    echo   hanya butuh beberapa detik karena dependensi dilewati.
+    echo.
+    ".venv\Scripts\python.exe" -m pip install --upgrade pip
+    ".venv\Scripts\python.exe" -m pip install -r requirements.txt
     if errorlevel 1 goto :gagal
     copy /y requirements.txt ".venv\.deps-terpasang" >nul
 ) else (

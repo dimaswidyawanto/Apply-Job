@@ -180,7 +180,7 @@ cp .env.example .env
 | `EXCLUDE_KEYWORDS` | `principal,director,head,senior,lead` | Kata yang membuat judul otomatis ditolak |
 | `STRICT_LOCATION` | `false` | `true` = tolak lowongan yang lokasinya di luar `LOCATION` |
 | `REQUIRE_COMPANY_LOGO` | `true` | Wajib logo/gambar di **JobStreet & Glints**; Indeed dikecualikan karena kartunya tidak memuat logo |
-| `MAX_APPLY_PER_DAY` | `50` | Batas **lamaran yang dikirim** per hari. Bawaan **50** sesuai aturan (boleh diubah lewat `.env`); `0` = tanpa batas. Riset & penilaian tetap tanpa batas |
+| `MAX_APPLY_PER_DAY` | `50` | Target **sekaligus batas** lamaran **per situs per siklus 24 jam** (JobStreet 50, Glints 50, Indeed 50; hitungan terpisah, siklus dimulai dari lamaran pertama). `0` = tanpa batas. Riset & penilaian tetap tanpa batas |
 | `DELAY_BETWEEN_APPLY` | `3` | Jeda (detik) antar lowongan |
 | `MAKS_ULANG` | `2` | Auto recovery: berapa kali lowongan yang gagal karena sebab **sementara** (timeout, internet putus, Chrome lambat) dicoba ulang sebelum dicatat `failed`. `0` = tanpa ulang, maksimum `5`. Kesalahan permanen (mis. login habis) tidak pernah diulang |
 | `JEDA_ULANG` | `3` | Jeda (detik) sebelum mencoba ulang lowongan yang gagal sementara |
@@ -193,6 +193,7 @@ cp .env.example .env
 | `HEADLESS_MODE` | `false` | `true` = Chrome tanpa jendela (tidak cocok untuk tinjau manual) |
 | `TELEGRAM_BOT_TOKEN` | kosong | Opsional, untuk notifikasi |
 | `TELEGRAM_CHAT_ID` | kosong | Opsional, untuk notifikasi |
+| `CACHE_RISET_MENIT` | `60` | Cache hasil riset per kombinasi situs + kata kunci + lokasi + halaman selama N menit, supaya sesi kedua di siklus kuota yang sama tidak membaca situs dari nol. `0` = selalu ambil ulang; `--segar` memaksa ambil ulang sekali jalan |
 | `COLLECT_BEFORE_APPLY` | `true` | `true` = **riset dulu**: kumpulkan → dedup → nilai → peringkat → TOP 50 → lamar. `false` = lamar sambil mencari (hanya bila `MAX_APPLY_PER_DAY=0`) |
 | `RANK_BY` | `relevance` | Urutan pemilihan saat `COLLECT_BEFORE_APPLY=true`: `relevance` = kecocokan tertinggi dulu, `newest` = posting terbaru dulu |
 | `SORT_MODE` | `ListedDate` | Urutan hasil; `ListedDate` = terbaru dulu, `KeywordRelevance` = relevansi |
@@ -280,17 +281,27 @@ dijalankan — samakan dengan commit terakhir di GitHub.
 
 ### Kirim perubahan ke GitHub (otomatis)
 
-Perubahan dari sesi pengembangan sudah di-push otomatis ke cabang
-`arena/4ab2b9fa-dimastes`. Di PC Anda cukup menariknya:
+Perubahan dari sesi pengembangan digabungkan ke **`main`**, jadi di PC Anda
+cukup:
 
-```bash
-git branch --show-current     # pastikan cabangnya benar
-git pull
+```powershell
+.\tarik.bat
 ```
 
-Kalau `git branch --show-current` menampilkan `main` padahal pekerjaan terbaru
-ada di cabang `arena/4ab2b9fa-dimastes`, `git pull` **tidak** akan menarik apa
-pun. Pindah dulu: `git checkout arena/4ab2b9fa-dimastes` lalu `git pull`.
+`tarik.bat` menggabungkan `arena/main` (bukan cabang pengembangan tertentu).
+Sejak 2026-11-14 ada **jaring pengaman**: bila variabel `ARENA_CABANG` di
+terminal Anda masih menunjuk cabang sesi lama yang sudah dihapus di GitHub
+(gejalanya: `tarik.bat` menjawab “Already up to date” padahal ada perbaikan
+baru), skrip membandingkan dengan `arena/main` dan **ikut menarik `main`**.
+Skrip lalu mencetak `Versi sekarang: <commit> - <judul>` supaya Anda bisa
+memastikan kodenya benar-benar baru. Setara dengan perintah manual:
+
+```bash
+git pull origin main
+```
+
+Kalau ingin memastikan versi yang dipakai, bandingkan **Versi kode (commit)**
+di `python cli.py config` dengan commit terakhir di GitHub.
 
 Untuk mengirim perubahan **dari PC ke GitHub** cukup satu klik:
 
@@ -711,8 +722,24 @@ otomatis pada lamaran berikutnya. Jadi kuesioner berulang seperti ini:
 cukup Anda jawab **sekali**. Lamaran Glints/JobStreet berikutnya terisi sendiri,
 dan bot hanya berhenti bertanya untuk pertanyaan yang benar-benar baru.
 
-Yang dicatat: pilihan ganda (radio), dropdown, dan kolom teks — termasuk kolom
-gaji, tahun pengalaman, dan pendidikan bila Anda mengubahnya.
+Yang dicatat: pilihan ganda (radio), kotak centang (checkbox), dropdown, dan
+kolom teks — termasuk kolom gaji, tahun pengalaman, dan pendidikan bila Anda
+mengubahnya. Kotak centang disimpan sebagai satu daftar, mis. `Excel; SAP`,
+dan dipakai ulang apa adanya.
+
+Sejak pembaruan 2026-11-11 tiga celah yang membuat jawaban **tidak** terekam
+sudah ditutup:
+
+1. radio Glints sering berupa input asli yang **tersembunyi** di balik label —
+   dulu dilewati saat merekam;
+2. radio/checkbox yang **tanpa atribut `name`** — dulu diabaikan;
+3. formulir skala memakai **satu judul untuk beberapa keahlian**, sehingga
+   jawaban keahlian yang satu menimpa keahlian lain. Sekarang kuncinya
+   menyertakan nama keahlian, mis. `… — Microsoft Excel`.
+
+Formulir seperti pada tangkapan layar (Pelayanan Pelanggan / Kerja Tim /
+Microsoft Excel, masing-masing 4 tingkat) kini menyimpan tiga jawaban
+terpisah dan mengisinya kembali otomatis.
 
 Yang **tidak** dicatat: tebakan bot sendiri. Bila bot memilih "Dasar" lalu Anda
 mengubahnya menjadi "Ahli", yang diingat adalah "Ahli" (keadaan akhir formulir).
@@ -730,7 +757,35 @@ python cli.py jawaban                                  # lihat semua
 python cli.py jawaban --isi "Microsoft Excel=Ahli"     # isi manual
 python cli.py jawaban --hapus "Microsoft Excel"        # hapus satu
 python cli.py jawaban --reset                          # kosongkan
+python cli.py jawaban --rapikan                        # lihat jawaban bertentangan
+python cli.py jawaban --tetapkan "purchasing=3 years"  # samakan satu kelompok
 ```
+
+#### Jawaban bertentangan: `--rapikan` lalu `--tetapkan`
+
+Karena pertanyaan yang maksudnya sama bisa dijawab berbeda di lowongan
+berbeda, ingatan bisa berisi beberapa nilai untuk satu hal — misalnya
+pengalaman purchasing tercatat "Less than 1 year", "1 year", "2 tahun", dan
+"3 years". Dengan pencocokan berdasarkan maksud, nilai yang terpilih bisa
+berubah-ubah antar-lowongan.
+
+`--rapikan` menampilkan tabel kelompok yang bertentangan beserta berapa kali
+tiap nilai dipakai, dan kolom **Disarankan** berisi nilai yang paling sering
+dipakai. Itu hanya usulan — **nilai resminya Anda yang menentukan**. Setelah
+memilih, samakan semuanya dengan `--tetapkan`:
+
+```bash
+python cli.py jawaban --rapikan
+python cli.py jawaban --tetapkan "purchasing=3 years"
+```
+
+Perintah `--tetapkan` hanya mengubah pertanyaan dengan jenis yang sama
+(pengalaman tidak akan diisi nilai gaji) dan menyamakan semua tingkat jabatan
+("purchasing staff", "purchasing specialist", asal subjeknya sama). Nilai yang
+setara angkanya ("Rp 5 Jt" dengan "Rp 5 million") tidak dianggap bertentangan.
+
+Perintah `python cli.py status` menampilkan berapa jawaban yang sudah
+tersimpan, jadi Anda bisa memastikan ingatannya aktif sebelum menjalankan sesi.
 
 Matikan fitur ini dengan `python cli.py set-env INGAT_JAWABAN=false` bila ingin
 bot kembali menebak dari aturan bawaan setiap kali.
@@ -739,6 +794,25 @@ Pencocokan pertanyaan tidak peka huruf besar/kecil, spasi ganda, atau tanda
 baca, dan masih mengenali pertanyaan yang berubah sedikit (kemiripan teks
 ≥ 86%). Pertanyaan berbeda tetap dianggap berbeda — "Manajemen Rantai Pasokan"
 tidak akan memakai jawaban "Manajemen Persediaan".
+
+Sejak pembaruan 2026-11-12 ada pencocokan **berdasarkan maksud** untuk jenis
+pertanyaan terstruktur (pengalaman, gaji, pendidikan, bahasa, hak kerja,
+industri, ketersediaan, SIM). JobStreet sering menanyakan hal yang sama dengan
+kalimat berbeda:
+
+| Pertanyaan di lowongan | Jawaban yang dipakai |
+|---|---|
+| "How many years' experience do you have as a Purchasing Specialist?" | 1 year |
+| "How many years of experience do you have in a Purchasing role?" | 1 year (dipakai ulang) |
+| "Berapa tahun pengalaman kerjamu di bidang pengadaan?" | 1 year (dipakai ulang) |
+
+Untuk pilihan ganda bernilai angka, jawaban lama dicocokkan lewat nilainya —
+"Rp 5 Jt" = "Rp 5 million" = "Rp 5.000.000" — sehingga pertanyaan gaji tidak
+lagi dilewati hanya karena format angkanya berbeda.
+
+Aturan penting: bot **tidak mengarang jawaban baru**. Kalau jenis pertanyaannya
+belum pernah dijawab, lowongan tetap dilewati seperti sebelumnya. Pertanyaan
+persetujuan/hukum tetap tidak pernah diisi otomatis.
 
 ### Isian lamaran otomatis
 
@@ -757,6 +831,92 @@ manual).
 Pertanyaan pilihan wajib dari perusahaan (radio/select) **tidak** ditebak
 jawabannya, karena salah jawab lebih merugikan daripada tidak melamar.
 Lowongan seperti itu dilewati otomatis dan hanya dicatat di akhir sesi.
+Karena itu, makin lengkap ingatan jawaban Anda, makin sedikit lowongan yang
+dilewati — isi sekali lewat `python cli.py jawaban --isi "…=…"`.
+
+### Indeed: captcha berulang
+
+Indeed kadang menampilkan captcha/verifikasi. Bot menunggu sampai 60 detik
+supaya Anda bisa menyelesaikannya di jendela Chrome. Bila captcha tetap muncul
+pada dua pencarian berturut-turut, **riset Indeed dihentikan** dengan pesan
+jelas — sebelumnya bot tetap mencoba 180 kombinasi (sekitar 3 jam) tanpa satu
+lowongan pun. Selesaikan verifikasi, lalu jalankan Indeed lagi; sisa kuota
+tidak terpengaruh.
+
+### Indeed: formulir lamaran ada di dalam iframe
+
+Indeed Apply menampilkan formulir lamarannya di **iframe** `smartapply.indeed.com`,
+bukan di halaman utama. Sebelumnya bot mencari tombol "Lanjutkan"/"Kirim
+lamaran" hanya di dokumen utama, sehingga alur tidak pernah dikenali dan
+lamaran Indeed berakhir "perlu manual" — di sesi 12 Nov 2026: 84 perlu manual,
+**0 terkirim**. Sekarang bot masuk ke iframe itu lebih dulu (maks 8 detik),
+lalu kembali ke dokumen utama sebelum membuka lowongan berikutnya.
+
+Bila setelah pembaruan ini Indeed masih 0 terkirim, jalankan
+
+```bash
+python cli.py history --situs indeed --alasan --limit 20
+```
+
+Kolom **Alasan** berisi catatan bot untuk tiap lamaran (mis. "Tombol Lamar
+tidak ditemukan di halaman" atau "Lowongan menggunakan 'Lamar di situs
+perusahaan'"), sehingga penyebabnya bisa dipastikan dari data, bukan dugaan.
+
+Bila tombol Lamar **tidak ditemukan**, bot sekarang:
+
+1. membedakan tiga penyebab yang sering tertukar — sesi login habis
+   ("Indeed meminta login sebelum melamar"), halaman verifikasi
+   ("Indeed menampilkan verifikasi/captcha…"), atau halaman yang memang tanpa
+   tombol Lamar. Pada kasus login, sesi Indeed **dihentikan** agar tidak
+   menghabiskan 84 percobaan sia-sia;
+2. menyimpan bukti halaman ke folder `debug/` (HTML + screenshot + daftar
+   tombol yang terlihat) walau `AUTO_APPLY_DEBUG` tidak diisi — maksimal 5
+   berkas per sesi.
+
+Kalau Indeed masih gagal, kirimkan satu berkas `.txt` dari `debug/`: isinya
+URL, cuplikan halaman, dan daftar tombol yang benar-benar ada. Dari situ
+selector bisa diperbaiki berdasarkan HTML asli, bukan tebakan.
+
+### Indeed: blokir Cloudflare (bukan captcha biasa)
+
+Bila Indeed menampilkan halaman **"Diperlukan Verifikasi Tambahan"** (ID Ray,
+logo Cloudflare), itu **bukan** captcha biasa: tidak ada centang yang bisa
+diselesaikan program, dan halaman akan muncul lagi selama reputasi IP/profil
+dianggap bot. Bot sekarang:
+
+1. mengenali halaman itu dari teks **dan** judul tab ("Tunggu sebentar…",
+   "Just a moment…");
+2. **berhenti seketika** — tidak menunggu 60 detik untuk setiap kombinasi.
+   Sebelumnya 180 kombinasi × 60 detik ≈ 5943 detik berakhir nol lowongan;
+3. menyimpan bukti `debug/blokir-cloudflare-*.html` (+ PNG) sekali per sesi;
+4. memberi langkah lanjutan: selesaikan verifikasi di jendela Chrome, bila
+   berulang ganti jaringan (hotspot HP) atau tunggu 30–60 menit, lalu uji satu
+   halaman dengan `jalankan.bat indeed diagnosa`.
+
+Jumlah kombinasi riset **tidak dikurangi** — penghentian hanya karena blokir
+yang sedang berlangsung, dan sesi berikutnya tetap mengulang kombinasi yang
+belum tercakup.
+
+### Chrome antar-situs
+
+JobStreet, Glints, dan Indeed memakai profil Chrome yang sama agar sesi login
+tersimpan. Setelah satu situs selesai, Chrome-nya ditutup, tetapi butuh
+beberapa detik untuk melepas profil. Yang berlaku sekarang:
+
+1. Chrome buatan bot **selalu ditutup** di akhir situs. Dulu, bila
+   `CHROME_DEBUG_PORT` diisi tetapi menempel ke Chrome Anda gagal, Chrome
+   buatan bot itu dibiarkan hidup — profilnya tetap terkunci dan situs
+   berikutnya hangus (log 2026-11-13: Glints dan Indeed 0 lamaran).
+2. Sebelum situs berikutnya, bot menunggu sampai **20 detik** agar profil
+   dilepas.
+3. Bila masih terkunci, bot menutup Chrome **sisa sesi sebelumnya** yang
+   memakai folder profil bot (di Windows, lewat daftar proses) — Chrome pribadi
+   Anda dengan profil lain tidak tersentuh — lalu menunggu 10 detik lagi.
+4. Baru sesudah itu, bila profil benar-benar tidak bisa dipakai, bot turun ke
+   profil cadangan dan memberi tahu bahwa login perlu diulang.
+
+Kalau pesan "Profil masih terkunci" tetap muncul, tutup semua jendela Chrome
+lalu jalankan lagi.
 
 ### Mode otomatis (default)
 
@@ -784,10 +944,10 @@ meninjau sendiri.
 5. Di akhir sesi muncul daftar lowongan yang dilewati beserta alasannya —
    hanya informasi, tidak perlu Anda kerjakan.
 
-Batas pengaman: `MAX_APPLY_PER_DAY` (harian, bawaan **50**; `0` = tanpa batas),
-`AUTO_APPLY_MAX_PER_SESSION` (per sesi, bawaan **0** = tanpa batas), dan
-`DELAY_BETWEEN_APPLY` (jeda antar lamaran, tetap **3** detik agar tidak
-terlihat seperti bot).
+Batas pengaman: `MAX_APPLY_PER_DAY` (**50 per situs per siklus 24 jam**,
+`0` = tanpa batas), `AUTO_APPLY_MAX_PER_SESSION` (per sesi, bawaan **0** =
+tanpa batas), dan `DELAY_BETWEEN_APPLY` (jeda antar lamaran, tetap **3** detik
+agar tidak terlihat seperti bot).
 
 Dengan kedua batas `0`, sesi berjalan sampai lowongan habis atau Anda
 menghentikannya (Ctrl+C). Untuk memasang batas lagi:
@@ -796,9 +956,11 @@ menghentikannya (Ctrl+C). Untuk memasang batas lagi:
 python cli.py set-env MAX_APPLY_PER_DAY=100 AUTO_APPLY_MAX_PER_SESSION=50
 ```
 
-### Riset sebanyak mungkin → nilai → peringkat → TOP 50 → apply
+### Riset sebanyak mungkin → nilai → peringkat → 50 per situs → apply
 
-**50 adalah batas lamaran per hari, bukan batas riset.** Riset dibatasi
+**50 adalah target wajib per situs per hari, bukan batas riset.** JobStreet 50,
+Glints 50, Indeed 50 — hitungannya terpisah, jadi Glints tetap punya 50 slot
+walau JobStreet sudah 50. Riset dibatasi
 **halaman**, bukan jumlah lowongan: maksimal 3 halaman untuk setiap kombinasi
 kata kunci × lokasi. Alur yang dijalankan setiap `run`:
 
@@ -827,11 +989,13 @@ nilai kecocokan → peringkat → ambil TOP 50 → apply maksimal 50/hari
    di kartu tidak dihukum.
 4. **Peringkat.** `RANK_BY=relevance` (bawaan) = skor tertinggi dulu, bila
    sama yang paling baru. `RANK_BY=newest` = tanggal terbaru dulu.
-5. **TOP 50.** Sisa kuota hari ini = `MAX_APPLY_PER_DAY` − lamaran yang sudah
-   terkirim hari ini. Hanya **sebanyak sisa kuota** kandidat teratas yang
-   dilamar — dipilih **global** dari seluruh kategori dan lokasi, bukan 50 per
-   kategori/lokasi. Bila kandidat yang memenuhi kriteria kurang dari 50,
-   semuanya dilamar.
+5. **50 per situs per siklus.** Sisa kuota situs ini = `MAX_APPLY_PER_DAY` −
+   lamaran situs itu pada siklus 24 jam yang sedang berjalan. Hanya
+   **sebanyak sisa kuota**
+   kandidat teratas yang dilamar — dipilih **global** dari seluruh kategori
+   dan lokasi pada situs tersebut, bukan 50 per kategori/lokasi. Bila kandidat
+   yang memenuhi kriteria kurang dari 50, semuanya dilamar dan akhir sesi
+   menampilkan berapa yang masih kurang.
 
 ```bash
 python cli.py set-env MAX_APPLY_PER_DAY=50 COLLECT_BEFORE_APPLY=true RANK_BY=relevance
@@ -894,10 +1058,28 @@ Cara mempercepat (pilih sesuai kebutuhan):
 | `.\jalankan.bat set-env AUTO_ANSWER_WAIT=10` | Memotong waktu tunggu kuesioner per lowongan (20 → 10 detik) |
 | `.\jalankan.bat set-env DELAY_BETWEEN_APPLY=2` | Menghemat ±50 detik untuk 50 lamaran |
 
-Catatan: `MAX_APPLY_PER_DAY` adalah batas **per hari kalender** yang dihitung
-dari database, jadi menjalankan `run` dua kali dalam sehari tidak menambah
-kuota — sisanya yang dipakai. Bila kuota habis, program berhenti dengan pesan
-`Kuota lamaran hari ini sudah habis` dan tidak mengirim apa pun.
+### Cache riset (`CACHE_RISET_MENIT`)
+
+Menjalankan `run` dua kali dalam siklus kuota yang sama (untuk mengejar 50)
+tidak perlu membaca situs dari nol. Hasil satu kombinasi **situs + kata kunci +
+lokasi + halaman** disimpan di SQLite dan dipakai ulang selama
+`CACHE_RISET_MENIT` menit (bawaan 60). Saat dipakai, terminal menampilkan
+`Halaman 1 diambil dari cache riset (24 lowongan).`
+
+- `0` = cache dimatikan, selalu ambil ulang dari situs.
+- `--segar` = paksa ambil ulang sekali jalan: `jalankan.bat run --auto --segar`.
+- Cache tidak dipakai saat mengirim lamaran: setiap lamaran tetap membuka
+  halaman lowongannya sendiri, jadi lowongan yang sudah tutup tetap gagal
+  dengan aman (tidak dikirim dua kali).
+- Baris cache lebih tua dari 3 hari dibuang otomatis.
+
+Catatan: `MAX_APPLY_PER_DAY` memakai **siklus 24 jam bergulir per situs**,
+bukan hari kalender. Siklus dimulai pada lamaran pertama; slot ke-51 baru bisa
+dikirim 24 jam setelahnya. Contoh: mulai 20:30 → berikutnya besok 20:30, bukan
+besok 00:00. Menjalankan `run` dua kali dalam siklus yang sama tidak menambah
+slot — sisanya yang dipakai. Bila kuota satu situs habis, hanya situs itu yang
+berhenti; situs lain tetap jalan. Contoh pesan: `Kuota Glints untuk siklus 24
+jam ini sudah habis. Siklus baru dibuka besok 20:30.`
 
 Ingin kembali melamar sambil mencari (lebih cepat, tanpa perbandingan)?
 Itu hanya berlaku bila tidak ada batas harian:
@@ -924,7 +1106,7 @@ JobStreet dipakai sebagai acuan; Glints mengikuti aturan yang sama:
 | Saring judul/lokasi/gaji/kualifikasi | `JobFilter` | `JobFilter` yang sama |
 | Logo perusahaan | wajib (`REQUIRE_COMPANY_LOGO`) | wajib (sama) |
 | Skor 8 dimensi + ranking global | ya | ya |
-| TOP 50 global per hari, kuota dipakai bersama | ya (`kuota.py`) | ya (`kuota.py`) |
+| 50 per hari **per situs** (hitungan terpisah) | ya (`kuota.py`) | ya (`kuota.py`) |
 | Lewati yang sudah pernah dilamar (situs **dan** database) | ya | ya |
 | Lowongan yang hanya bisa dilamar via aplikasi | tidak berlaku | perlu manual (bukan dilewati) |
 | `AUTO_APPLY_MAX_PER_SESSION` | ya | ya |
@@ -932,15 +1114,19 @@ JobStreet dipakai sebagai acuan; Glints mengikuti aturan yang sama:
 | Mode manual `AUTO_APPLY=false` (tinjau lalu konfirmasi) | ya | ya |
 | Login habis → sesi berhenti + notifikasi Telegram | ya | ya |
 | Laporan harian Telegram di akhir sesi | ya | ya |
-| Pencarian per lokasi | `LOCATIONS` × kata kunci | satu pencarian nasional per kata kunci, hasil disaring `LOCATIONS` |
+| Pencarian per lokasi | `LOCATIONS` × kata kunci | `LOCATIONS` × kata kunci (parameter `location` di URL explore) |
 
 Dua perbedaan yang memang disengaja:
 
 1. **Glints selalu riset dulu** (tidak ada mode "lamar sambil mencari"),
    karena TOP 50 global hanya bisa ditentukan setelah semua hasil dinilai.
-2. **Pencarian Glints tidak per lokasi** — alamat explore-nya nasional
-   (`countryCode=ID`), jadi hasilnya lebih luas lalu disaring dengan
-   `LOCATIONS`. Aturan "semua lokasi tercakup" tetap terpenuhi.
+2. **Pencarian Glints kini per lokasi, sama seperti JobStreet.** Jumlah
+   kombinasi = kata kunci × lokasi (mis. 20 × 9 = 180), dengan parameter
+   `location` pada URL explore. Bila ternyata Glints mengabaikan parameter itu
+   (tidak ada kartu), bot otomatis kembali ke pencarian nasional per kata
+   kunci — sisa lokasi dilewati agar tidak mengulang kartu yang sama — dan
+   lokasi tetap disaring dari teks kartu (`STRICT_LOCATION`). Penyesuaian ini
+   terlihat di terminal: *"Glints mengabaikan parameter lokasi…"*.
 
 ### Paritas aturan Apply: JobStreet = Glints = Indeed
 
@@ -1133,6 +1319,36 @@ Opsi bisa ditambahkan pada berkas mana pun:
 .\Lamar Indeed.bat --max-pages 2
 .\Lamar Otomatis.bat --situs jobstreet,indeed
 ```
+
+### Situs tetap terpisah (JobStreet / Glints / Indeed)
+
+JobStreet yang sudah selesai **tidak ikut tersentuh** saat Anda mengerjakan
+Glints atau Indeed. Setiap situs punya pencatat sendiri: lowongan dikenali dari
+`job_id` + `sumber`, dan perintah di bawah hanya membaca/menulis situs yang
+disebut.
+
+| Perintah | Yang dijalankan |
+|---|---|
+| `python cli.py run --auto` | **JobStreet saja** (perilaku lama, tidak berubah) |
+| `python cli.py run --auto --situs glints` | Glints saja |
+| `python cli.py run --auto --situs indeed` | Indeed saja |
+| `python cli.py run --auto --situs semua` | JobStreet → Glints → Indeed |
+| `python cli.py status` | ringkasan **terpisah per situs** (tanpa membuka browser) |
+| `python cli.py history --situs glints` | riwayat lamaran Glints saja |
+| `python cli.py history --situs indeed --alasan` | riwayat Indeed + alasan yang dicatat bot |
+| `python cli.py antrean --situs indeed` | antrean Indeed saja |
+| `python cli.py stats` | total keseluruhan + tabel per situs |
+
+Contoh keluaran `status` (angka diambil dari database Anda sendiri):
+
+```powershell
+python cli.py status
+```
+
+Tabelnya memuat, per situs: jumlah lowongan, terkirim, perlu manual, gagal,
+ditolak, dan kedaluwarsa. `run` juga selalu mencetak baris pertama
+`Situs: ... — situs lain tidak dibuka`, jadi tidak ada lagi kebingungan situs
+mana yang sedang berjalan.
 
 Ingin ikon di Desktop? Jalankan sekali — keempat pintasan dibuat sekaligus:
 

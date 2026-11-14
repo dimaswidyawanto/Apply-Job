@@ -8,7 +8,6 @@ import contextlib
 import hashlib
 import re
 import time
-from typing import Dict, List, Optional
 from urllib.parse import urldefrag, urlencode, urljoin
 
 from rich.console import Console
@@ -20,6 +19,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
+import teks as teks_modul
 from auto_apply import ApplyResult, AutoApplier
 from browser import buka_chrome, tutup_chrome
 from config import config
@@ -77,8 +77,12 @@ ALREADY_APPLIED_MARKERS = (
 
 
 def _norm_teks(teks: str) -> str:
-    """Huruf kecil tanpa tanda baca, untuk membandingkan nama perusahaan."""
-    return re.sub(r"[^a-z0-9]+", "", (teks or "").lower())
+    """Huruf kecil tanpa tanda baca, untuk membandingkan nama perusahaan.
+
+    Isinya kini satu tempat dengan `jawaban` lewat `teks.kunci_nama()`
+    (audit E-12); nama lama dipertahankan supaya pemanggil lama tetap jalan.
+    """
+    return teks_modul.kunci_nama(teks)
 
 
 def logo_perusahaan(
@@ -162,7 +166,7 @@ class JobStreetBot:
 
         return False
 
-    def _login_status(self) -> Optional[bool]:
+    def _login_status(self) -> bool | None:
         """True = sudah login, False = belum, None = tidak pasti."""
         for selector in (
             "a[data-automation='signIn']",
@@ -287,10 +291,10 @@ class JobStreetBot:
     # Pencarian
     # ------------------------------------------------------------------
     def search_jobs(
-        self, keyword: str, page: int = 1, location: Optional[str] = None
-    ) -> List[Dict]:
+        self, keyword: str, page: int = 1, location: str | None = None
+    ) -> list[dict]:
         """Membuka hasil pencarian dan membaca lowongan yang dapat dikenali."""
-        jobs: List[Dict] = []
+        jobs: list[dict] = []
         seen_urls = set()
         seen_ids = set()
 
@@ -426,7 +430,7 @@ class JobStreetBot:
 
         return False, f"{len(gambar)} gambar tanpa logo"
 
-    def _parse_job_card(self, card) -> Optional[Dict]:
+    def _parse_job_card(self, card) -> dict | None:
         """Membaca satu kartu lowongan. Kartu tanpa judul/URL dilewati."""
         links = self._collect_job_links(card)
 
@@ -536,7 +540,7 @@ class JobStreetBot:
         return bool(baris & APPLIED_CARD_TEXTS)
 
     @staticmethod
-    def _parse_listing_age(text: str) -> Optional[int]:
+    def _parse_listing_age(text: str) -> int | None:
         """Mengubah label tanggal ("Hari ini", "3 hari yang lalu") jadi umur hari."""
         value = " ".join(str(text or "").split()).lower()
 
@@ -616,7 +620,7 @@ class JobStreetBot:
         )
 
     @staticmethod
-    def _read_card_value(card, selectors: List[str]) -> str:
+    def _read_card_value(card, selectors: list[str]) -> str:
         for selector in selectors:
             try:
                 element = card.find_element(By.CSS_SELECTOR, selector)
@@ -675,7 +679,7 @@ class JobStreetBot:
         )
         return any(marker in page_text for marker in markers)
 
-    def apply_job(self, job: Dict) -> ApplyResult:
+    def apply_job(self, job: dict) -> ApplyResult:
         """Melamar satu lowongan: otomatis bila AUTO_APPLY aktif, atau manual."""
         title = (job.get("title") or "").strip()
         job_url = (job.get("url") or "").strip()
@@ -706,7 +710,7 @@ class JobStreetBot:
         except Exception as exc:
             console.print(f"[yellow]Gagal mencatat lamaran: {exc}[/]")
 
-    def _apply_automatically(self, job: Dict, job_id: str) -> ApplyResult:
+    def _apply_automatically(self, job: dict, job_id: str) -> ApplyResult:
         title = (job.get("title") or "").strip()
         console.print(f"\n[bold magenta]{title}[/] [cyan](otomatis)[/]")
 
@@ -739,7 +743,7 @@ class JobStreetBot:
 
         return result
 
-    def _apply_manually(self, job: Dict, job_id: str) -> ApplyResult:
+    def _apply_manually(self, job: dict, job_id: str) -> ApplyResult:
         """Membuka halaman lowongan agar pengguna melamar sendiri."""
         title = (job.get("title") or "").strip()
         job_url = (job.get("url") or "").strip()
@@ -817,8 +821,12 @@ class JobStreetBot:
 
     def close(self):
         if self.driver:
-            tutup_chrome(self.driver)
+            # Pesan hanya dicetak bila Chrome benar-benar ditutup; dulu selalu
+            # "Chrome ditutup." walau Chrome dibiarkan hidup, sehingga sesi
+            # berikutnya gagal membuka profil yang masih terkunci.
+            benar_tertutup = tutup_chrome(self.driver)
             self.driver = None
             self.wait = None
 
-            console.print("[blue]Chrome ditutup.[/]")
+            if benar_tertutup:
+                console.print("[blue]Chrome ditutup.[/]")

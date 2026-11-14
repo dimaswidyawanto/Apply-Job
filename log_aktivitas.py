@@ -13,6 +13,11 @@ WIB = timezone(timedelta(hours=7))
 FOLDER = Path("logs")
 BERKAS = FOLDER / "aktivitas.log"
 MAKS_BARIS = 2000
+# Rotasi berbasis ukuran: berkas lama diganti nama menjadi aktivitas.log.1
+# (satu arsip). Tanpa ini berkas log tumbuh terus dan setiap penulisan harus
+# membaca seluruh isi untuk memangkas baris.
+MAKS_BYTE = 512 * 1024
+ARSIP = "aktivitas.log.1"
 
 
 def catat(pesan: str, tingkat: str = "info", folder: Path = FOLDER) -> None:
@@ -20,12 +25,27 @@ def catat(pesan: str, tingkat: str = "info", folder: Path = FOLDER) -> None:
     try:
         folder.mkdir(parents=True, exist_ok=True)
         berkas = folder / "aktivitas.log"
+        _rotasi(berkas)
         waktu = datetime.now(WIB).strftime("%Y-%m-%d %H:%M:%S")
         with berkas.open("a", encoding="utf-8") as f:
             f.write(f"{waktu} [{tingkat}] {str(pesan).strip()}\n")
         _pangkas(berkas)
     except OSError:
         pass
+
+
+def _rotasi(berkas: Path, maks_byte: int = MAKS_BYTE) -> None:
+    """Ganti nama log lama bila sudah melewati batas ukuran (satu arsip)."""
+    try:
+        if berkas.stat().st_size <= maks_byte:
+            return
+    except OSError:
+        return
+
+    with contextlib.suppress(OSError):
+        (berkas.parent / ARSIP).unlink()
+    with contextlib.suppress(OSError):
+        berkas.rename(berkas.parent / ARSIP)
 
 
 def _pangkas(berkas: Path, maks: int = MAKS_BARIS) -> None:

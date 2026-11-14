@@ -109,7 +109,7 @@ def test_rank_by_newest_mengembalikan_urutan_lama(siapkan, monkeypatch):
 
 
 def test_hanya_sebanyak_sisa_kuota_yang_dilamar(siapkan, monkeypatch):
-    mesin, database = siapkan
+    mesin, _database = siapkan
     monkeypatch.setattr(config, "max_apply_per_day", 2)
 
     mesin._kumpulkan_lalu_lamar()

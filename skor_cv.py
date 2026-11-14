@@ -21,7 +21,6 @@ ke skor lama, sehingga perilaku sistem tidak berubah diam-diam.
 """
 
 import re
-from typing import Dict, List, Optional
 
 from config import config
 
@@ -48,11 +47,11 @@ SINONIM = {
 
 KATEGORI = ((90, "Sangat sesuai"), (80, "Sesuai"), (70, "Cukup sesuai"))
 
-_potret: Dict[str, Dict] = {}
+_potret: dict[str, dict] = {}
 
 
 # ------------------------------------------------------------- profil CV ----
-def muat_profil(path: str = "") -> Optional[Dict]:
+def muat_profil(path: str = "") -> dict | None:
     """Baca profil CV sekali, lalu simpan di memori (hindari baca berulang)."""
     import cv as modul_cv
 
@@ -83,7 +82,7 @@ def lupakan() -> None:
 
 
 # ------------------------------------------------------------------ skor ----
-def _rasio(kata: List[str], teks: str) -> float:
+def _rasio(kata: list[str], teks: str) -> float:
     if not kata:
         return 0.0
     isi = teks.lower()
@@ -91,7 +90,7 @@ def _rasio(kata: List[str], teks: str) -> float:
     return cocok / len(kata)
 
 
-def _pengalaman(profil: Dict, job: Dict) -> float:
+def _pengalaman(profil: dict, job: dict) -> float:
     """0..1 — CV memenuhi pengalaman yang diminta lowongan."""
     punya = profil.get("pengalaman_tahun")
     diminta = _pengalaman_diminta(job)
@@ -107,7 +106,7 @@ def _pengalaman(profil: Dict, job: Dict) -> float:
     return max(0.0, punya / diminta)
 
 
-def _pengalaman_diminta(job: Dict) -> Optional[int]:
+def _pengalaman_diminta(job: dict) -> int | None:
     teks = f"{job.get('title') or ''} {job.get('description') or ''}".lower()
     pola = (
         r"minimal\s*(\d{1,2})\s*(?:tahun|year)",
@@ -121,7 +120,7 @@ def _pengalaman_diminta(job: Dict) -> Optional[int]:
     return min(angka) if angka else None
 
 
-def _keterampilan(profil: Dict, job: Dict) -> float:
+def _keterampilan(profil: dict, job: dict) -> float:
     teks = f"{job.get('title') or ''} {job.get('description') or ''}"
     kata = profil.get("keterampilan") or []
     if not kata:
@@ -130,7 +129,7 @@ def _keterampilan(profil: Dict, job: Dict) -> float:
     return min(1.0, _rasio(kata, teks) * 2)  # 50% kata cocok sudah penuh
 
 
-def _tanggung_jawab(profil: Dict, job: Dict) -> float:
+def _tanggung_jawab(profil: dict, job: dict) -> float:
     teks = f"{job.get('title') or ''} {job.get('description') or ''}".lower()
     bidang_cv = profil.get("bidang") or []
 
@@ -150,7 +149,7 @@ def _tanggung_jawab(profil: Dict, job: Dict) -> float:
     return 0.5 if any(k in teks for k in semua) else 0.0
 
 
-def _pendidikan(profil: Dict, job: Dict) -> float:
+def _pendidikan(profil: dict, job: dict) -> float:
     import cv as modul_cv
 
     milik = modul_cv.peringkat_pendidikan(profil.get("pendidikan"))
@@ -163,7 +162,7 @@ def _pendidikan(profil: Dict, job: Dict) -> float:
     return 1.0 if milik >= diminta else 0.4
 
 
-def _pendidikan_diminta(job: Dict) -> Optional[int]:
+def _pendidikan_diminta(job: dict) -> int | None:
     import cv as modul_cv
 
     teks = f"{job.get('title') or ''} {job.get('description') or ''}".lower()
@@ -173,7 +172,7 @@ def _pendidikan_diminta(job: Dict) -> Optional[int]:
     return None
 
 
-def _jabatan(profil: Dict, job: Dict) -> float:
+def _jabatan(profil: dict, job: dict) -> float:
     judul = str(job.get("title") or "").lower()
     bidang_cv = profil.get("bidang") or []
 
@@ -188,7 +187,7 @@ def _jabatan(profil: Dict, job: Dict) -> float:
     return 0.0
 
 
-def _lokasi(profil: Dict, job: Dict) -> float:
+def _lokasi(profil: dict, job: dict) -> float:
     lokasi = str(job.get("location") or "").strip().lower()
 
     if not lokasi:
@@ -216,7 +215,7 @@ def kategori(skor: float) -> str:
     return "Tidak diprioritaskan"
 
 
-def hitung(job: Dict, profil: Optional[Dict] = None) -> Optional[Dict]:
+def hitung(job: dict, profil: dict | None = None) -> dict | None:
     """Skor 0-100 per parameter. None bila CV belum tersedia."""
     profil = profil or muat_profil()
     if not profil:
@@ -244,7 +243,7 @@ def hitung(job: Dict, profil: Optional[Dict] = None) -> Optional[Dict]:
     }
 
 
-def terapkan(job: Dict, profil: Optional[Dict] = None) -> Optional[Dict]:
+def terapkan(job: dict, profil: dict | None = None) -> dict | None:
     """Hitung dan tempelkan hasil skor ke dict lowongan."""
     hasil = hitung(job, profil)
     if not hasil:
@@ -258,7 +257,7 @@ def terapkan(job: Dict, profil: Optional[Dict] = None) -> Optional[Dict]:
     return hasil
 
 
-def saring_minimal(kandidat: List[Dict], minimal: Optional[int] = None,
+def saring_minimal(kandidat: list[dict], minimal: int | None = None,
                    skor_sudah: bool = False) -> tuple:
     """Pisahkan kandidat yang skornya memenuhi `MIN_SKOR_CV`.
 
@@ -286,7 +285,7 @@ def saring_minimal(kandidat: List[Dict], minimal: Optional[int] = None,
     return lolos, dibuang
 
 
-def tabel_rincian(kandidat: List[Dict], maksimal: int = 5) -> List[List[str]]:
+def tabel_rincian(kandidat: list[dict], maksimal: int = 5) -> list[list[str]]:
     """Baris siap tampil untuk tabel CLI."""
     baris = []
     for job in kandidat[:maksimal]:

@@ -8,7 +8,8 @@ Aturan Indeed **sama persis dengan JobStreet**:
 * saring dengan `JobFilter` yang sama (judul, lokasi, gaji `MIN_SALARY`,
   kualifikasi) + wajib logo perusahaan bila `REQUIRE_COMPANY_LOGO=true`,
 * skor 8 dimensi lalu ranking global, ambil yang terbaik sebanyak sisa kuota,
-* kuota harian dari `kuota.py` — **dipakai bersama** JobStreet dan Glints,
+* kuota harian dari `kuota.py` — dihitung **per situs** (Indeed punya
+  hitungan sendiri; tidak memakai jatah JobStreet/Glints),
 * `AUTO_APPLY_MAX_PER_SESSION`, `DELAY_BETWEEN_APPLY`,
 * lewati lowongan yang sudah pernah dilamar (tanda situs **dan** database),
 * mode manual `AUTO_APPLY=false`, login habis menghentikan sesi,
@@ -19,7 +20,6 @@ Aturan Indeed **sama persis dengan JobStreet**:
 import contextlib
 import re
 import time
-from typing import Dict, List, Optional
 from urllib.parse import quote_plus
 
 from rich.console import Console
@@ -28,6 +28,7 @@ from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.common.by import By
 
 import antrean
+import cache_riset
 import kendali
 import kuota
 import log_aktivitas
@@ -83,6 +84,23 @@ TEKS_SITUS_LAIN = (
     "melamar di situs perusahaan",
 )
 
+# Halaman tantangan Cloudflare ("Diperlukan Verifikasi Tambahan" dengan ID Ray).
+# Ini BUKAN captcha biasa: tidak ada centang yang bisa diklik program dan
+# halaman akan muncul lagi selama reputasi IP/profil dianggap bot. Dikenali
+# dari badan halaman maupun judul tab, karena halaman ini memakai judul
+# jenisnya sendiri ("Tunggu sebentar...", "Just a moment...").
+PENANDA_BLOKIR_CLOUDFLARE = (
+    "verifikasi tambahan",
+    "additional verification",
+    "melakukan verifikasi",
+    "verify you are human",
+    "verifikasi anda",
+    "just a moment",
+    "tunggu sebentar",
+    "attention required",
+    "cloudflare",
+)
+
 # Teks khas Indeed saat lamaran sudah terkirim.
 SUKSES_INDEED = (
     "lamaran anda telah dikirim",
@@ -94,12 +112,15 @@ SUKSES_INDEED = (
 )
 
 # Teks khas Indeed saat lowongan sudah pernah dilamar.
+# Catatan: kata "applied" sendirian sengaja TIDAK dipakai — di halaman Indeed
+# kata itu muncul di banyak tempat ("applied filters", "Applied"), sehingga
+# lowongan yang belum pernah dilamar bisa tercatat sudah dilamar.
 SUDAH_DILAMAR_TEXTS = (
     "anda sudah melamar",
     "sudah pernah melamar",
     "you have already applied",
+    "you've applied",
     "sudah dilamar",
-    "applied",
 )
 
 # Skrip pembaca kartu: dibaca dari tautan `jk=` agar tahan perubahan kelas CSS.
@@ -243,7 +264,7 @@ def logo_kartu_indeed(kandidat, perusahaan: str = "") -> tuple:
     return False, "gambar pengganti"
 
 
-def rapikan_kartu(data: Dict) -> Optional[Dict]:
+def rapikan_kartu(data: dict) -> dict | None:
     """Ubah hasil pembaca kartu menjadi dict lowongan; None bila tidak layak."""
     if not isinstance(data, dict):
         return None
@@ -280,7 +301,7 @@ def rapikan_kartu(data: Dict) -> Optional[Dict]:
     }
 
 
-def alasan_tidak_layak(job: Dict, saringan: Optional[JobFilter] = None) -> str:
+def alasan_tidak_layak(job: dict, saringan: JobFilter | None = None) -> str:
     """Alasan lowongan tidak dicoba dilamar ('' bila layak).
 
     Memakai aturan tunggal JobStreet (`job_filter.alasan_tidak_layak`), tanpa
@@ -340,6 +361,40 @@ class IndeedApplier(AutoApplier):
     success_texts = SUKSES_INDEED
     already_texts = SUDAH_DILAMAR_TEXTS
 
+    # Indeed Apply menampilkan formulir lamaran di dalam iframe smartapply.
+    # Tanpa masuk ke iframe ini, tombol "Lanjutkan"/"Kirim lamaran" tidak
+    # pernah terlihat sehingga semua lamaran berakhir "perlu manual".
+    kerangka_lamaran_selectors = (
+        "iframe#indeedapply-modal-iframe",
+        "iframe[id*='indeedapply']",
+        "iframe[src*='indeedapply']",
+        "iframe[src*='smartapply']",
+    )
+    kerangka_lamaran_host = ("indeed.com", "indeedapply")
+
+    # Indeed menampilkan ajakan masuk, bukan tombol Lamar, bila sesi login
+    # habis. Tanpa deteksi ini, 84 lamaran tercatat "tombol tidak ditemukan"
+    # padahal penyebabnya login — dan sesi tidak berhenti.
+    petunjuk_login = (
+        "masuk untuk melamar",
+        "masuk untuk melanjutkan",
+        "sign in to apply",
+        "sign in to continue",
+        "log in to apply",
+        "masuk atau daftar",
+        "masuk ke indeed",
+        "sign in to indeed",
+    )
+
+    # Halaman verifikasi/captcha Indeed pada halaman lowongan, termasuk
+    # tantangan Cloudflare ("Diperlukan Verifikasi Tambahan").
+    petunjuk_verifikasi = (
+        "are you a human",
+        "unusual traffic",
+        "captcha",
+        "konfirmasi bahwa anda",
+    ) + PENANDA_BLOKIR_CLOUDFLARE
+
     def __init__(self, driver, wait=None):
         super().__init__(driver, wait)
 
@@ -347,15 +402,68 @@ class IndeedApplier(AutoApplier):
         self.step_timeout = max(self.step_timeout, 12)
         self.submit_timeout = max(self.submit_timeout, 30)
 
+    def _ada_tombol_lamar(self) -> bool:
+        return self._cari_tombol_lamar() is not None
+
+    def _is_login_page(self) -> bool:
+        """Halaman Indeed meminta masuk, bukan menawarkan Lamar."""
+        if super()._is_login_page():
+            return True
+
+        # Ajakan masuk bisa muncul sebagai panel di halaman lowongan (tanpa
+        # kolom sandi), jadi teks halaman yang diperiksa. Pemeriksaan teks
+        # didahulukan supaya halaman normal (mayoritas) tidak perlu memindai
+        # seluruh tombol — pemindaian itu mahal di halaman Indeed yang besar.
+        teks = self._body_text()
+        if not any(pola in teks for pola in self.petunjuk_login):
+            return False
+
+        # Bila tombol Lamar tetap ada, ajakan masuk itu hanya hiasan halaman.
+        return not self._ada_tombol_lamar()
+
+    def _blocker(self) -> str:
+        """Alasan yang lebih jelas daripada "tombol Lamar tidak ditemukan"."""
+        alasan = super()._blocker()
+        if alasan:
+            return alasan
+
+        teks = self._body_text()
+
+        if any(pola in teks for pola in PENANDA_BLOKIR_CLOUDFLARE):
+            return (
+                "Indeed diblokir Cloudflare (halaman \"Diperlukan Verifikasi "
+                "Tambahan\") — selesaikan verifikasi di jendela Chrome; bila "
+                "berulang, ganti jaringan atau tunggu 30-60 menit"
+            )
+
+        if any(pola in teks for pola in self.petunjuk_verifikasi):
+            return (
+                "Indeed menampilkan verifikasi/captcha saat membuka lowongan — "
+                "selesaikan di jendela Chrome lalu jalankan ulang"
+            )
+
+        if any(pola in teks for pola in self.petunjuk_login):
+            return (
+                "Indeed meminta login sebelum melamar — login di jendela "
+                "Chrome (profil bot) lalu jalankan ulang"
+            )
+
+        return ""
+
 
 class IndeedBot:
     """Mesin Indeed: buka pencarian, baca kartu, lalu melamar."""
+
+    # Setelah sekian halaman berturut-turut tetap captcha, riset dihentikan:
+    # menunggu 60 detik × 180 kombinasi = 3 jam untuk nol lowongan.
+    BATAS_CAPTCHA_BERTURUT = 2
 
     def __init__(self):
         self.driver = None
         self.filters = JobFilter()
         self.login_expired = False
-        self.diagnosa_terakhir: Dict = {}
+        self.diagnosa_terakhir: dict = {}
+        self.captcha_berturut = 0
 
     # ------------------------------ browser ---------------------------
     def init_browser(self):
@@ -418,7 +526,7 @@ class IndeedBot:
         return False
 
     # --------------------------- pencarian ----------------------------
-    def _tautan_kartu(self) -> List[str]:
+    def _tautan_kartu(self) -> list[str]:
         try:
             elemen = self.driver.find_elements(By.CSS_SELECTOR, "a[href*='jk=']")
         except Exception:
@@ -435,7 +543,7 @@ class IndeedBot:
 
         return hasil
 
-    def _tunggu_kartu(self, detik: Optional[int] = None) -> int:
+    def _tunggu_kartu(self, detik: int | None = None) -> int:
         """Tunggu sampai tautan lowongan muncul (SEARCH_WAIT detik)."""
         batas = time.time() + max(
             3, int(detik if detik is not None else config.search_wait)
@@ -463,6 +571,12 @@ class IndeedBot:
         self.driver.get(url)
         time.sleep(1)
 
+        # Tantangan Cloudflare dicek lebih dulu: menunggu 60 detik tidak akan
+        # menolong, dan setiap kombinasi berikutnya hanya menambah skor bot.
+        if self.diblokir_cloudflare():
+            self._laporkan_blokir(url)
+            return False
+
         if self.kena_captcha():
             console.print(
                 "[bold yellow]Indeed menampilkan verifikasi/captcha. "
@@ -471,6 +585,13 @@ class IndeedBot:
             batas = time.time() + 60
             while time.time() < batas and self.kena_captcha():
                 time.sleep(2)
+
+            if self.kena_captcha():
+                self.captcha_berturut += 1
+            else:
+                self.captcha_berturut = 0
+        else:
+            self.captcha_berturut = 0
 
         jumlah = self._tunggu_kartu()
         if jumlah:
@@ -488,6 +609,44 @@ class IndeedBot:
             tanda in teks
             for tanda in ("unusual traffic", "captcha", "verifikasi")
         )
+
+    def diblokir_cloudflare(self) -> bool:
+        """True bila halaman ini halaman tantangan Cloudflare."""
+        gabungan = f"{self._teks_halaman()} {self._judul_halaman().lower()}"
+        return any(tanda in gabungan for tanda in PENANDA_BLOKIR_CLOUDFLARE)
+
+    def _laporkan_blokir(self, url: str = "") -> None:
+        """Laporkan blokir Cloudflare sekali per sesi, lalu hentikan riset.
+
+        Tanpa ini, bot menunggu 60 detik untuk setiap kombinasi kata kunci ×
+        lokasi (180 kombinasi ≈ 5943 detik) dan menghasilkan nol lowongan.
+        """
+        # Blokir dihitung sebagai captcha yang sudah mencapai batas, sehingga
+        # semua pemeriksaan penghentian yang ada langsung berlaku.
+        self.captcha_berturut = self.BATAS_CAPTCHA_BERTURUT
+
+        if getattr(self, "blokir_dilaporkan", False):
+            return
+
+        self.blokir_dilaporkan = True
+        console.print(
+            "[bold red]Indeed diblokir Cloudflare[/] — halaman "
+            '"Diperlukan Verifikasi Tambahan" (bukan captcha biasa).'
+        )
+        console.print(
+            "[yellow]Halaman ini tidak bisa diselesaikan otomatis dan "
+            "muncul lagi selama reputasi IP/profil dianggap bot.[/]"
+        )
+        if url:
+            console.print(f"[dim]Halaman: {url}[/]")
+        console.print(
+            "[dim]Langkah: 1) selesaikan verifikasi di jendela Chrome; "
+            "2) bila berulang, ganti jaringan (hotspot HP) atau tunggu "
+            "30-60 menit; 3) uji satu halaman dulu dengan "
+            'jalankan.bat indeed diagnosa[/]'
+        )
+        with contextlib.suppress(Exception):
+            self.simpan_diagnosa("blokir-cloudflare", "")
 
     def _halaman_berikutnya(self) -> bool:
         """Klik tombol halaman berikutnya; False bila tidak ada."""
@@ -551,12 +710,12 @@ class IndeedBot:
         return hasil
 
     def cari(self, keyword: str, halaman: int = 0,
-             location: str = "") -> List[Dict]:
+             location: str = "") -> list[dict]:
         """Kumpulkan lowongan Indeed: satu kata kunci, maksimal `halaman` muat."""
         if not self.buka_pencarian(keyword, location):
             return []
 
-        lowongan: List[Dict] = []
+        lowongan: list[dict] = []
         sudah_ada = set()
 
         def serap() -> int:
@@ -734,7 +893,7 @@ class IndeedBot:
             return " ".join(str(self.driver.title or "").split())
         return ""
 
-    def simpan_diagnosa(self, awalan: str = "indeed", keyword: str = "") -> Dict:
+    def simpan_diagnosa(self, awalan: str = "indeed", keyword: str = "") -> dict:
         """Simpan HTML + screenshot dan laporkan penyebab kartu tidak terbaca."""
         folder = folder_debug()
         cap = f"{awalan}-{time.strftime('%Y%m%d-%H%M%S')}"
@@ -795,19 +954,22 @@ class IndeedBot:
 # ----------------------------------------------------------------------
 # Alur utama
 # ----------------------------------------------------------------------
-def kumpulkan_lowongan(bot: IndeedBot, kata_kunci: List[str],
+def kumpulkan_lowongan(bot: IndeedBot, kata_kunci: list[str],
                        halaman: int,
-                       lokasi: Optional[List[str]] = None) -> List[Dict]:
+                       lokasi: list[str] | None = None) -> list[dict]:
     """Riset Indeed: semua lokasi × kata kunci, dedupe, maksimal 5 halaman."""
     daftar_lokasi = list(lokasi if lokasi is not None else config.locations) or [""]
     halaman = max(1, min(int(halaman or 1), MAKS_HALAMAN_RISET))
-    lowongan: List[Dict] = []
+    lowongan: list[dict] = []
     terlihat = set()
     duplikat = 0
 
     total = len(daftar_lokasi) * len(kata_kunci)
     selesai = 0
     mulai = time.monotonic()
+    batas_captcha = getattr(
+        bot, "BATAS_CAPTCHA_BERTURUT", IndeedBot.BATAS_CAPTCHA_BERTURUT
+    )
 
     console.print(
         f"[bold blue]RISET INDEED[/] — {len(kata_kunci)} kata kunci × "
@@ -816,7 +978,13 @@ def kumpulkan_lowongan(bot: IndeedBot, kata_kunci: List[str],
     )
 
     for location in daftar_lokasi:
+        if getattr(bot, "captcha_berturut", 0) >= batas_captcha:
+            break
+
         for keyword in kata_kunci:
+            if getattr(bot, "captcha_berturut", 0) >= batas_captcha:
+                break
+
             kata = str(keyword or "").strip()
             if not kata:
                 continue
@@ -827,7 +995,22 @@ def kumpulkan_lowongan(bot: IndeedBot, kata_kunci: List[str],
                 + f" — muat sampai {halaman} halaman[/]"
             )
 
-            kartu = bot.cari(kata, max(0, halaman - 1), location=location)
+            kunci_cache = cache_riset.kunci(
+                "indeed", kata, location, halaman
+            )
+            kartu = cache_riset.ambil(kunci_cache, situs="indeed")
+
+            if kartu is None:
+                kartu = bot.cari(
+                    kata, max(0, halaman - 1), location=location
+                )
+                cache_riset.simpan(kunci_cache, kartu, situs="indeed")
+            else:
+                console.print(
+                    f"[dim]Cache riset Indeed dipakai '{kata}'"
+                    + (f" — {location}" if location else "")
+                    + f" ({len(kartu)} lowongan).[/]"
+                )
 
             baru = 0
             for job in kartu:
@@ -850,6 +1033,23 @@ def kumpulkan_lowongan(bot: IndeedBot, kata_kunci: List[str],
                 f"{len(lowongan)} lowongan, {lama:.0f} detik berlalu — "
                 f"perkiraan sisa {sisa:.0f} detik.[/]"
             )
+
+    if getattr(bot, "blokir_dilaporkan", False):
+        console.print(
+            "[bold red]Riset Indeed dihentikan:[/] Cloudflare memblokir "
+            "pencarian, jadi kombinasi berikutnya tidak dijalankan. Selesaikan "
+            "verifikasi di jendela Chrome (atau ganti jaringan/tunggu "
+            "30-60 menit), lalu jalankan Indeed lagi — sisa kuota tidak "
+            "terpengaruh dan riset akan mengulang dari kombinasi yang belum "
+            "tercakup."
+        )
+    elif getattr(bot, "captcha_berturut", 0) >= batas_captcha:
+        console.print(
+            "[bold yellow]Riset Indeed dihentikan:[/] captcha/verifikasi muncul "
+            f"{batas_captcha} kali berturut-turut. Selesaikan verifikasi di "
+            "jendela Chrome (atau tunggu beberapa saat), lalu jalankan "
+            "Indeed lagi — sisa kuota tidak terpengaruh."
+        )
 
     sebelum = len(lowongan)
     lowongan = dedupe_jobs(lowongan)
@@ -874,7 +1074,9 @@ def tampilkan_konfigurasi() -> None:
     tabel.add_row("Mode lamar", mode)
     tabel.add_row(
         "Kuota lamaran",
-        f"{batas_harian} per hari" if batas_harian else "tanpa batas",
+        f"{batas_harian} per hari (khusus Indeed)"
+        if batas_harian
+        else "tanpa batas",
     )
     tabel.add_row(
         "Batas per sesi", f"{batas_sesi} lamaran" if batas_sesi else "tanpa batas"
@@ -897,7 +1099,7 @@ def tampilkan_konfigurasi() -> None:
     console.print(tabel)
 
 
-def jalankan_indeed(max_pages: int = 0, keywords: Optional[List[str]] = None,
+def jalankan_indeed(max_pages: int = 0, keywords: list[str] | None = None,
                     batas: int = 0, laporan_harian: bool = True) -> dict:
     """Riset → saring → peringkat → lamar di Indeed, aturan sama JobStreet."""
     kata_kunci = list(keywords) if keywords else config.keywords_riset
@@ -933,7 +1135,7 @@ def jalankan_indeed(max_pages: int = 0, keywords: Optional[List[str]] = None,
         if batas_riset and len(lowongan) > batas_riset:
             lowongan = lowongan[:batas_riset]
 
-        layak: List[Dict] = []
+        layak: list[dict] = []
         sudah = JobFilter()
 
         for job in lowongan:
@@ -969,13 +1171,15 @@ def jalankan_indeed(max_pages: int = 0, keywords: Optional[List[str]] = None,
             console.print("[yellow]Tidak ada lowongan Indeed yang lolos filter.[/]")
             return laporan
 
-        console.print(f"[cyan]{kuota.ringkasan(db)}[/]")
+        console.print(f"[cyan]{kuota.ringkasan(db, situs='indeed')}[/]")
 
-        if kuota.habis(db):
-            console.print(f"[bold yellow]{kuota.pesan_habis()}[/]")
+        if kuota.habis(db, situs="indeed"):
+            console.print(
+                f"[bold yellow]{kuota.pesan_habis('indeed')}[/]"
+            )
             return laporan
 
-        sisa = kuota.sisa(db)
+        sisa = kuota.sisa(db, situs="indeed")
         dipilih = pilih_teratas(layak, sisa or 0)
 
         if sisa is not None and len(layak) > sisa:
@@ -995,7 +1199,7 @@ def jalankan_indeed(max_pages: int = 0, keywords: Optional[List[str]] = None,
             if batas and laporan["dilamar"] >= batas:
                 console.print("[yellow]Batas lamaran sesi ini tercapai.[/]")
                 break
-            if kuota.habis(db):
+            if kuota.habis(db, situs="indeed"):
                 console.print("[yellow]Batas lamaran harian tercapai.[/]")
                 break
             if batas_sesi and laporan["dilamar"] >= batas_sesi:
@@ -1081,9 +1285,9 @@ def jalankan_indeed(max_pages: int = 0, keywords: Optional[List[str]] = None,
     return laporan
 
 
-def daftar_kandidat(keywords: Optional[List[str]] = None,
+def daftar_kandidat(keywords: list[str] | None = None,
                     max_pages: int = 1, batas: int = 10,
-                    semuanya: bool = False) -> List[Dict]:
+                    semuanya: bool = False) -> list[dict]:
     """Lowongan Indeed yang layak dilamar (tanpa melamar)."""
     kata_kunci = list(keywords or config.keywords)
     bot = IndeedBot()
@@ -1109,7 +1313,7 @@ def daftar_kandidat(keywords: Optional[List[str]] = None,
     return hasil[:batas] if batas and batas > 0 else hasil
 
 
-def diagnosa_indeed(keyword: str = "", location: str = "") -> Dict:
+def diagnosa_indeed(keyword: str = "", location: str = "") -> dict:
     """Periksa mengapa kartu Indeed tidak terbaca (HTML + PNG disimpan)."""
     kata = (keyword or "").strip()
     if not kata:
@@ -1123,7 +1327,7 @@ def diagnosa_indeed(keyword: str = "", location: str = "") -> Dict:
         lokasi = config.locations[0]
 
     bot = IndeedBot()
-    info: Dict = {}
+    info: dict = {}
 
     try:
         bot.init_browser()

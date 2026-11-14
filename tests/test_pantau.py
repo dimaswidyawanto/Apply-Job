@@ -101,7 +101,7 @@ def test_commit_belum_terkirim_ikut_dikirim(tmp_path):
 # ----------------------------------------------------------------------
 def test_menarik_pembaruan_dari_repo_pengembangan(tmp_path, monkeypatch):
     """Commit baru di repo pengembangan masuk otomatis, tanpa perintah manual."""
-    remote, kerja = _siapkan(tmp_path)
+    _remote, kerja = _siapkan(tmp_path)
 
     asal = tmp_path / "asal.git"
     _git(tmp_path, "init", "-q", "--bare", "-b", "main", str(asal))

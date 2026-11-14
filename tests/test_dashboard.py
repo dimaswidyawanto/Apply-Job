@@ -263,7 +263,7 @@ def test_halaman_memuat_kontrol_baru():
 def _skrip() -> str:
     import re
 
-    return re.search(r"<script>(.*)</script>", dashboard.HALAMAN, re.S).group(1)
+    return re.search(r"<script>(.*)</script>", dashboard.HALAMAN, re.DOTALL).group(1)
 
 
 def _galat_kutip(js: str) -> list:

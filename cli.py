@@ -7,6 +7,7 @@ from pathlib import Path
 from rich.console import Console
 from rich.table import Table
 
+import cache_riset
 from config import MAKS_HALAMAN_RISET, batas_halaman_riset, config
 from database import db
 
@@ -232,13 +233,17 @@ def diagnosa_form(berkas: str = "", semua: bool = False):
     console.print(df.teks_laporan(hasil, semua=semua))
 
 
-def tampilkan_antrean(batas: int = 20):
+def tampilkan_antrean(batas: int = 20, situs: str = ""):
     """Lihat isi antrean: sebaran status + lowongan yang perlu ditinjau."""
+    from database import _situs_sql
     from database import db as _db
 
-    hitung = _db.hitung_status_antrean()
+    hitung = _db.hitung_status_antrean(situs)
 
-    ringkas = Table(title="Antrean lowongan")
+    judul = "Antrean lowongan"
+    if situs:
+        judul = f"Antrean lowongan — {situs.title()}"
+    ringkas = Table(title=judul)
     ringkas.add_column("Status", style="cyan")
     ringkas.add_column("Jumlah", justify="right")
     for nama, jumlah in hitung.items():
@@ -247,17 +252,24 @@ def tampilkan_antrean(batas: int = 20):
     console.print(ringkas)
 
     perhatian = []
+    saringan = ""
+    parameter_tambahan: list = []
+    if situs:
+        saringan = f"AND {_situs_sql()} = ?"
+        parameter_tambahan.append(situs)
+
     with _db._get_conn() as conn:  # noqa: SLF001 (pembacaan langsung, aman)
         for status in ("review_required", "failed", "expired"):
             for baris in conn.execute(
-                """
+                f"""
                 SELECT title, company, url, alasan, status_antrean
                   FROM jobs
                  WHERE status_antrean = ?
+                   {saringan}
                  ORDER BY diperbarui_at DESC, id DESC
                  LIMIT ?
                 """,
-                (status, max(1, batas)),
+                (status, *parameter_tambahan, max(1, batas)),
             ):
                 perhatian.append(dict(baris))
 
@@ -336,10 +348,13 @@ def tampilkan_laporan(simpan: bool = False):
     table.add_row("Lowongan tersimpan", str(data["lowongan_tersimpan"]))
     table.add_row("Lamaran terkirim", str(data["lamaran_terkirim"]))
     table.add_row("Lamaran hari ini (WIB)", str(data["lamaran_hari_ini"]))
-    table.add_row(
-        "Sisa kuota",
-        "tanpa batas" if data["sisa_kuota"] is None else str(data["sisa_kuota"]),
-    )
+    for baris in data.get("kuota_situs") or []:
+        sisa = baris["sisa"]
+        table.add_row(
+            f"Kuota {baris['nama']}",
+            f"{baris['terpakai']}/{baris['batas']}"
+            + (" (tanpa batas)" if sisa is None else f" — sisa {sisa}"),
+        )
     table.add_row("Tingkat berhasil", f"{data['tingkat_berhasil']}%")
     console.print(table)
 
@@ -448,9 +463,18 @@ def buka_dashboard(port: int = 0, tanpa_browser: bool = False):
 
 
 def kelola_jawaban(hapus: str = "", reset: bool = False,
-                   isi: str = ""):
-    """Lihat, tambah, atau hapus ingatan jawaban formulir."""
+                   isi: str = "", rapikan: bool = False,
+                   tetapkan: str = ""):
+    """Lihat, tambah, hapus, atau rapikan ingatan jawaban formulir."""
     import jawaban as memori
+
+    if rapikan:
+        _tampilkan_konflik(memori)
+        return
+
+    if tetapkan:
+        _tetapkan_jawaban(memori, tetapkan)
+        return
 
     if reset:
         jumlah = memori.lupakan_semua()
@@ -509,6 +533,171 @@ def kelola_jawaban(hapus: str = "", reset: bool = False,
     )
 
 
+def _tampilkan_konflik(memori) -> None:
+    """Tabel kelompok jawaban yang maksudnya sama tetapi nilainya berbeda."""
+    daftar = memori.konflik()
+
+    if not daftar:
+        console.print(
+            "[green]Tidak ada jawaban yang bertentangan.[/] Semua pertanyaan "
+            "sejenis sudah dijawab dengan nilai yang sama."
+        )
+        return
+
+    tabel = Table(
+        title=f"Jawaban bertentangan ({len(daftar)} kelompok)",
+        caption=(
+            'Pilih satu nilai resmi per kelompok, lalu jalankan: '
+            'jalankan.bat jawaban --tetapkan "subjek=nilai"'
+        ),
+    )
+    tabel.add_column("Jenis", style="cyan")
+    tabel.add_column("Subjek", style="cyan", overflow="fold")
+    tabel.add_column("Nilai yang tersimpan", overflow="fold")
+    tabel.add_column("Disarankan", overflow="fold")
+
+    for kelompok in daftar:
+        nilai = "\n".join(
+            f"{teks} (dipakai {info['dipakai']}x, {info['jumlah']} baris)"
+            for teks, info in sorted(
+                kelompok["nilai"].items(),
+                key=lambda item: (-item[1]["dipakai"], -item[1]["jumlah"], item[0]),
+            )
+        )
+        tabel.add_row(
+            kelompok["keluarga"],
+            kelompok["subjek"] or "(semua)",
+            nilai,
+            memori._nilai_terbanyak(kelompok["nilai"]),
+        )
+
+    console.print(tabel)
+    console.print(
+        "[dim]Disarankan = nilai yang paling sering dipakai. Ini hanya usulan; "
+        "jawaban resmi tetap Anda yang menentukan.[/]"
+    )
+
+
+def _tetapkan_jawaban(memori, isi: str) -> None:
+    """Samakan semua jawaban satu subjek: `--tetapkan "purchasing=3 years"`."""
+    if "=" not in isi:
+        console.print(
+            '[red]Format: jawaban --tetapkan "subjek=nilai"[/] '
+            'contoh: jawaban --tetapkan "purchasing=3 years"'
+        )
+        return
+
+    subjek, nilai = isi.split("=", 1)
+    subjek, nilai = subjek.strip(), nilai.strip()
+
+    if not subjek or not nilai:
+        console.print('[red]Subjek dan nilai tidak boleh kosong.[/]')
+        return
+
+    jumlah = memori.tetapkan(subjek, nilai)
+
+    if jumlah:
+        console.print(
+            f"[green]{jumlah} jawaban disamakan:[/] {subjek} = {nilai}"
+        )
+    else:
+        console.print(
+            f"[yellow]Tidak ada jawaban yang cocok dengan subjek:[/] {subjek}"
+        )
+
+
+def tabel_situs(judul: str = "Status per situs"):
+    """Tabel ringkasan tiap situs, supaya JobStreet/Glints/Indeed tidak tercampur."""
+    daftar = db.ringkasan_per_situs()
+    if not daftar:
+        console.print("[dim]Belum ada lowongan tercatat.[/]")
+        return
+
+    table = Table(title=judul)
+    table.add_column("Situs", style="cyan")
+    table.add_column("Lowongan", justify="right")
+    table.add_column("Terkirim", justify="right", style="green")
+    table.add_column("Perlu manual", justify="right", style="yellow")
+    table.add_column("Gagal", justify="right", style="red")
+    table.add_column("Ditolak", justify="right")
+    table.add_column("Kedaluwarsa", justify="right")
+
+    import kuota as kuota_modul
+
+    for baris in daftar:
+        table.add_row(
+            kuota_modul.NAMA_SITUS.get(
+                str(baris["situs"]).lower(), str(baris["situs"]).title()
+            ),
+            str(baris["total"]),
+            str(baris["terkirim"]),
+            str(baris["perlu_manual"]),
+            str(baris["gagal"]),
+            str(baris["ditolak"]),
+            str(baris["kedaluwarsa"]),
+        )
+
+    console.print(table)
+
+
+def tampilkan_status_situs():
+    """Ringkasan terpisah per situs + kuota harian (tanpa membuka browser)."""
+    console.print(f"[cyan]Versi kode:[/] {versi_kode()}")
+    tabel_situs()
+
+    try:
+        import kuota
+
+        console.print()
+        kuota_tabel = Table(
+            title="Kuota per situs — siklus 24 jam (50 wajib tercapai)"
+        )
+        kuota_tabel.add_column("Situs", style="cyan")
+        kuota_tabel.add_column("Siklus ini", justify="right")
+        kuota_tabel.add_column("Target", justify="right")
+        kuota_tabel.add_column("Sisa", justify="right", style="yellow")
+        kuota_tabel.add_column("Reset berikutnya", style="blue")
+        kuota_tabel.add_column("Status", style="green")
+
+        for baris in kuota.ringkasan_situs():
+            sisa = baris["sisa"]
+            kuota_tabel.add_row(
+                baris["nama"],
+                str(baris["terpakai"]),
+                "tanpa batas" if sisa is None else str(baris["batas"]),
+                "-" if sisa is None else str(sisa),
+                baris["berakhir"] or "-",
+                "tercapai" if sisa == 0 else "belum",
+            )
+
+        console.print(kuota_tabel)
+    except Exception:
+        pass
+
+    from lamar_semua import NAMA_SITUS, situs_terpilih
+
+    aktif = situs_terpilih("")
+    console.print(
+        "[dim]Situs aktif di .env:[/] "
+        + ", ".join(NAMA_SITUS.get(nama, nama) for nama in aktif)
+    )
+
+    try:
+        import jawaban as ingatan
+
+        jumlah = ingatan.jumlah()
+        pesan = (
+            f"[cyan]Ingatan jawaban:[/] {jumlah} jawaban tersimpan"
+            if jumlah
+            else "[yellow]Ingatan jawaban:[/] belum ada jawaban tersimpan"
+        )
+        console.print(
+            f"{pesan} [dim](lihat: jalankan.bat jawaban)[/]"
+        )
+    except Exception:
+        pass
+
+
 def show_stats():
     stats = db.get_stats()
     table = Table(title="Statistik")
@@ -519,6 +708,7 @@ def show_stats():
         table.add_row(key.replace("_", " ").title(), str(value))
 
     console.print(table)
+    tabel_situs("Statistik per situs")
 
 
 def uji_lamar(url: str):
@@ -1076,26 +1266,74 @@ def blacklist_company(company: str, reason: str = ""):
     )
 
 
-def show_applications(limit: int = 50):
-    rows = db.get_recent_applications(limit)
+def jalankan_run(situs: str = "jobstreet", max_pages: int = 0) -> None:
+    """Jalankan `run` untuk satu situs saja.
 
-    table = Table(title=f"Riwayat Lamaran ({limit} terakhir)")
+    Bawaan tetap JobStreet supaya `run --auto` tidak berubah perilakunya;
+    memilih situs lain berarti situs selebihnya benar-benar tidak dibuka.
+    """
+    situs = str(situs or "jobstreet").strip().lower()
+
+    if situs in ("", "jobstreet"):
+        console.print(
+            "[bold]Situs:[/] JobStreet — Glints & Indeed tidak dibuka"
+        )
+        from main import main as mesin_jobstreet
+
+        jalankan_terkunci(mesin_jobstreet)
+        return
+
+    from lamar_semua import NAMA_SITUS, situs_terpilih
+
+    daftar = situs_terpilih(situs)
+    if not daftar:
+        console.print(
+            "[bold red]Nama situs tidak dikenal:[/] "
+            f"{situs}. Pilih: jobstreet, glints, indeed, semua"
+        )
+        raise SystemExit(2)
+
+    nama = ", ".join(NAMA_SITUS.get(item, item) for item in daftar)
+    console.print(f"[bold]Situs:[/] {nama} — situs lain tidak dibuka")
+    lamar_semua_situs(
+        ",".join(daftar),
+        max(0, int(max_pages or 0)),
+        0,
+        False,
+    )
+
+
+def show_applications(limit: int = 50, situs: str = "",
+                      alasan: bool = False):
+    rows = db.get_recent_applications(limit, situs=situs)
+
+    judul = f"Riwayat Lamaran ({limit} terakhir)"
+    if situs:
+        judul = f"Riwayat Lamaran {situs.title()} ({limit} terakhir)"
+    table = Table(title=judul)
     table.add_column("Tanggal", style="cyan", no_wrap=True)
     table.add_column("Posisi", style="white")
     table.add_column("Perusahaan", style="yellow")
     table.add_column("Status", style="green", no_wrap=True)
+    if alasan:
+        # Alasan yang dicatat bot dipakai untuk menelusuri kenapa lamaran
+        # berakhir "perlu manual" dan tidak pernah terkirim.
+        table.add_column("Alasan", overflow="fold")
 
     if not rows:
         console.print("[dim]Belum ada lamaran yang tercatat.[/]")
         return
 
     for row in rows:
-        table.add_row(
+        kolom = [
             row["applied_at"][:19],
             row["title"][:40],
             row["company"][:25],
             row["status"],
-        )
+        ]
+        if alasan:
+            kolom.append(str(row.get("notes") or ""))
+        table.add_row(*kolom)
 
     console.print(table)
 
@@ -1161,7 +1399,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="JobStreet Auto-Apply CLI")
     subparsers = parser.add_subparsers(dest="command")
 
-    run_parser = subparsers.add_parser("run", help="Jalankan pencarian lowongan")
+    run_parser = subparsers.add_parser(
+        "run",
+        help="Jalankan pencarian lowongan (bawaan: JobStreet saja)",
+    )
     run_mode = run_parser.add_mutually_exclusive_group()
     run_mode.add_argument(
         "--auto",
@@ -1172,6 +1413,14 @@ if __name__ == "__main__":
         "--manual",
         action="store_true",
         help="Buka lowongan untuk ditinjau dan dikirim manual (default)",
+    )
+    run_parser.add_argument(
+        "--situs",
+        default="jobstreet",
+        help=(
+            "Situs yang dijalankan: jobstreet (bawaan), glints, indeed, "
+            "atau \"semua\" (JobStreet+Glints+Indeed)"
+        ),
     )
     run_parser.add_argument(
         "--max-age-days",
@@ -1222,6 +1471,14 @@ if __name__ == "__main__":
         action="store_true",
         help="Jangan menunggu Enter saat login; berhenti bila belum login",
     )
+    run_parser.add_argument(
+        "--segar",
+        action="store_true",
+        help=(
+            "Abaikan cache riset dan ambil ulang lowongan dari situs "
+            "(bawaan: cache CACHE_RISET_MENIT menit)"
+        ),
+    )
     subparsers.add_parser("stats", help="Tampilkan statistik")
     subparsers.add_parser("config", help="Tampilkan konfigurasi aktif")
     subparsers.add_parser("repair", help="Rapikan data lama di database")
@@ -1243,6 +1500,16 @@ if __name__ == "__main__":
     )
     history_parser.add_argument(
         "--limit", type=int, default=50, help="Jumlah baris (default 50)"
+    )
+    history_parser.add_argument(
+        "--situs",
+        default="",
+        help="Saring satu situs: jobstreet, glints, indeed (kosong = semua)",
+    )
+    history_parser.add_argument(
+        "--alasan",
+        action="store_true",
+        help="Tampilkan alasan yang dicatat bot (untuk menelusuri kegagalan)",
     )
 
     uji_parser = subparsers.add_parser(
@@ -1425,6 +1692,16 @@ if __name__ == "__main__":
     antre_parser.add_argument(
         "--limit", type=int, default=20, help="Jumlah per status (20)"
     )
+    antre_parser.add_argument(
+        "--situs",
+        default="",
+        help="Saring satu situs: jobstreet, glints, indeed (kosong = semua)",
+    )
+
+    subparsers.add_parser(
+        "status",
+        help="Ringkasan terpisah per situs (JobStreet/Glints/Indeed)",
+    )
 
     lamar_parser = subparsers.add_parser(
         "lamar",
@@ -1508,6 +1785,16 @@ if __name__ == "__main__":
     jawab_parser.add_argument(
         "--isi", default="", help='Tambah manual: "pertanyaan=jawaban"'
     )
+    jawab_parser.add_argument(
+        "--rapikan",
+        action="store_true",
+        help="Tampilkan jawaban sejenis yang nilainya bertentangan",
+    )
+    jawab_parser.add_argument(
+        "--tetapkan",
+        default="",
+        help='Samakan satu kelompok: "subjek=nilai" (mis. "purchasing=3 years")',
+    )
 
     bl_parser = subparsers.add_parser(
         "blacklist",
@@ -1561,11 +1848,21 @@ if __name__ == "__main__":
         if args.no_login_wait:
             config.login_wait = False
 
-        from main import main
+        if getattr(args, "segar", False):
+            cache_riset.paksa_segar()
+            console.print(
+                "[cyan]Cache riset dimatikan untuk sesi ini (--segar):[/] "
+                "lowongan diambil ulang dari situs."
+            )
 
-        jalankan_terkunci(main)
+        # Pemisahan situs: `run` tanpa --situs tetap JobStreet saja, persis
+        # seperti sebelumnya. Situs lain dijalankan lewat jalur yang sama
+        # dengan "Lamar Glints.bat"/"Lamar Indeed.bat".
+        jalankan_run(getattr(args, "situs", "jobstreet"), args.max_pages or 0)
     elif args.command == "stats":
         show_stats()
+    elif args.command == "status":
+        tampilkan_status_situs()
     elif args.command == "config":
         show_config()
     elif args.command == "repair":
@@ -1579,7 +1876,11 @@ if __name__ == "__main__":
     elif args.command == "set-env":
         atur_env(args.pasangan)
     elif args.command == "history":
-        show_applications(args.limit)
+        show_applications(
+            args.limit,
+            getattr(args, "situs", ""),
+            getattr(args, "alasan", False),
+        )
     elif args.command == "uji-lamar":
         uji_lamar(args.url)
     elif args.command == "cek-logo":
@@ -1619,7 +1920,7 @@ if __name__ == "__main__":
     elif args.command == "diagnosa-form":
         diagnosa_form(args.berkas, args.semua)
     elif args.command == "antrean":
-        tampilkan_antrean(args.limit)
+        tampilkan_antrean(args.limit, getattr(args, "situs", ""))
     elif args.command == "lamar":
         lamar_semua_situs(
             args.situs, args.max_pages, args.limit, not args.tanpa_perbarui
@@ -1636,7 +1937,13 @@ if __name__ == "__main__":
         else:
             indeed_parser.print_help()
     elif args.command == "jawaban":
-        kelola_jawaban(args.hapus, args.reset, args.isi)
+        kelola_jawaban(
+            args.hapus,
+            args.reset,
+            args.isi,
+            getattr(args, "rapikan", False),
+            getattr(args, "tetapkan", ""),
+        )
     elif args.command == "blacklist":
         if args.hapus:
             nama = args.hapus.strip()

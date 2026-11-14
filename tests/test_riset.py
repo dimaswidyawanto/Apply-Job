@@ -214,7 +214,7 @@ def test_top_50_global_dari_semua_kategori_dan_lokasi(siapkan, monkeypatch):
     mesin._kumpulkan_lalu_lamar()
 
     assert len(mesin.bot.dilamar) == 50
-    assert set(f"baik-{n}" for n in range(10)) <= set(mesin.bot.dilamar)
+    assert {f"baik-{n}" for n in range(10)} <= set(mesin.bot.dilamar)
 
 
 def test_kurang_dari_50_dilamar_semua(siapkan, monkeypatch):
@@ -332,7 +332,7 @@ def test_glints_dibatasi_3_muat_per_kata_kunci(monkeypatch):
     diminta = []
 
     class BotGlintsPalsu:
-        def cari(self, keyword, nomor=0):
+        def cari(self, keyword, nomor=0, location=""):
             diminta.append(nomor)
             return [lowongan(f"{keyword}-{nomor}")]
 
@@ -340,6 +340,7 @@ def test_glints_dibatasi_3_muat_per_kata_kunci(monkeypatch):
         BotGlintsPalsu(),
         ["inventory"],
         glints_module.halaman_per_kata_kunci(0),
+        lokasi=["Bandung"],
     )
 
     # 3 muat -> cari(nomor=2), bukan nomor 3 atau 19.

@@ -193,3 +193,52 @@ def test_jalankan_bat_punya_jalur_cepat():
     # Penanda hanya dibuat untuk Python yang didukung (< 3.14).
     assert ".python-baik" in isi
     assert ':cek_deps' in isi
+
+
+def test_skrip_git_tidak_membuka_editor():
+    """Commit/penggabungan tidak boleh memunculkan Vim di tengah skrip.
+
+    Pengguna pernah terjebak di Vim saat `simpan.bat` menjalankan `git pull`
+    yang berakhir dengan commit gabungan.
+    """
+    for nama in ("tarik.bat", "simpan.bat"):
+        isi = (AKAR / nama).read_text(encoding="utf-8")
+        assert 'set "GIT_EDITOR=' in isi, f"{nama} bisa membuka editor"
+        assert 'set "GIT_MERGE_AUTOEDIT=no"' in isi, f"{nama} bisa membuka editor"
+
+    simpan = (AKAR / "simpan.bat").read_text(encoding="utf-8")
+    assert "git pull --no-rebase --autostash --no-edit" in simpan
+
+
+def test_tarik_memakai_main_dan_mengejar_main():
+    """Bug nyata 2026-11-13: tarik.bat menggabungkan cabang sesi lama yang
+    sudah tidak ada di GitHub, menjawab "Already up to date", sehingga PC
+    pengguna tetap menjalankan kode lama dan perbaikan tidak pernah sampai.
+    """
+    isi = (AKAR / "tarik.bat").read_text(encoding="utf-8")
+
+    assert 'set "ARENA_CABANG=main"' in isi
+    assert "4ab2b9fa" not in isi
+    # Jaring pengaman: bila masih tertinggal dari main, tarik main juga.
+    assert 'git rev-list --count "HEAD..%ARENA_REMOTE%/main"' in isi
+    assert "git merge --no-edit %ARENA_REMOTE%/main" in isi
+    # Versi akhir dicetak supaya pengguna bisa memastikan kode sudah baru.
+    assert "git rev-parse --short HEAD" in isi
+    assert "Versi sekarang:" in isi
+
+
+def test_skrip_pantau_tidak_menunjuk_cabang_lama():
+    for nama in ("pantau.bat", "pantau.sh", "tarik.sh"):
+        isi = (AKAR / nama).read_text(encoding="utf-8")
+        assert "4ab2b9fa" not in isi, nama
+        assert "main" in isi, nama
+
+
+def test_jalankan_memperingatkan_jangan_dihentikan_saat_pasang():
+    """Log 2026-11-13: pengguna menekan Ctrl+C saat "Memasang dependensi"
+    karena layar diam; pip kini menampilkan progres dan ada peringatan.
+    """
+    isi = (AKAR / "jalankan.bat").read_text(encoding="utf-8")
+
+    assert "JANGAN tekan Ctrl+C" in isi
+    assert "pip install --quiet" not in isi
