@@ -63,6 +63,23 @@ LOGIN_URL = f"{BASE}/account/login"
 # Ditambahkan" di Glints dan "tanggal terbaru" di JobStreet).
 SEARCH_URL = BASE + "/jobs?q={keyword}&l={location}&sort=date"
 
+# Halaman "perantara" Cloudflare ("Tunggu sebentar...", "Security Check")
+# adalah pemeriksaan JavaScript yang biasanya selesai sendiri dalam beberapa
+# detik. Dulu bot memeriksa pada detik ke-1, melihat halaman perantara itu,
+# lalu menghentikan seluruh riset 180 kombinasi — padahal halamannya lolos
+# (log 2026-11-14: "1/180 kombinasi, 0 lowongan, 2 detik berlalu" dua kali).
+BATAS_TUNGGU_HALAMAN = 15  # detik
+
+# Penanda halaman hasil yang sah walaupun tidak ada kartu: kombinasi kata
+# kunci & lokasi memang kosong. Ini BUKAN blokir.
+PENANDA_KOSONG = (
+    "did not match any jobs",
+    "no matching jobs",
+    "tidak cocok dengan lowongan apa pun",
+    "tidak ada lowongan yang cocok",
+    "tidak ada hasil",
+)
+
 # Kunci lowongan Indeed ada di parameter `jk` (mis. ?jk=1a2b3c4d5e6f7890).
 TAUTAN_LOWONGAN = re.compile(r"[?&]jk=([0-9a-zA-Z]+)")
 
@@ -464,6 +481,9 @@ class IndeedBot:
         self.login_expired = False
         self.diagnosa_terakhir: dict = {}
         self.captcha_berturut = 0
+        # Hasil terakhir riset: "siap" (ada kartu), "kosong" (kombinasi tanpa
+        # lowongan), atau "blokir" (Cloudflare menahan sampai batas waktu).
+        self.keadaan_terakhir = ""
 
     # ------------------------------ browser ---------------------------
     def init_browser(self):
@@ -565,16 +585,79 @@ class IndeedBot:
 
         return jumlah
 
+    def _tunggu_halaman_siap(self, detik: int | None = None) -> str:
+        """Tunggu halaman perantara Cloudflare selesai memeriksa.
+
+        Hasil: ``"siap"`` (ada kartu lowongan), ``"kosong"`` (halaman sah tapi
+        kombinasi ini tidak punya lowongan), atau ``"blokir"`` (tantangan masih
+        ada sampai batas waktu).
+
+        Bedanya penting: halaman perantara yang lolos tidak boleh dianggap
+        blokir (itu menghentikan seluruh riset), dan halaman kosong juga bukan
+        blokir (riset cukup lanjut ke kombinasi berikutnya).
+        """
+        batas = time.time() + max(1, int(
+            detik if detik is not None else BATAS_TUNGGU_HALAMAN
+        ))
+        mulai = time.time()
+
+        while True:
+            if self._tautan_kartu():
+                if time.time() - mulai >= 2:
+                    console.print(
+                        "[dim]Halaman perantara Indeed lolos setelah "
+                        f"{time.time() - mulai:.0f} detik.[/]"
+                    )
+                return "siap"
+
+            # Judul diperiksa tiap putaran (murah); teks halaman hanya setelah
+            # halaman tidak lagi menampilkan halaman perantara.
+            judul = self._judul_halaman().lower()
+            if not any(tanda in judul for tanda in PENANDA_BLOKIR_CLOUDFLARE):
+                teks = self._teks_halaman()
+                if any(tanda in teks for tanda in PENANDA_KOSONG):
+                    return "kosong"
+
+            if time.time() >= batas:
+                break
+            time.sleep(1)
+
+        return "blokir" if self.diblokir_cloudflare() else "kosong"
+
     def buka_pencarian(self, keyword: str, location: str = "") -> bool:
         """Buka halaman pencarian Indeed untuk satu kata kunci & lokasi."""
         url = url_pencarian(keyword, location)
         self.driver.get(url)
-        time.sleep(1)
 
-        # Tantangan Cloudflare dicek lebih dulu: menunggu 60 detik tidak akan
-        # menolong, dan setiap kombinasi berikutnya hanya menambah skor bot.
-        if self.diblokir_cloudflare():
+        # Beri waktu halaman perantara Cloudflare menyelesaikan pemeriksaan
+        # JavaScript-nya sebelum menyimpulkan apa pun.
+        keadaan = self._tunggu_halaman_siap()
+
+        if keadaan == "blokir" and "sort=date" in url:
+            # Bentuk cadangan: tanpa `sort=date`. Parameter itu tidak pernah
+            # dipakai manusia sehingga menambah kecurigaan.
+            cadangan = url.replace("&sort=date", "")
+            console.print(
+                "[dim]Bentuk URL pertama diblokir; mencoba tanpa "
+                f"sort=date: {cadangan}[/]"
+            )
+            self.driver.get(cadangan)
+            keadaan = self._tunggu_halaman_siap()
+            if keadaan != "blokir":
+                url = cadangan
+
+        self.keadaan_terakhir = keadaan
+
+        if keadaan == "blokir":
             self._laporkan_blokir(url)
+            return False
+
+        if keadaan == "kosong":
+            console.print(
+                f"[dim]Tidak ada lowongan untuk kombinasi ini: "
+                f"'{keyword}' · {location or 'semua lokasi'}[/]"
+            )
+            self.captcha_berturut = 0
             return False
 
         if self.kena_captcha():
@@ -1374,6 +1457,12 @@ def diagnosa_indeed(keyword: str = "", location: str = "") -> dict:
                     f"[yellow]Cara cadangan menemukan "
                     f"{len(bot._kartu_fallback())} tautan lowongan.[/]"
                 )
+        elif bot.keadaan_terakhir == "kosong":
+            console.print(
+                "[green]Halaman Indeed terbuka normal.[/] Kombinasi "
+                f"'{kata}' · {lokasi or 'semua lokasi'} memang tidak punya "
+                "lowongan — bukan blokir. Coba kata kunci atau lokasi lain."
+            )
         else:
             console.print(
                 "[bold yellow]Tidak ada kartu yang bisa dibaca. Kirimkan "

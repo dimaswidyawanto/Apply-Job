@@ -885,13 +885,22 @@ diselesaikan program, dan halaman akan muncul lagi selama reputasi IP/profil
 dianggap bot. Bot sekarang:
 
 1. mengenali halaman itu dari teks **dan** judul tab ("Tunggu sebentar…",
-   "Just a moment…");
-2. **berhenti seketika** — tidak menunggu 60 detik untuk setiap kombinasi.
-   Sebelumnya 180 kombinasi × 60 detik ≈ 5943 detik berakhir nol lowongan;
-3. menyimpan bukti `debug/blokir-cloudflare-*.html` (+ PNG) sekali per sesi;
-4. memberi langkah lanjutan: selesaikan verifikasi di jendela Chrome, bila
-   berulang ganti jaringan (hotspot HP) atau tunggu 30–60 menit, lalu uji satu
-   halaman dengan `jalankan.bat indeed diagnosa`.
+   "Just a moment…", "Security Check");
+2. **memberi waktu 15 detik** agar pemeriksaan JavaScript selesai sendiri.
+   Halaman perantara yang lolos tidak lagi dianggap blokir. Ini penting: dulu
+   bot memeriksa pada detik ke-1, lalu membatalkan 180 kombinasi karena satu
+   halaman yang belum selesai dimuat (log 2026-11-14: "1/180 kombinasi,
+   0 lowongan, 2 detik berlalu", dua kali);
+3. **membedakan hasil kosong dari blokir**. Bila halaman terbuka normal tetapi
+   tertulis "did not match any jobs", itu berarti kombinasi kata kunci & lokasi
+   memang kosong — riset lanjut ke kombinasi berikutnya tanpa menghitungnya
+   sebagai blokir;
+4. mencoba bentuk URL cadangan **tanpa `sort=date`** sebelum menyatakan blokir
+   (parameter itu tidak pernah dipakai manusia);
+5. hanya bila tantangan masih ada setelah semua itu: berhenti, menyimpan bukti
+   `debug/blokir-cloudflare-*.html` (+ PNG) sekali per sesi, dan memberi langkah
+   lanjutan (selesaikan verifikasi di jendela Chrome, ganti jaringan, atau
+   tunggu 30–60 menit).
 
 Jumlah kombinasi riset **tidak dikurangi** — penghentian hanya karena blokir
 yang sedang berlangsung, dan sesi berikutnya tetap mengulang kombinasi yang

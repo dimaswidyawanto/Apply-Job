@@ -734,3 +734,35 @@ ini dibuat khusus untuk Glints.
 
 Tes: `tests/test_skrip_windows.py` +4 (bawaan Indeed, situs lain, URL penuh,
 perintah uji per situs). Gate ruff bersih.
+
+---
+
+## 21. Indeed: halaman perantara Cloudflare dianggap blokir (riset mati 2 detik)
+
+Gejala dari dua sesi 2026-11-14:
+
+```
+Indeed: 'inventory control' — lokasi Bandung — muat sampai 3 halaman
+Indeed diblokir Cloudflare — halaman "Diperlukan Verifikasi Tambahan"
+Judul: Security Check - Indeed.com / Tunggu sebentar...
+Kemajuan riset Indeed: 1/180 kombinasi, 0 lowongan, 2 detik berlalu
+```
+
+Sementara di jendela Chrome yang sama, URL itu akhirnya menampilkan halaman
+Indeed normal ("The search inventory staff jobs in Bandung did not match any
+jobs") — jadi halamannya **lolos**, botnya yang berhenti terlalu cepat.
+
+| Gejala | Penyebab | Perbaikan |
+|---|---|---|
+| Riset 180 kombinasi berhenti setelah 2 detik | `buka_pencarian()` memeriksa tanda blokir setelah `time.sleep(1)`; halaman perantara Cloudflare butuh beberapa detik | `_tunggu_halaman_siap()`: periksa tiap detik sampai `BATAS_TUNGGU_HALAMAN` (15 dtk); "siap" begitu kartu muncul |
+| Halaman kosong dilaporkan sebagai blokir | Tidak ada penanda "hasil kosong" | `PENANDA_KOSONG` ("did not match any jobs", …) → keadaan `"kosong"`, riset lanjut, penghitung captcha direset |
+| `sort=date` menambah kecurigaan | Parameter itu tidak pernah dipakai manusia | Bila bentuk itu diblokir, dicoba bentuk tanpa `sort=date` sebelum menyatakan blokir |
+| Blokir sungguhan tetap harus berhenti | — | Setelah 15 detik tantangan masih ada → `_laporkan_blokir()` seperti sebelumnya (bukti `debug/`, riset berhenti) |
+| Diagnosa menyesatkan | Semua kegagalan dicetak sama | Diagnosa kini membedakan "halaman terbuka normal, kombinasi kosong" dari "tidak terbaca" |
+
+Tes: 788 → **794 passed, 1 skipped** (+6 di `tests/test_indeed_tunggu_halaman.py`),
+gate ruff bersih.
+
+Batas jujur: semua di atas teruji dengan halaman tiruan. Apakah 15 detik cukup
+di situs sungguhan **belum** terverifikasi — bila tantangan ternyata bertahan,
+riset tetap berhenti seperti sebelumnya dan itu penilaian jaringan, bukan bug.
