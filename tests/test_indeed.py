@@ -218,6 +218,10 @@ class BotPalsu:
     def login(self):
         return True
 
+    def panaskan(self, keyword="", location="", detik=None):
+        """Pemanasan sesi: tiruan selalu langsung siap."""
+        return "siap"
+
     def cari(self, keyword, halaman=0, location=""):
         return [dict(job) for job in self.kartu]
 

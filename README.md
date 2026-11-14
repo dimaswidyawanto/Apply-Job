@@ -902,6 +902,21 @@ dianggap bot. Bot sekarang:
    lanjutan (selesaikan verifikasi di jendela Chrome, ganti jaringan, atau
    tunggu 30–60 menit).
 
+**Pemanasan sesi.** Sebelum riset, bot membuka **satu** halaman pencarian lebih
+dulu. Bila muncul verifikasi, Anda diberi **90 detik** untuk menyelesaikannya di
+jendela Chrome (20 detik bila Chrome headless, karena tidak ada yang bisa
+membantu). Setelah lolos sekali, cookie `cf_clearance` ikut pada navigasi
+berikutnya sehingga riset tidak berhenti di kombinasi pertama.
+
+**Cache tidak menyimpan hasil blokir.** Bila satu kombinasi gagal dibaca karena
+diblokir, hasilnya **tidak** masuk cache — kombinasi itu dicoba lagi pada sesi
+berikutnya. Dulu hasil blokir tersimpan sebagai "0 lowongan" selama
+`CACHE_RISET_MENIT` (60 menit), sehingga kombinasi yang belum pernah dibaca
+tampak "sudah selesai" (log 2026-11-14: `Cache riset Indeed dipakai … (0
+lowongan)`, 0 detik). Ringkasan akhir kini memisahkan: berapa kombinasi
+dijalankan, berapa kosong (halaman terbaca), berapa terblokir, berapa dari
+cache. Untuk mengabaikan cache sepenuhnya, tambahkan `--segar`.
+
 Jumlah kombinasi riset **tidak dikurangi** — penghentian hanya karena blokir
 yang sedang berlangsung, dan sesi berikutnya tetap mengulang kombinasi yang
 belum tercakup.

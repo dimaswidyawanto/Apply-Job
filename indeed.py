@@ -70,6 +70,12 @@ SEARCH_URL = BASE + "/jobs?q={keyword}&l={location}&sort=date"
 # (log 2026-11-14: "1/180 kombinasi, 0 lowongan, 2 detik berlalu" dua kali).
 BATAS_TUNGGU_HALAMAN = 15  # detik
 
+# Pemanasan sesi: buka satu halaman pencarian lebih dulu dan beri kesempatan
+# verifikasi Cloudflare diselesaikan di jendela Chrome. Setelah lolos sekali,
+# cookie `cf_clearance` ikut pada navigasi berikutnya.
+PANAS_MAKS_DETIK = 90      # bila jendela Chrome terlihat pengguna
+PANAS_MAKS_DETIK_HEADLESS = 20  # headless: tidak ada yang bisa membantu
+
 # Penanda halaman hasil yang sah walaupun tidak ada kartu: kombinasi kata
 # kunci & lokasi memang kosong. Ini BUKAN blokir.
 PENANDA_KOSONG = (
@@ -731,6 +737,63 @@ class IndeedBot:
         with contextlib.suppress(Exception):
             self.simpan_diagnosa("blokir-cloudflare", "")
 
+    def panaskan(self, keyword: str = "", location: str = "",
+                 detik: int | None = None) -> str:
+        """Buka satu halaman pencarian untuk "memanaskan" sesi Cloudflare.
+
+        Halaman pertama dibuka lebih dulu; bila muncul halaman verifikasi,
+        pengguna diberi kesempatan menyelesaikannya di jendela Chrome. Setelah
+        satu kali lolos, cookie `cf_clearance` berlaku untuk navigasi berikutnya
+        sehingga riset tidak berhenti di kombinasi pertama.
+
+        Hasil sama dengan `_tunggu_halaman_siap`: siap / kosong / blokir.
+        """
+        if not keyword:
+            return ""
+
+        if detik is None:
+            terlihat = not getattr(config, "headless", False) or bool(
+                int(getattr(config, "chrome_debug_port", 0) or 0)
+            )
+            detik = PANAS_MAKS_DETIK if terlihat else PANAS_MAKS_DETIK_HEADLESS
+
+        self.driver.get(url_pencarian(keyword, location))
+        keadaan = self._tunggu_halaman_siap()
+
+        if keadaan != "blokir":
+            console.print(
+                "[green]Pemanasan Indeed: halaman pencarian langsung "
+                "terbaca — riset dimulai.[/]"
+            )
+            self.keadaan_terakhir = keadaan
+            return keadaan
+
+        console.print(
+            "[yellow]Indeed menampilkan halaman verifikasi. Bila jendela "
+            "Chrome terlihat, selesaikan verifikasinya SEKARANG — bot "
+            f"menunggu maksimal {detik} detik.[/]"
+        )
+
+        batas = time.time() + max(1, int(detik))
+        while time.time() < batas:
+            time.sleep(2)
+            keadaan = self._tunggu_halaman_siap(2)
+            if keadaan != "blokir":
+                console.print(
+                    "[bold green]Verifikasi Indeed selesai — riset "
+                    "dilanjutkan dengan sesi yang sama.[/]"
+                )
+                self.keadaan_terakhir = keadaan
+                return keadaan
+
+        console.print(
+            "[yellow]Verifikasi belum selesai dalam batas waktu. Riset tetap "
+            "dicoba; bila tetap diblokir, jalankan lagi setelah verifikasi "
+            "diselesaikan di jendela Chrome.[/]"
+        )
+        self.keadaan_terakhir = "blokir"
+        return "blokir"
+
     def _halaman_berikutnya(self) -> bool:
         """Klik tombol halaman berikutnya; False bila tidak ada."""
         selectors = (
@@ -1049,6 +1112,11 @@ def kumpulkan_lowongan(bot: IndeedBot, kata_kunci: list[str],
 
     total = len(daftar_lokasi) * len(kata_kunci)
     selesai = 0
+    # Dipisah supaya laporan akhir jujur: kombinasi kosong (halaman terbaca)
+    # tidak sama dengan kombinasi yang gagal dibaca karena diblokir.
+    terblokir = 0
+    kosong = 0
+    dari_cache = 0
     mulai = time.monotonic()
     batas_captcha = getattr(
         bot, "BATAS_CAPTCHA_BERTURUT", IndeedBot.BATAS_CAPTCHA_BERTURUT
@@ -1087,8 +1155,24 @@ def kumpulkan_lowongan(bot: IndeedBot, kata_kunci: list[str],
                 kartu = bot.cari(
                     kata, max(0, halaman - 1), location=location
                 )
-                cache_riset.simpan(kunci_cache, kartu, situs="indeed")
+                keadaan = getattr(bot, "keadaan_terakhir", "")
+                if keadaan == "blokir":
+                    # Hasil dari halaman yang diblokir BUKAN hasil riset.
+                    # Dulu ia tetap disimpan, sehingga kombinasi itu "hilang"
+                    # selama CACHE_RISET_MENIT (log 2026-11-14: cache dipakai
+                    # untuk kombinasi yang belum pernah benar-benar dibaca).
+                    terblokir += 1
+                    console.print(
+                        "[dim]Kombinasi ini tidak disimpan ke cache — "
+                        "halamannya diblokir, akan dicoba lagi sesi "
+                        "berikutnya.[/]"
+                    )
+                else:
+                    cache_riset.simpan(kunci_cache, kartu, situs="indeed")
+                    if keadaan == "kosong":
+                        kosong += 1
             else:
+                dari_cache += 1
                 console.print(
                     f"[dim]Cache riset Indeed dipakai '{kata}'"
                     + (f" — {location}" if location else "")
@@ -1141,6 +1225,12 @@ def kumpulkan_lowongan(bot: IndeedBot, kata_kunci: list[str],
         f"{len(lowongan)} unik ({sebelum - len(lowongan) + duplikat} duplikat "
         f"dibuang)."
     )
+    if kosong or terblokir or dari_cache:
+        console.print(
+            f"[dim]Rincian kombinasi: {selesai}/{total} dijalankan · "
+            f"{kosong} kosong (halaman terbaca) · {terblokir} terblokir "
+            f"(tidak di-cache) · {dari_cache} dari cache.[/]"
+        )
     return lowongan
 
 
@@ -1211,6 +1301,18 @@ def jalankan_indeed(max_pages: int = 0, keywords: list[str] | None = None,
         if not bot.login():
             console.print("[red]Login Indeed belum selesai — dihentikan.[/]")
             return laporan
+
+        # Pemanasan: satu halaman lebih dulu, supaya verifikasi Cloudflare
+        # (bila ada) bisa diselesaikan sekali di jendela Chrome dan cookie
+        # cf_clearance dipakai seluruh riset.
+        if kata_kunci:
+            # Pemanasan tidak boleh menggagalkan sesi: bila jendela Chrome
+            # sudah tertutup, riset tetap dicoba dan dilaporkan apa adanya.
+            with contextlib.suppress(Exception):
+                bot.panaskan(
+                    str(kata_kunci[0]),
+                    config.locations[0] if config.locations else "",
+                )
 
         lowongan = kumpulkan_lowongan(bot, kata_kunci, halaman)
         laporan["dibaca"] = len(lowongan)

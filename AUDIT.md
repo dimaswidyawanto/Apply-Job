@@ -766,3 +766,31 @@ gate ruff bersih.
 Batas jujur: semua di atas teruji dengan halaman tiruan. Apakah 15 detik cukup
 di situs sungguhan **belum** terverifikasi — bila tantangan ternyata bertahan,
 riset tetap berhenti seperti sebelumnya dan itu penilaian jaringan, bukan bug.
+
+---
+
+## 22. Indeed: cache menyimpan hasil blokir + pemanasan sesi Cloudflare
+
+Dua temuan dari sesi 2026-11-14 (versi `761ce6e`, sudah memuat PR #19):
+
+```
+Cache riset Indeed dipakai 'inventory control' — Bandung (0 lowongan).
+Kemajuan riset Indeed: 1/180 kombinasi, 0 lowongan, 0 detik berlalu
+...
+Bentuk URL pertama diblokir; mencoba tanpa sort=date: .../jobs?q=inventory+staff&l=Bandung
+Kemajuan riset Indeed: 2/180 kombinasi, 0 lowongan, 33 detik berlalu
+```
+
+| Gejala | Penyebab | Perbaikan |
+|---|---|---|
+| Kombinasi ke-1 selesai 0 detik "0 lowongan" | `cache_riset.simpan()` dipanggil tanpa memeriksa apakah halaman benar-benar terbaca; hasil sesi yang diblokir (daftar kosong) tersimpan 60 menit | Simpan hanya bila `bot.keadaan_terakhir != "blokir"`; hasil blokir dicoba lagi sesi berikutnya |
+| Laporan tidak bisa dibedakan | Semua kombinasi dihitung sama | Ringkasan akhir memisahkan *kosong* (halaman terbaca) dari *terblokir* (tidak di-cache) dan *dari cache* |
+| Verifikasi Cloudflare hanya bisa diselesaikan manual, tetapi bot langsung menyerah | Tidak ada kesempatan bagi pengguna | `IndeedBot.panaskan()`: satu halaman dibuka lebih dulu, pengguna diberi 90 detik (20 dtk bila headless) untuk menyelesaikan verifikasi, lalu riset memakai cookie `cf_clearance` yang sama |
+
+Yang **tidak** diklaim: kode ini tidak menembus Cloudflare. Kalau verifikasi
+tidak selesai dalam batas waktu, riset tetap berhenti dan melaporkannya
+dengan jujur. Apakah pemanasan cukup di jaringan pengguna **belum** terbukti —
+itu yang diuji sesi berikutnya.
+
+Tes: 794 → **804 passed, 1 skipped** (+10 di `tests/test_indeed_cache_blokir.py`),
+gate ruff bersih.
