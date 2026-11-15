@@ -462,6 +462,65 @@ def buka_dashboard(port: int = 0, tanpa_browser: bool = False):
     )
 
 
+def cek_target(situs: str = "jobstreet", batas: int = 0):
+    """Hitung peluang mencapai target 50 dari isi database (tanpa melamar).
+
+    Menjawab: "kalau target 50 belum tercapai, apa yang menghalangi?" —
+    dengan menilai ulang lowongan yang sudah tersimpan pada beberapa
+    skenario aturan.
+    """
+    import target_audit
+
+    nama = str(situs or "jobstreet").strip().lower()
+    console.print(f"[cyan]Versi kode:[/] {versi_kode()}")
+    console.print(f"[cyan]Situs:[/] {nama} · penilaian ulang isi database")
+
+    hasil = target_audit.hitung(db, situs=nama, batas=max(0, batas))
+
+    console.print(f"[dim]{hasil['kuota']}[/]")
+
+    if hasil["kandidat"] == 0:
+        console.print(
+            "[yellow]Tidak ada lowongan tersimpan yang belum dilamar. "
+            "Jalankan riset dulu (run --auto).[/]"
+        )
+        return hasil
+
+    tabel = Table(title="Perkiraan lamaran yang bisa dikirim dari isi database")
+    tabel.add_column("Aturan", style="cyan")
+    tabel.add_column("Lolos", justify="right", style="green")
+    tabel.add_column("Tambahan", justify="right", style="yellow")
+
+    dasar = hasil["skenario"][0]["lolos"] if hasil["skenario"] else 0
+
+    for baris in hasil["skenario"]:
+        tabel.add_row(
+            baris["nama"],
+            str(baris["lolos"]),
+            "-" if baris["lolos"] == dasar else f"+{baris['lolos'] - dasar}",
+        )
+
+    console.print(tabel)
+
+    sisa_slot = hasil["sisa_slot"]
+    console.print(
+        f"[dim]{hasil['kandidat']} lowongan tersimpan belum dilamar · "
+        f"sisa slot siklus ini: "
+        f"{'tanpa batas' if sisa_slot is None else sisa_slot}[/]"
+    )
+
+    if hasil["alasan"]:
+        console.print("\n[bold]Alasan lowongan tertolak dengan aturan sekarang:[/]")
+
+        for alasan, jumlah in hasil["alasan"].most_common(8):
+            console.print(f"  {jumlah:>6}  {alasan}")
+
+    for baris in target_audit.saran(hasil):
+        console.print(f"[yellow]Saran:[/] {baris}")
+
+    return hasil
+
+
 def kelola_jawaban(hapus: str = "", reset: bool = False,
                    isi: str = "", rapikan: bool = False,
                    tetapkan: str = ""):
@@ -1723,6 +1782,19 @@ if __name__ == "__main__":
         help="Jangan tarik pembaruan kode dari GitHub",
     )
 
+    target_parser = subparsers.add_parser(
+        "cek-target",
+        help="Perkirakan peluang mencapai target 50 dari isi database",
+    )
+    target_parser.add_argument(
+        "--situs", default="jobstreet",
+        help="jobstreet, glints, indeed (bawaan: jobstreet)",
+    )
+    target_parser.add_argument(
+        "--limit", type=int, default=0,
+        help="Batasi lowongan yang dinilai (0 = semua)",
+    )
+
     indeed_parser = subparsers.add_parser(
         "indeed", help="Cari & lamar lowongan di Indeed"
     )
@@ -1936,6 +2008,8 @@ if __name__ == "__main__":
             diagnosa_indeed_cli(args.keyword, args.location)
         else:
             indeed_parser.print_help()
+    elif args.command == "cek-target":
+        cek_target(args.situs, args.limit)
     elif args.command == "jawaban":
         kelola_jawaban(
             args.hapus,

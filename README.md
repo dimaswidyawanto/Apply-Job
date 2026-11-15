@@ -1050,6 +1050,52 @@ Kuota harian: 12 sudah dilamar hari ini, sisa 38 dari 50.
 └──────────────────────┴──────┴──────┴──────┴──────┴──────┴──────┴─────┴────┴─────┘
 ```
 
+### Kalau target 50 belum tercapai: baca alasannya, jangan menebak
+
+Setiap lamaran yang terkirim mencetak kemajuan target, dan akhir sesi selalu
+menutup dengan panel target:
+
+```
+Target JobStreet: 3/50 lamaran pada siklus ini (sesi ini 1).
+============================================================
+Target harian JobStreet belum tercapai: 3/50 — kurang 47. Sesi ini mengirim 2 lamaran.
+Alasan lowongan tidak bisa dilamar:
+    1402  Tanpa logo perusahaan
+     124  Sudah pernah apply
+      12  formulir butuh isian yang belum pernah dijawab
+Saran: set-env REQUIRE_COMPANY_LOGO=false
+Saran: isi sekali lewat jalankan.bat jawaban --isi "pertanyaan=jawaban", ...
+```
+
+Angka itu menjawab "kenapa cuma sedikit" tanpa perlu membaca log panjang.
+Bila ingin tahu **berapa lamaran yang sebenarnya bisa dikirim hari ini** dari
+isi database (tanpa membuka browser dan tanpa melamar), jalankan:
+
+```bash
+python cli.py cek-target            # bawaan: jobstreet
+python cli.py cek-target --situs indeed
+```
+
+Keluarannya menilai ulang seluruh lowongan tersimpan pada beberapa skenario
+aturan, sehingga selisihnya menunjukkan aturan mana yang menahan:
+
+```
+Perkiraan lamaran yang bisa dikirim dari isi database
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━┓
+┃ Aturan                                ┃  Lolos ┃ Tambahan┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━┩
+│ Sekarang (semua aturan aktif)         │    12 │       - │
+│ Tanpa syarat logo                     │   812 │    +800 │
+│ Tanpa syarat logo + gaji minimum      │  1204 │   +1192 │
+│ Tanpa logo + gaji + pencocokan judul  │  2010 │   +1998 │
+└───────────────────────────────────────┴───────┴─────────┘
+```
+
+Batas jujurnya: perkiraan hanya mencakup lowongan yang **sudah ada di
+database**, dan saringan umur lowongan (`MAX_AGE_DAYS`) tidak ikut dihitung
+karena umur tidak disimpan. Target 50 tetap bisa tidak tercapai walau semua
+aturan dilonggarkan — persediaan lowongan di situslah yang menentukan.
+
 ### Berapa lama risetnya, dan cara mempercepat
 
 Waktu riset = **jumlah kombinasi × halaman × biaya per halaman**:

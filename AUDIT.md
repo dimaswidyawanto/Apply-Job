@@ -794,3 +794,44 @@ itu yang diuji sesi berikutnya.
 
 Tes: 794 → **804 passed, 1 skipped** (+10 di `tests/test_indeed_cache_blokir.py`),
 gate ruff bersih.
+
+## 23. Target 50 per situs tidak tercapai: penyebabnya terlihat, bukan ditebak
+
+**Gejala (data nyata 2026-11-15, JobStreet, folder `C:\Users\ASUS\dimastes`).**
+
+```
+Riset selesai: 11962 lowongan terbaca dari 20 kategori × 9 lokasi → 14 unik
+Hasil Sesi: diproses 1643 · baru 5 · terkirim 2 · sudah dilamar 124 ·
+            butuh isian khusus 12 · dilewati 1629 · error 0
+JobStreet: 3/50 lamaran siklus ini
+```
+
+Pemilik alat menetapkan **target 50 lamaran per situs per siklus 24 jam** dan
+bertanya mengapa satu sesi hanya mengirim 2. Jawabannya bukan batas per sesi
+(`AUTO_APPLY_MAX_PER_SESSION` bawaan 0 = tanpa batas) dan bukan kuota (baru
+3 dari 50 terpakai): **kandidat yang lolos saringan hanya 14**, lalu 12 di
+antaranya berhenti pada pertanyaan formulir yang belum pernah dijawab.
+
+| Gejala | Penyebab | Perbaikan |
+|---|---|---|
+| "Kenapa cuma 2?" hanya bisa dijawab dengan membaca log ratusan baris | Penolakan lowongan hanya dihitung sebagai satu angka `dilewati`; jenis alasannya tidak pernah dirangkum | `AutoApplyEngine` mencatat setiap alasan (`_catat_alasan`) dan mencetaknya sebagai tabel di akhir sesi |
+| Kemajuan menuju 50 tidak terlihat selama sesi berjalan | Status kuota hanya dicetak sekali di awal | Setiap lamaran terkirim mencetak `Target JobStreet: x/50 (sesi ini n)` |
+| Tidak ada cara mengetahui apakah target masih mungkin dicapai | Tidak ada alat ukur; satu-satunya cara adalah menjalankan sesi 2,5 jam | Perintah baru `cek-target` menilai ulang seluruh lowongan di database pada empat skenario aturan (sekarang, tanpa logo, tanpa logo+gaji, tanpa logo+gaji+judul) dan menampilkan selisihnya |
+| Aturan mana yang paling menahan tidak diketahui | Semua aturan tampak sama besar | Alasan penolakan terbanyak dipetakan ke tindakan konkret (`REQUIRE_COMPANY_LOGO`, `MIN_SALARY`, `KEYWORDS`, `LOCATIONS`) |
+
+**Angka dari sesi nyata** (lihat §21–22 untuk konteks Indeed): 11.962 kartu →
+14 unik karena saringan wajib logo (pasal 6.1) dan judul; dari 14 kandidat,
+12 berhenti di pertanyaan `do you have … experience?` yang belum pernah
+dijawab sehingga menunggu 20 detik lalu dilewati. Karena riset dibatasi
+3 halaman per kombinasi (keputusan pemilik alat), persediaan kandidat tidak
+bisa ditambah dari dalam kode — hanya dari pelonggaran aturan atau penambahan
+kata kunci/lokasi.
+
+Yang **tidak** diklaim: perintah `cek-target` tidak menambah lowongan dan
+tidak menjamin 50 tercapai. Ia hanya mengubah "kenapa sedikit?" dari tebakan
+menjadi angka. Umur lowongan tidak tersimpan di database, jadi saringan
+`MAX_AGE_DAYS` tidak ikut dihitung dan perkiraan bisa sedikit lebih tinggi
+dari kenyataan.
+
+Tes: 804 → **818 passed, 1 skipped** (+14: `tests/test_target_audit.py` 8,
+`tests/test_target_panel.py` 6), gate ruff (`E9,F,E501,I,B,SIM,ISC`) bersih.

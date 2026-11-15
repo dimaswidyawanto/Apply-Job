@@ -55,6 +55,9 @@ class AutoApplyEngine:
         # Duplikat yang muncul lagi dari kata kunci/lokasi lain (dihitung
         # untuk laporan riset).
         self.duplikat_dilewati = 0
+        # Alasan lowongan tidak bisa dilamar pada sesi ini, supaya laporan
+        # akhir bisa menunjukkan APA yang menghalangi target 50.
+        self.alasan_tolak = {}
         # Pengukuran waktu fase riset (laporan kemajuan & perkiraan sisa).
         self.riset_mulai = 0.0
         self.riset_selesai = 0
@@ -244,6 +247,7 @@ class AutoApplyEngine:
                 antrean.tandai_hasil(job.get("job_id", ""), reason)
                 log_aktivitas.catat(f"Ditolak: {title[:60]} — {reason}")
                 console.print(f"[dim]Dilewati: {title[:50]} — {reason}[/]")
+                self._catat_alasan(reason)
                 self.session_stats["skipped"] += 1
 
         eligible_jobs = job_filter.rank_jobs(eligible_jobs)
@@ -455,6 +459,7 @@ class AutoApplyEngine:
             antrean.selesai(job.get("job_id", ""), "applied", hasil.reason or "")
             log_aktivitas.catat(f"Terkirim: {title} ({job.get('company') or '-'})")
             notifier.send_apply_success(job)
+            self._lapor_target()
 
         elif hasil.status == "manual_required":
             self.session_stats["manual"] += 1
@@ -957,6 +962,92 @@ class AutoApplyEngine:
         console.print(table)
         console.print()
 
+    def _catat_alasan(self, alasan: str):
+        """Simpan alasan lowongan ditolak supaya bisa dirangkum di akhir."""
+        teks = " ".join(str(alasan or "").split()) or "Tanpa alasan"
+        self.alasan_tolak[teks] = self.alasan_tolak.get(teks, 0) + 1
+
+    def _lapor_target(self):
+        """Satu baris kemajuan menuju target harian JobStreet."""
+        target = kuota.batas()
+
+        if target <= 0:
+            return
+
+        try:
+            terpakai = kuota.terpakai(db, situs="jobstreet")
+        except Exception:
+            return
+
+        console.print(
+            f"[cyan]Target JobStreet:[/] {terpakai}/{target} lamaran pada "
+            f"siklus ini (sesi ini {self.session_stats['applied']})."
+        )
+
+    def _laporan_target(self):
+        """Jawab "kenapa target belum tercapai?" tanpa perlu membaca log."""
+        target = kuota.batas()
+
+        if target <= 0:
+            return
+
+        try:
+            terpakai = kuota.terpakai(db, situs="jobstreet")
+        except Exception:
+            return
+
+        sesi = self.session_stats["applied"]
+        kurang = max(0, target - terpakai)
+
+        console.print()
+        console.print("=" * 60)
+
+        if terpakai >= target:
+            console.print(
+                f"[bold green]Target harian JobStreet tercapai:[/] "
+                f"{terpakai}/{target} lamaran pada siklus 24 jam ini "
+                f"(sesi ini {sesi})."
+            )
+            return
+
+        console.print(
+            f"[bold yellow]Target harian JobStreet belum tercapai:[/] "
+            f"{terpakai}/{target} — kurang {kurang}. Sesi ini mengirim "
+            f"{sesi} lamaran."
+        )
+
+        if self.alasan_tolak:
+            console.print("[bold]Alasan lowongan tidak bisa dilamar:[/]")
+
+            for alasan, jumlah in sorted(
+                self.alasan_tolak.items(), key=lambda item: -item[1]
+            )[:8]:
+                console.print(f"  {jumlah:>6}  {alasan}")
+
+        if self.session_stats["manual"]:
+            console.print(
+                f"  {self.session_stats['manual']:>6}  formulir butuh isian "
+                "yang belum pernah dijawab"
+            )
+            console.print(
+                "[yellow]Saran:[/] isi sekali lewat "
+                'jalankan.bat jawaban --isi "pertanyaan=jawaban" '
+                "(lihat daftarnya di atas), atau "
+                "jalankan.bat set-env AUTO_ANSWER_WAIT=60"
+            )
+
+        from collections import Counter
+
+        import target_audit
+
+        for saran in target_audit.saran({"alasan": Counter(self.alasan_tolak)}):
+            console.print(f"[yellow]Saran:[/] {saran}")
+
+        console.print(
+            "[dim]Perkiraan peluang dari isi database: "
+            "jalankan.bat cek-target[/]"
+        )
+
     def _print_results(self):
         console.print(f"\n{'=' * 60}")
 
@@ -993,6 +1084,7 @@ class AutoApplyEngine:
             console.print(f"[yellow]Statistik database tidak tersedia: {exc}[/]")
 
         console.print(table)
+        self._laporan_target()
 
         if self.manual_jobs:
             console.print(

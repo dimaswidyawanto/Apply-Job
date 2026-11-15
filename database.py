@@ -825,6 +825,36 @@ class Database:
 
         return dict(row) if row else None
 
+    def lowongan_belum_dilamar(self, batas: int = 0) -> list[dict]:
+        """Lowongan tersimpan yang belum pernah dilamar (siap dinilai ulang).
+
+        Dipakai `cek-target` untuk menghitung berapa lamaran yang masih bisa
+        dikirim dari isi database, tanpa membuka browser. `batas` 0 = semua.
+        """
+        placeholders = ", ".join("?" for _ in APPLIED_STATUSES)
+
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT j.*
+                FROM jobs AS j
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM applications AS a
+                    WHERE a.job_id = j.job_id
+                      AND a.status IN ({placeholders})
+                )
+                ORDER BY j.id DESC
+                """,
+                tuple(APPLIED_STATUSES),
+            ).fetchall()
+
+        hasil = [dict(row) for row in rows]
+
+        if batas and batas > 0:
+            return hasil[:batas]
+
+        return hasil
+
     # ------------------------------------------------------------------
     # Lamaran
     # ------------------------------------------------------------------
