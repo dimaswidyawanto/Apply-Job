@@ -29,6 +29,10 @@ class BotPalsu:
 
     def apply_job(self, job):
         self.dilamar.append(job["job_id"])
+        # Seperti bot sungguhan: lamaran tercatat, sehingga kuota 50 berkurang.
+        main_module.db.record_application(
+            job["job_id"], "applied", "Terkirim otomatis"
+        )
         return SimpleNamespace(
             applied=True, status="applied", reason="Terkirim otomatis"
         )
@@ -190,7 +194,7 @@ def test_riset_memakai_kata_kunci_khusus(siapkan, monkeypatch):
 
 
 def test_top_50_global_dari_semua_kategori_dan_lokasi(siapkan, monkeypatch):
-    """60 kandidat -> hanya 50 terbaik yang dilamar, lintas lokasi."""
+    """60 kandidat -> 50 teratas dicoba lebih dulu, sesi berhenti di kuota 50."""
     mesin, _ = siapkan
     monkeypatch.setattr(config, "max_apply_per_day", 50)
 

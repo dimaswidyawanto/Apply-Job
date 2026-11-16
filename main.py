@@ -58,6 +58,10 @@ class AutoApplyEngine:
         # Alasan lowongan tidak bisa dilamar pada sesi ini, supaya laporan
         # akhir bisa menunjukkan APA yang menghalangi target 50.
         self.alasan_tolak = {}
+        # Berapa lowongan beruntun gagal karena HALAMAN tidak dikenali (bukan
+        # karena isinya). Dipakai mendeteksi dinding tantangan Cloudflare
+        # "Just a moment..." sebelum menghabiskan banyak kandidat.
+        self.gagal_halaman_beruntun = 0
         # Pengukuran waktu fase riset (laporan kemajuan & perkiraan sisa).
         self.riset_mulai = 0.0
         self.riset_selesai = 0
@@ -476,6 +480,13 @@ class AutoApplyEngine:
                 hasil.reason or "",
             )
 
+        # Halaman yang berulang kali tidak dikenali biasanya bukan soal satu
+        # lowongan: JobStreet menampilkan dinding tantangan Cloudflare
+        # ("Just a moment..."). Sesi 2026-11-16 kehilangan 16 kandidat dalam
+        # 74 detik karena bot terus mencoba di dinding yang sama.
+        if self._periksa_halaman_macet(hasil):
+            return False
+
         # Jeda hanya untuk lamaran yang benar-benar diproses;
         # lowongan yang dilewati langsung lanjut ke berikutnya.
         delay = max(0, int(config.delay_between_apply))
@@ -701,9 +712,15 @@ class AutoApplyEngine:
             f"{keterangan_urut}.[/]"
         )
 
-        # Bandingkan dulu, baru lamar: ambil hanya yang terbaik sebanyak sisa
-        # kuota hari ini, supaya batas harian dipakai untuk lowongan paling
-        # cocok — bukan untuk yang kebetulan ditemukan lebih dulu.
+        # Bandingkan dulu, baru lamar — dari yang paling cocok.
+        #
+        # Kandidat TIDAK dipotong sebanyak sisa kuota. Dulu daftar dipotong
+        # tepat 50, lalu setiap kegagalan (formulir belum terjawab, halaman
+        # tantangan Cloudflare, tombol Lamar tidak ada) membakar satu slot
+        # tanpa diganti kandidat berikutnya: sesi 2026-11-16 hanya mengirim 24
+        # dari 220 kandidat karena 26 slot habis di formulir. Sekarang seluruh
+        # kandidat dicoba berurutan dan sesi berhenti saat kuota benar-benar
+        # terisi.
         console.print(f"[cyan]{kuota.ringkasan(db, situs='jobstreet')}[/]")
 
         if kuota.habis(db, situs="jobstreet"):
@@ -716,10 +733,9 @@ class AutoApplyEngine:
         if sisa is not None and len(kandidat) > sisa:
             console.print(
                 f"[bold]{len(kandidat)} kandidat[/] (dari seluruh "
-                f"kategori & lokasi) bersaing untuk [bold]{sisa} slot[/] "
-                f"— diambil {sisa} yang paling cocok."
+                f"kategori & lokasi) untuk [bold]{sisa} slot[/] — "
+                "dicoba berurutan sampai kuota terisi atau kandidat habis."
             )
-            kandidat = kuota.potong(kandidat, db, situs="jobstreet")
 
         if not kandidat:
             console.print("[yellow]Tidak ada lowongan yang dilamar.[/]")
@@ -841,7 +857,7 @@ class AutoApplyEngine:
         if len(kandidat) > maksimal:
             console.print(
                 f"[dim]… dan {len(kandidat) - maksimal} lowongan lain di "
-                "bawahnya (tidak dilamar pada sesi ini).[/]"
+                "bawahnya (dicoba juga bila slot kuota masih tersisa).[/]"
             )
 
     def _print_banner(self):
@@ -966,6 +982,67 @@ class AutoApplyEngine:
         """Simpan alasan lowongan ditolak supaya bisa dirangkum di akhir."""
         teks = " ".join(str(alasan or "").split()) or "Tanpa alasan"
         self.alasan_tolak[teks] = self.alasan_tolak.get(teks, 0) + 1
+
+    # Alasan kegagalan yang menandakan HALAMANNYA tidak terbaca, bukan isinya.
+    ALASAN_HALAMAN_MACET = (
+        "tombol lamar tidak ditemukan",
+        "halaman tidak dikenali",
+        "alur lamaran tidak dikenali",
+    )
+    # Setelah sekian kegagalan beruntun: berhenti sejenak, lalu berhenti total.
+    BATAS_MACET_JEDA = 3
+    BATAS_MACET_BERHENTI = 6
+
+    def _periksa_halaman_macet(self, hasil) -> bool:
+        """Deteksi dinding tantangan Cloudflare sebelum kandidat habis.
+
+        True = sesi harus dihentikan. Jeda pendek diberikan lebih dulu agar
+        tantangan yang lewat sendiri (biasanya 5-10 detik) tidak mematikan
+        sesi; jeda itu bisa dilewati lewat `JEDA_MACET_DETIK=0`.
+        """
+        alasan = str(getattr(hasil, "reason", "") or "").lower()
+        macet = any(kata in alasan for kata in self.ALASAN_HALAMAN_MACET)
+
+        if not macet:
+            self.gagal_halaman_beruntun = 0
+            return False
+
+        self.gagal_halaman_beruntun += 1
+
+        if self.gagal_halaman_beruntun == self.BATAS_MACET_JEDA:
+            jeda = max(0, int(config.jeda_macet_detik))
+            console.print(
+                "[bold yellow]Beberapa halaman beruntun tidak dikenali — "
+                "kemungkinan JobStreet menampilkan halaman verifikasi "
+                "(\"Just a moment...\").[/]"
+            )
+            if jeda:
+                console.print(
+                    f"[yellow]Berhenti {jeda} detik supaya halaman verifikasi "
+                    "lewat. Bila jendela Chrome menampilkan tantangan, "
+                    "selesaikan sekarang.[/]"
+                )
+                waktu_berhenti = time.monotonic()
+                while time.monotonic() - waktu_berhenti < jeda:
+                    if self.stop_requested:
+                        break
+                    time.sleep(min(1, jeda))
+
+        if self.gagal_halaman_beruntun >= self.BATAS_MACET_BERHENTI:
+            console.print(
+                "[bold red]Sesi dihentikan: halaman lowongan terus tidak "
+                f"dikenali ({self.gagal_halaman_beruntun} kali beruntun). "
+                "Kemungkinan besar Anda kena batas kecepatan JobStreet.[/]"
+            )
+            console.print(
+                "[yellow]Saran: tunggu 15-30 menit, lalu jalankan lagi. "
+                "Perlambat dengan set-env DELAY_BETWEEN_APPLY=8 dan "
+                "set-env AUTO_APPLY_STEP_TIMEOUT=15.[/]"
+            )
+            self.stop_requested = True
+            return True
+
+        return False
 
     def _lapor_target(self):
         """Satu baris kemajuan menuju target harian JobStreet."""

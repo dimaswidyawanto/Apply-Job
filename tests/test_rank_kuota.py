@@ -2,7 +2,11 @@
 
 Pengguna meminta maksimal 50 lamaran/hari dan hanya lowongan dengan kecocokan
 tertinggi yang dikirim — jadi semua kandidat dari semua lokasi dikumpulkan dan
-dibandingkan dulu, baru diambil yang terbaik sebanyak sisa kuota.
+dibandingkan dulu, baru dicoba berurutan dari yang terbaik.
+
+Sejak 2026-11-16 daftar TIDAK lagi dipotong sebanyak sisa kuota: kandidat
+dicoba satu per satu sampai kuota terisi, supaya satu formulir yang gagal
+tidak membakar slot lamaran yang bisa dikirim (lihat tests/test_kejar_target.py).
 """
 
 from types import SimpleNamespace
@@ -27,6 +31,10 @@ class BotPalsu:
 
     def apply_job(self, job):
         self.dilamar.append(job["job_id"])
+        # Seperti bot sungguhan: lamaran tercatat sehingga kuota berkurang.
+        main_module.db.record_application(
+            job["job_id"], "applied", "Terkirim otomatis"
+        )
         return SimpleNamespace(
             applied=True, status="applied", reason="Terkirim otomatis"
         )

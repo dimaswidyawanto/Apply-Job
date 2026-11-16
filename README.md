@@ -1050,6 +1050,43 @@ Kuota harian: 12 sudah dilamar hari ini, sisa 38 dari 50.
 └──────────────────────┴──────┴──────┴──────┴──────┴──────┴──────┴─────┴────┴─────┘
 ```
 
+### Kuota 50 diisi sampai penuh, bukan "50 dicoba"
+
+Kandidat **tidak lagi dipotong sebanyak sisa kuota**. Seluruh kandidat hasil
+riset diurutkan dari yang paling cocok, lalu dicoba satu per satu sampai kuota
+benar-benar terisi atau kandidat habis.
+
+Kenapa berubah: sesi 2026-11-16 menemukan 220 kandidat, tetapi daftar dipotong
+tepat 50 lalu setiap kegagalan membakar satu slot — 26 formulir yang belum
+terjawab membuat sesi berhenti di **24 terkirim** padahal 170 kandidat belum
+pernah dicoba. Sekarang 26 kegagalan itu diganti kandidat berikutnya.
+
+```
+220 kandidat (dari seluruh kategori & lokasi) untuk 50 slot —
+dicoba berurutan sampai kuota terisi atau kandidat habis.
+```
+
+### Halaman verifikasi ("Just a moment...") tidak lagi menghabiskan kandidat
+
+JobStreet bisa menampilkan dinding tantangan Cloudflare di tengah sesi
+(biasanya setelah puluhan lamaran beruntun). Halaman itu berjudul
+`Just a moment...`, memuat 0 tombol Lamar, dan dulu membuat bot melewati
+kandidat setiap 5 detik — 16 kandidat hilang dalam 74 detik.
+
+Sekarang bot mendeteksinya:
+
+* **3 kegagalan beruntun** dengan alasan `Tombol Lamar tidak ditemukan` /
+  `Halaman tidak dikenali` → berhenti **90 detik** (`JEDA_MACET_DETIK`) supaya
+  tantangan lewat sendiri; Anda juga bisa menyelesaikannya di jendela Chrome.
+* **6 kegagalan beruntun** → sesi dihentikan dengan pesan jelas (bukan diam-diam
+  melanjutkan), dan kandidat yang belum dicoba tidak ditandai gagal.
+
+```bash
+python cli.py set-env JEDA_MACET_DETIK=90      # 0 = langsung lanjut
+python cli.py set-env DELAY_BETWEEN_APPLY=8    # perlambat agar tidak terpicu
+python cli.py set-env AUTO_APPLY_STEP_TIMEOUT=15
+```
+
 ### Kalau target 50 belum tercapai: baca alasannya, jangan menebak
 
 Setiap lamaran yang terkirim mencetak kemajuan target, dan akhir sesi selalu

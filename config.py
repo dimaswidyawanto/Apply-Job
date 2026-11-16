@@ -256,6 +256,11 @@ class Config:
     max_apply_per_day: int = max(0, _int_setting("MAX_APPLY_PER_DAY", 50))
     delay_between_apply: int = _int_setting("DELAY_BETWEEN_APPLY", 3)
 
+    # Jeda (detik) ketika beberapa halaman lowongan beruntun tidak dikenali —
+    # gejalanya dinding verifikasi Cloudflare "Just a moment...". Tantangan itu
+    # biasanya lewat sendiri dalam 5-10 detik; 0 = langsung lanjut.
+    jeda_macet_detik: int = max(0, _int_setting("JEDA_MACET_DETIK", 90))
+
     # Auto recovery (master prompt pasal 10): kegagalan SEMENTARA (timeout,
     # internet putus, browser mati) diulang beberapa kali sebelum menyerah.
     # 0 = tanpa ulang.

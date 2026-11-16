@@ -835,3 +835,43 @@ dari kenyataan.
 
 Tes: 804 → **818 passed, 1 skipped** (+14: `tests/test_target_audit.py` 8,
 `tests/test_target_panel.py` 6), gate ruff (`E9,F,E501,I,B,SIM,ISC`) bersih.
+
+## 24. Kuota 50 terpakai habis oleh kegagalan, dan dinding "Just a moment..."
+
+**Data nyata 2026-11-16** (dua sesi, JobStreet, folder `C:\Users\ASUS\dimastes`).
+
+Sesi A, 00:33–00:47:
+
+```
+Riset selesai: 12140 kartu → 220 unik
+220 kandidat ... bersaing untuk 50 slot — diambil 50 yang paling cocok.
+Hasil Sesi: terkirim 24 · butuh isian khusus 26 · error 0
+Target harian JobStreet belum tercapai: 24/50 — kurang 26
+… 16 kegagalan "Tombol Lamar tidak ditemukan" dalam 74 detik
+   (berkas debug: <title>Just a moment...</title>, 45.198 bytes)
+```
+
+Sesi B, 18:22–21:21 (saringan logo masih aktif di folder lain):
+
+```
+Riset selesai: 12041 kartu → 29 unik
+Hasil Sesi: terkirim 15 · butuh isian khusus 14 · error 0
+Alasan tertolak: 1082 Tanpa logo perusahaan · 499 Judul tidak sesuai minat
+```
+
+| Gejala | Penyebab | Perbaikan |
+|---|---|---|
+| 220 kandidat → hanya 24 terkirim | `kuota.potong()` memotong daftar tepat sebanyak sisa kuota **sebelum** melamar; setiap kegagalan formulir membakar satu slot dan kandidat ke-51 dst. tidak pernah dicoba | Pemotongan dihapus: seluruh kandidat dicoba berurutan, sesi berhenti saat kuota terisi (`_kumpulkan_lalu_lamar`) |
+| 16 kandidat hilang dalam 74 detik | JobStreet menampilkan `Just a moment...`; bot menunggu 3 detik (`AUTO_APPLY_STEP_TIMEOUT`), tidak menemukan tombol Lamar, lalu lanjut ke kandidat berikutnya | `_periksa_halaman_macet()`: 3 kegagalan halaman beruntun → jeda `JEDA_MACET_DETIK` (bawaan 90 dtk); 6 beruntun → sesi dihentikan dengan pesan jelas |
+| Kandidat yang belum dicoba ikut tampak "gagal" | Tidak ada pembeda antara "lowongan buruk" dan "halaman tidak terbaca" | Penghitung `gagal_halaman_beruntun` direset oleh hasil apa pun yang bukan kegagalan halaman |
+
+**Yang tidak diklaim:** jeda 90 detik tidak menembus Cloudflare. Bila tantangan
+tidak lewat dan Anda tidak menyelesaikannya di jendela Chrome, sesi memang
+berhenti — tetapi berhenti **sesudah 6 kandidat**, bukan 16, dan laporannya
+menyebut sebabnya.
+
+Tes: 818 → **823 passed, 1 skipped** (+5 di `tests/test_kejar_target.py`),
+gate ruff (`E9,F,E501,I,B,SIM,ISC`) bersih. Tiga tes lama
+(`tests/test_rank_kuota.py`, `tests/test_riset.py`) disesuaikan: bot tiruannya
+kini mencatat lamaran ke database seperti bot sungguhan, karena kuota 50
+sekarang dihitung dari lamaran yang benar-benar terkirim.
