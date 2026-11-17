@@ -41,6 +41,30 @@ APPLIED_CARD_SELECTORS = (
     "[data-testid*='applied']",
 )
 
+# Penanda tanggal publikasi pada kartu lowongan JobStreet.
+#
+# Markup kartu berubah antar versi situs. Dulu hanya
+# `[data-automation='jobListingDate']` dan `time` yang dibaca; ketika keduanya
+# tidak ada, `date_posted` kosong, `age_days` menjadi None, dan aturan
+# MAX_AGE_DAYS tidak pernah bekerja di data nyata (semua lowongan terbaca
+# DATE_UNKNOWN — terlihat pada live validation 17 Nov 2026).
+DATE_SELECTORS = (
+    "[data-automation='jobListingDate']",
+    "[data-automation*='jobListingDate']",
+    "[data-automation*='listingDate']",
+    "[data-testid*='listing-date']",
+    "time[datetime]",
+    "time",
+)
+
+# Label umur yang kadang hanya muncul sebagai teks biasa di badan kartu.
+POLA_LABEL_UMUR = re.compile(
+    r"(?:baru saja|hari ini|kemarin"
+    r"|\d+\s*(?:menit|jam|hari|minggu|bulan|tahun)(?:\s+yang)?\s+lalu"
+    r"|\d+\+?\s*hari(?:\s+yang)?\s+lalu)",
+    re.IGNORECASE,
+)
+
 # Penanda logo perusahaan pada kartu lowongan JobStreet.
 LOGO_SELECTORS = (
     "[data-automation*='logo']",
@@ -481,13 +505,7 @@ class JobStreetBot:
             ],
         )
 
-        date_posted = self._read_card_value(
-            card,
-            [
-                "[data-automation='jobListingDate']",
-                "time",
-            ],
-        )
+        date_posted = self._baca_tanggal(card)
 
         try:
             description = (card.text or "").strip()
@@ -510,6 +528,51 @@ class JobStreetBot:
             "age_days": self._parse_listing_age(date_posted),
             "applied": self._card_is_applied(card),
         }
+
+    def _baca_tanggal(self, card) -> str:
+        """Tanggal publikasi satu kartu: atribut `datetime`, teks, lalu label.
+
+        Urutannya sengaja: `datetime` (paling tepat) → teks elemen tanggal →
+        label umur di badan kartu ("3 hari lalu", "Baru saja"). Bila semuanya
+        tidak ada, kembalikan "" supaya lowongan tercatat DATE_UNKNOWN —
+        bukan 0 hari (yang akan membuat lowongan lama tampak baru).
+        """
+        for selector in DATE_SELECTORS:
+            try:
+                element = card.find_element(By.CSS_SELECTOR, selector)
+            except Exception:
+                continue
+
+            try:
+                atribut = (element.get_attribute("datetime") or "").strip()
+            except Exception:
+                atribut = ""
+
+            try:
+                teks = " ".join(
+                    (element.text or element.get_attribute("textContent") or "")
+                    .split()
+                )
+            except Exception:
+                teks = ""
+
+            # Yang bisa dibaca parser umur didahulukan, mana pun yang ada.
+            for kandidat in (atribut, atribut[:10], teks):
+                if kandidat and umur.umur_dari_teks(kandidat) is not None:
+                    return kandidat
+
+            for kandidat in (teks, atribut):
+                if kandidat:
+                    return kandidat
+
+        # Tidak ada elemen tanggal: cari label umur di teks kartu.
+        try:
+            teks_kartu = " ".join((card.text or "").split())
+        except Exception:
+            teks_kartu = ""
+
+        cocok = POLA_LABEL_UMUR.search(teks_kartu)
+        return cocok.group(0) if cocok else ""
 
     @staticmethod
     def _card_is_applied(card) -> bool:

@@ -48,6 +48,17 @@ from notifier import notifier
 
 console = Console()
 
+# Jeda kecil antar pencarian Glints. Tanpa jeda, 126 kombinasi (14 kata kunci
+# x 9 lokasi) dijalankan beruntun dan sesi Chrome bisa diputus server
+# (terlihat live: ConnectionResetError WinError 10054 pada kombinasi ke-27).
+JEDA_PENCARIAN = 1.0
+
+PESAN_CHROME_PUTUS = (
+    "Koneksi ke Chrome terputus saat membaca Glints. Riset dihentikan, "
+    "lowongan yang sudah terbaca tetap dipakai. Jalankan lagi setelah Chrome "
+    "stabil (atau ganti jaringan bila situs menutup koneksi)."
+)
+
 # Sama seperti JobStreet: riset Glints berhenti setelah 5 kali muat
 # ("Muat lebih banyak") untuk setiap kata kunci.
 BATAS_MUAT_GLINTS = MAKS_HALAMAN_RISET
@@ -1686,6 +1697,7 @@ def kumpulkan_lowongan(bot, kata_kunci, halaman: int,
 
     lowongan: list[dict] = []
     terlihat = set()
+    sudah_mencari = False
 
     for urutan, location in enumerate(daftar_lokasi):
         # Glints mengabaikan parameter lokasi: mengulang 9 lokasi hanya
@@ -1705,9 +1717,29 @@ def kumpulkan_lowongan(bot, kata_kunci, halaman: int,
             kartu = cache_riset.ambil(kunci_cache, situs="glints")
 
             if kartu is None:
-                kartu = list(
-                    bot.cari(keyword, max(0, halaman - 1), location)
-                )
+                # Jedakan pencarian sungguhan (cache tidak perlu jeda) supaya
+                # tidak menembak situs 100+ kali tanpa henti.
+                if sudah_mencari:
+                    time.sleep(max(0.0, float(JEDA_PENCARIAN)))
+
+                try:
+                    kartu = list(
+                        bot.cari(keyword, max(0, halaman - 1), location)
+                    )
+                except (ConnectionError, OSError, WebDriverException) as exc:
+                    # Chrome bisa memutus sesi DevTools di tengah riset
+                    # (WinError 10054). Dulu ini menghasilkan traceback mentah
+                    # dan seluruh sesi dianggap gagal; sekarang berhenti rapi
+                    # dengan lowongan yang sudah terbaca.
+                    console.print(f"[yellow]{PESAN_CHROME_PUTUS}[/]")
+                    log_aktivitas.catat(
+                        "Glints: koneksi Chrome terputus "
+                        f"({exc.__class__.__name__}: {str(exc)[:120]})",
+                        "warning",
+                    )
+                    return dedupe_jobs(lowongan)
+
+                sudah_mencari = True
                 cache_riset.simpan(kunci_cache, kartu, situs="glints")
             else:
                 console.print(
@@ -1838,6 +1870,13 @@ def daftar_kandidat(keywords: list[str] | None = None,
     try:
         bot.init_browser()
         lowongan = kumpulkan_lowongan(bot, kata_kunci, max_pages)
+    except KeyboardInterrupt:
+        # Ctrl+C saat menunggu Chrome/memaut halaman bukan kegagalan program.
+        console.print(
+            "[yellow]Dihentikan oleh Anda (Ctrl+C).[/] Chrome ditutup; "
+            "lowongan yang sudah terbaca tetap dipakai."
+        )
+        lowongan = []
     finally:
         bot.tutup()
 

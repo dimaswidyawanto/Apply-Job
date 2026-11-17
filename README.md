@@ -695,6 +695,17 @@ Aturan yang berlaku:
 * **bawaan sejak validasi final: `MAX_AGE_DAYS=7`** supaya lowongan lama tidak
   ikut dilamar. Isi `0` untuk mematikan batas ini.
 
+Tanggal di kartu JobStreet dibaca berlapis (live validation 17 Nov 2026
+menemukan semua lowongan `DATE_UNKNOWN` karena hanya dua selector lama yang
+dipakai):
+
+1. atribut `datetime` pada elemen tanggal (`<time datetime="2026-11-15T…">`);
+2. teks elemen tanggal (`15 Nov 2026`, `3 hari yang lalu`);
+3. label umur di badan kartu (`Baru saja`, `30+ hari lalu`).
+
+Bila ketiganya tidak ada, lowongan dicatat **`DATE_UNKNOWN`** (bukan 0 hari),
+supaya lowongan lama tidak tampak baru.
+
 ```powershell
 .\jalankan.bat set-env MAX_AGE_DAYS=7
 .\jalankan.bat set-env TOLAK_UMUR_TAK_DIKETAHUI=true
@@ -1286,6 +1297,19 @@ Catatan: urutan itu mengikuti kode apa adanya (duplikat diperiksa lebih dulu),
 bukan urutan yang enak dibaca. Skor hanya dipakai untuk mengurutkan — keputusan
 melamar tetap dari aturan `should_apply()` yang sama untuk JobStreet, Glints,
 dan Indeed.
+
+Di akhir, `dry-run` mencetak ringkasan per situs (Total/APPLY/SKIP, duplikat,
+terlalu tua, tanpa tanggal, lokasi, judul, blacklist) plus satu peringatan bila
+ada lowongan tanpa tanggal tersimpan:
+
+```
+Catatan: 6118 dari 6118 lowongan tanpa tanggal tersimpan (DATE_UNKNOWN) —
+aturan MAX_AGE_DAYS tidak dapat menilainya. Riset baru akan mengisi tanggalnya.
+```
+
+Peringatan itu jujur: `MAX_AGE_DAYS` hanya bisa bekerja pada lowongan yang
+tanggalnya benar-benar terbaca dari kartu. Baris lama di database yang
+dikumpulkan sebelum perbaikan tanggal tetap `DATE_UNKNOWN` sampai diriset ulang.
 
 Keluarannya menilai ulang seluruh lowongan tersimpan pada beberapa skenario
 aturan, sehingga selisihnya menunjukkan aturan mana yang menahan:

@@ -560,6 +560,35 @@ def _umur_lowongan(job: dict):
     return umur_modul.umur_dari_teks(teks)
 
 
+# Kategori alasan penolakan untuk ringkasan dry-run (bahan laporan live).
+KATEGORI_PENOLAKAN = (
+    ("duplikat", ("sudah pernah", "sudah tercatat", "sudah dilamar")),
+    ("terlalu_tua", ("max_age_days", "terlalu lama")),
+    ("tanpa_tanggal", ("date_unknown", "tidak terbaca")),
+    ("lokasi", ("lokasi",)),
+    ("judul", ("judul", "minat", "title", "peran lain")),
+    ("blacklist", ("blacklist",)),
+    ("logo", ("logo",)),
+    ("gaji", ("salary", "gaji")),
+    ("pengalaman", ("experience", "pengalaman")),
+    ("senior", ("senior",)),
+)
+
+
+def kategori_penolakan(alasan: str) -> str:
+    """Kategori singkat satu alasan penolakan ('' bila lolos)."""
+    teks = str(alasan or "").strip().lower()
+
+    if not teks or teks == "ok":
+        return ""
+
+    for nama, penanda in KATEGORI_PENOLAKAN:
+        if any(kata in teks for kata in penanda):
+            return nama
+
+    return "lainnya"
+
+
 def dry_run(situs: str = "", batas: int = 5):
     """Jejak keputusan lowongan tersimpan TANPA mengirim lamaran.
 
@@ -640,16 +669,102 @@ def dry_run(situs: str = "", batas: int = 5):
             )
 
     jumlah_apply = sum(1 for item in dinilai if item["keputusan"] == "APPLY")
+    tanpa_tanggal = sum(
+        1
+        for item in dinilai
+        if next(
+            (t for t in item["tahapan"] if t["tahap"] == "AGE"), {}
+        ).get("umur_hari")
+        is None
+    )
+
     console.print(
         f"\n[bold]Ringkasan:[/] {jumlah_apply} APPLY · "
         f"{len(dinilai) - jumlah_apply} SKIP dari {len(dinilai)} lowongan "
         "(tidak ada yang dikirim)"
     )
 
+    if tanpa_tanggal:
+        # Penting untuk kejujuran: aturan umur tidak bisa menilai lowongan
+        # yang tanggalnya tidak tersimpan (mis. baris lama di database).
+        console.print(
+            f"[yellow]Catatan:[/] {tanpa_tanggal} dari {len(dinilai)} lowongan "
+            "tanpa tanggal tersimpan (DATE_UNKNOWN) — aturan MAX_AGE_DAYS tidak "
+            "dapat menilainya. Riset baru akan mengisi tanggalnya."
+        )
+
+    per_situs: dict = {}
+
+    for item in dinilai:
+        nama_situs = item.get("platform") or "tidak diketahui"
+        baris = per_situs.setdefault(
+            nama_situs, {"total": 0, "apply": 0}
+        )
+        baris["total"] += 1
+
+        if item["keputusan"] == "APPLY":
+            baris["apply"] += 1
+            continue
+
+        kategori = kategori_penolakan(item["alasan"]) or "lainnya"
+        baris[kategori] = baris.get(kategori, 0) + 1
+
+    tabel = Table(title="Ringkasan dry-run per situs")
+    kolom = (
+        "Situs",
+        "Total",
+        "APPLY",
+        "SKIP",
+        "Duplikat",
+        "Tua",
+        "Tgl ?",
+        "Lokasi",
+        "Judul",
+        "Lain",
+    )
+
+    for judul in kolom:
+        tabel.add_column(judul)
+
+    for nama_situs, baris in sorted(per_situs.items()):
+        total = baris["total"]
+        apply_count = baris["apply"]
+        # "Lain" = blacklist, logo, gaji, pengalaman, senior, dan sisanya.
+        lain = sum(
+            nilai
+            for kunci, nilai in baris.items()
+            if kunci
+            not in (
+                "total",
+                "apply",
+                "duplikat",
+                "terlalu_tua",
+                "tanpa_tanggal",
+                "lokasi",
+                "judul",
+            )
+        )
+        tabel.add_row(
+            nama_situs,
+            str(total),
+            str(apply_count),
+            str(total - apply_count),
+            str(baris.get("duplikat", 0)),
+            str(baris.get("terlalu_tua", 0)),
+            str(baris.get("tanpa_tanggal", 0)),
+            str(baris.get("lokasi", 0)),
+            str(baris.get("judul", 0)),
+            str(lain),
+        )
+
+    console.print(tabel)
+
     return {
         "total": len(dinilai),
         "apply": jumlah_apply,
         "skip": len(dinilai) - jumlah_apply,
+        "tanpa_tanggal": tanpa_tanggal,
+        "per_situs": per_situs,
         "lowongan": dinilai,
     }
 
@@ -1326,7 +1441,11 @@ def show_config():
     )
     table.add_row(
         "Wajib ada logo perusahaan",
-        "Aktif (JobStreet & Glints; Indeed tanpa logo)",
+        (
+            "Aktif (JobStreet & Glints; Indeed tanpa logo)"
+            if config.require_company_logo
+            else "Tidak aktif — lowongan tanpa logo tetap dilamar"
+        ),
     )
     table.add_row(
         "Pertanyaan pilihan otomatis",

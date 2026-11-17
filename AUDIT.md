@@ -1103,3 +1103,84 @@ cukup".
 `pytest -q` → **985 passed, 1 skipped** (+3); ruff (`E9,F,E501,I,B,SIM,ISC`)
 bersih; `compileall` bersih. Perbaikan ini **wajib** agar live validation
 JobStreet/Glints/Indeed bisa dilanjutkan di Windows.
+
+## 29. LIVE VALIDATION Windows: umur tidak terbaca, banner logo bohong, Chrome putus
+
+Tiga temuan dari sesi nyata di mesin pengguna (Windows 11, commit `56ceeab`),
+semuanya lolos dari unit test karena DOM-nya tiruan.
+
+### a. `MAX_AGE_DAYS=7` tidak pernah bekerja pada data nyata
+
+`dry-run` atas 6118 lowongan menampilkan `AGE · tanggal tidak terbaca
+(DATE_UNKNOWN)` untuk **setiap** lowongan. Artinya `date_posted` kosong di
+database, `age_days` = `None`, dan `umur.batas_umur()` selalu meloloskan.
+
+Akar masalah: `scraper.py` hanya membaca `[data-automation='jobListingDate']`
+dan `time`. Markup kartu JobStreet berubah, sehingga keduanya tidak ditemukan
+dan tanggal menjadi `""`. Unit test lama memakai kartu tiruan yang memang tidak
+punya tanggal, jadi tidak pernah menangkapnya.
+
+Perbaikan (`scraper.py`):
+
+| Bagian | Perubahan |
+|---|---|
+| `DATE_SELECTORS` (baru) | 6 selector: `jobListingDate`, `listingDate`, `data-testid*='listing-date'`, `time[datetime]`, `time` |
+| `POLA_LABEL_UMUR` (baru) | label umur di badan kartu: `baru saja`, `hari ini`, `kemarin`, `N (menit|jam|hari|minggu|bulan|tahun) [yang] lalu`, `N+ hari lalu` |
+| `_baca_tanggal()` (baru) | urutan: atribut `datetime` → teks elemen → label di teks kartu; kosong = `""` (`DATE_UNKNOWN`), **tidak** dipaksa 0 hari |
+
+Bukti uji: kartu `datetime="2026-11-15T…"` → `date_posted="2026-11-15"`;
+kartu berlabel `3 hari yang lalu` → `age_days=3`; kartu `Baru saja` → `0`;
+kartu tanpa tanggal → `None`. Ujung-ke-ujung: lowongan 9 hari dari kartu
+ditolak `Lowongan terlalu lama (9 hari > MAX_AGE_DAYS=7)`, umur 7 diterima.
+
+Batas jujur: baris lama di database tetap `DATE_UNKNOWN` sampai diriset ulang —
+karena itu `dry-run` sekarang mencetak berapa banyak lowongan tanpa tanggal.
+
+### b. Banner `config` menyatakan filter logo aktif padahal mati
+
+`cli.py` mencetak baris "Wajib ada logo perusahaan: Aktif (JobStreet & Glints;
+Indeed tanpa logo)" **hardcoded**, sementara `cek-logo` pada sesi yang sama
+mencetak `REQUIRE_COMPANY_LOGO=false — filter logo belum aktif`. Pengguna jadi
+melihat dua kebenaran berbeda; angka `APPLY` di `dry-run` (696) pun dihitung
+tanpa filter logo.
+
+Perbaikan: baris itu mengikuti `config.require_company_logo`
+("Aktif (JobStreet & Glints; Indeed tanpa logo)" / "Tidak aktif — lowongan tanpa
+logo tetap dilamar").
+
+### c. Chrome memutus koneksi → traceback mentah, riset Glints berhenti
+
+Pada kombinasi ke-27 dari 126, sesi DevTools direset
+(`ConnectionResetError: [WinError 10054]`). Yang terjadi: traceback panjang,
+`bot.tutup()` melempar `ConnectionRefusedError` (Chrome sudah mati), lalu Ctrl+C
+menghasilkan `KeyboardInterrupt` berlapis saat `driver.quit()` — karena
+`contextlib.suppress(Exception)` tidak menangkap `KeyboardInterrupt`.
+
+Perbaikan:
+* `glints.py`: `PESAN_CHROME_PUTUS`, `JEDA_PENCARIAN = 1.0` (jeda antar
+  pencarian sungguhan; cache tidak dijeda), dan penanganan
+  `ConnectionError/OSError/WebDriverException` → berhenti rapi sambil
+  mempertahankan lowongan yang sudah terbaca;
+* `daftar_kandidat()`: `KeyboardInterrupt` → pesan "Dihentikan oleh Anda
+  (Ctrl+C)", Chrome ditutup, tanpa traceback;
+* `browser.tutup_chrome()`: `suppress(Exception, KeyboardInterrupt)` pada
+  `driver.quit()` supaya pembersihan tidak pernah menutupi hasil sesi.
+
+### d. Ringkasan dry-run per situs
+
+`cli.py dry_run()` sekarang mengembalikan/mencetak `per_situs` (Total, APPLY,
+SKIP, duplikat, terlalu tua, tanpa tanggal, lokasi, judul, blacklist, lainnya)
+supaya laporan live (§14) tidak perlu dihitung manual.
+
+### Hasil
+
+`tests/test_live_fixes.py` (17 tes): tanggal kartu (4 variasi + 2 ujung-ke-ujung
+dengan `MAX_AGE_DAYS`), banner logo aktif/mati, Chrome putus/refused/OSError,
+Ctrl+C, jeda pencarian, dan ringkasan dry-run per situs.
+
+Suite: **1002 passed, 1 skipped**; ruff (`E9,F,E501,I,B,SIM,ISC`) dan
+`compileall` bersih.
+
+**Yang masih NOT VERIFIED:** pembacaan tanggal pada markup JobStreet **hari
+ini** (butuh satu kali riset nyata), form lamaran, ARIA/required-field live, dan
+scoring Glints/Indeed live (Glints sempat putus, Indeed diblokir Cloudflare).

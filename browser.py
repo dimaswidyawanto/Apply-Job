@@ -176,7 +176,9 @@ def tutup_chrome(driver) -> bool:
         )
         return False
 
-    with contextlib.suppress(Exception):
+    # Termasuk KeyboardInterrupt: Ctrl+C saat membersihkan browser tidak boleh
+    # menutupi hasil sesi dengan traceback (kejadian nyata di Windows).
+    with contextlib.suppress(Exception, KeyboardInterrupt):
         driver.quit()
     return True
 
