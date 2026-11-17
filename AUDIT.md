@@ -875,3 +875,44 @@ gate ruff (`E9,F,E501,I,B,SIM,ISC`) bersih. Tiga tes lama
 (`tests/test_rank_kuota.py`, `tests/test_riset.py`) disesuaikan: bot tiruannya
 kini mencatat lamaran ke database seperti bot sungguhan, karena kuota 50
 sekarang dihitung dari lamaran yang benar-benar terkirim.
+
+## 25. Jawaban ya/tidak yang sudah tersimpan tidak terpakai (audit #25)
+
+**Data nyata 2026-11-17, 01:30–02:00** (JobStreet, folder
+`C:\Dimas\Lamar otomatis Jobstreet dan Glints`):
+
+```
+Target JobStreet: 50/50 lamaran pada siklus ini (sesi ini 35)
+Error 0 · dilewati (butuh isian khusus) 13 · dilewati/tidak dikonfirmasi 1466
+```
+
+Target tercapai, tetapi 13 lamaran hilang karena **satu** pertanyaan ya/tidak
+yang jawabannya SUDAH tersimpan. Setiap pertanyaan seperti itu juga membakar
+`AUTO_ANSWER_WAIT` penuh (60 detik) → ±13 menit terbuang per sesi.
+
+| Gejala | Penyebab (root cause) | Perbaikan |
+|---|---|---|
+| `do you have sales negotiation experience?` (tersimpan "No") tetap ditanya | Label opsi tidak terbaca: formulir hanya mengisi `value="Yes"/"No"` tanpa label/aria, sehingga daftar opsi kosong dan tidak ada yang bisa dipilih | `_label_untuk()` jalur 6: atribut `value` dipakai sebagai teks opsi bila berupa teks manusia (`opt_3`, `choice_1`, angka, ID internal ditolak) |
+| Pertanyaan yang sudah terjawab dilaporkan "belum bisa dijawab otomatis" | Status "terpilih" dibaca seketika setelah klik; komponen React JobStreet baru memperbarui `checked` beberapa ratus milidetik kemudian, jadi klik yang BERHASIL dianggap gagal | `_terpilih_setelah_klik()`: status ditunggu ≤0,8 detik; jalan terakhir memakai skrip (`click` + `checked` + event `input`/`change`) |
+| Kalimat pertanyaan yang disusun ulang tidak dikenali | Ambang kemiripan tunggal 0,86; "do you have sales negotiation experience" vs "do you have experience in sales negotiation" hanya 0,70 | `cocok_opsi()` (kunci persis → sisi ya/tidak → kata utuh → angka → kemiripan 0,80) dan cadangan `_cadangan_ya_tidak()` (0,72 + wajib berbagi kata pembeda + selisih 0,06 dari kandidat kedua) |
+| Jawaban salah bisa terpakai untuk pertanyaan lain | `subjek_utama()` membandingkan subjek yang masih memuat kata jenis ("experience"), sehingga "ERP implementation experience" dianggap sejenis "sales negotiation experience" (0,702 ≥ 0,70) | Kata jenis (`experience`, `salary`, `education`, …) dibuang dari subjek; ditambah penjaga `_isi_sejalan()` di jalur cadangan |
+| Pertanyaan wajib yang penanda "wajib" menempel di teksnya tidak cocok dengan ingatan | Teks halaman: "…? This question is required.", ingatan: "…?" | `_rapikan_pertanyaan()`: membuang "this question is required", "(wajib)", "(required)", nomor urut |
+| Waktu tunggu penuh terbuang walau jawaban sudah ada | `_tunggu_jawaban()` selalu menunggu `AUTO_ANSWER_WAIT` | Bila `jawaban.cari(rinci)` menemukan jawaban tersimpan, tunggu dibatasi `BATAS_TUNGGU_TERSIMPAN` (20 detik) + pesan alasannya |
+| Penyebab kegagalan hanya bisa ditebak | Laporan hanya menyebut "butuh isian khusus" | `_catat_radio_gagal()`: pertanyaan, daftar opsi yang terbaca, dan jawaban tersimpan ditulis ke layar + `logs/aktivitas.log` |
+
+**Temuan tambahan (integritas data kuota).** `applications` tidak punya batas
+unik, dan versi lama bisa mencatat job yang sama lebih dari sekali. Hitungan
+kuota memakai `COUNT(*)`, sehingga slot bisa habis oleh lamaran yang sebenarnya
+hanya terkirim sekali — laporan "50/50" padahal terkirim kurang dari 50.
+Sekarang `siklus_kuota()` menghitung per `job_id` (`GROUP BY`) dan
+`get_today_apply_count()` memakai `COUNT(DISTINCT job_id)`; jumlah baris ganda
+ditampilkan oleh `cek-target` lewat `hitung_lamaran_ganda()`.
+
+Tes: 823 → **851 passed, 1 skipped** (`tests/test_jawaban_ya_tidak.py` baru,
+26 tes; 2 tes tambahan di `tests/test_siklus_kuota.py`), ruff
+(`E9,F,E501,I,B,SIM,ISC`) bersih, `compileall` bersih.
+
+**Yang tidak diklaim:** perbaikan ini tidak menjamin semua pertanyaan kuesioner
+terjawab. Formulir yang memakai komponen non-standar (mis. tombol opsi tanpa
+`input`) tetap dilaporkan beserta alasannya, lalu lamaran dilewati seperti
+sebelumnya.

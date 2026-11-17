@@ -479,6 +479,14 @@ def cek_target(situs: str = "jobstreet", batas: int = 0):
 
     console.print(f"[dim]{hasil['kuota']}[/]")
 
+    ganda = db.hitung_lamaran_ganda(situs=nama)
+    if ganda:
+        console.print(
+            f"[yellow]Catatan:[/] ada {ganda} baris lamaran ganda di database "
+            "(job yang sama tercatat lebih dari sekali, mis. dari versi lama). "
+            "Hitungan kuota memakai job unik, jadi slot tidak hangus."
+        )
+
     if hasil["kandidat"] == 0:
         console.print(
             "[yellow]Tidak ada lowongan tersimpan yang belum dilamar. "

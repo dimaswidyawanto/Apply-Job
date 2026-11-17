@@ -178,3 +178,30 @@ def test_ringkasan_situs_memuat_jam_reset(database):
     assert daftar["glints"]["berakhir"] != ""
     assert daftar["jobstreet"]["terpakai"] == 0
     assert daftar["jobstreet"]["berakhir"] == ""
+
+
+def test_lamaran_ganda_tidak_menghabiskan_daftar_kuota(database):
+    """Satu job = satu lamaran (audit #25).
+
+    Versi lama bisa mencatat job yang sama dua kali (ulang setelah galat).
+    Bila setiap baris dihitung, slot kuota habis oleh lamaran yang sebenarnya
+    hanya terkirim sekali — target 50 jadi tidak pernah benar-benar terkirim.
+    """
+    mulai = _jam()
+    _catat(database, "jobstreet:1", mulai)
+    _catat(database, "jobstreet:1", mulai + timedelta(minutes=1))
+    _catat(database, "jobstreet:2", mulai + timedelta(minutes=2))
+
+    data = database.siklus_kuota("jobstreet", sekarang=mulai + timedelta(hours=1))
+
+    assert data["jumlah"] == 2
+    assert database.hitung_lamaran_ganda("jobstreet") == 1
+
+
+def test_hitungan_hari_ini_memakai_job_unik(database):
+    sekarang = datetime.now(UTC)
+    _catat(database, "indeed:abc", sekarang)
+    _catat(database, "indeed:abc", sekarang)
+    _catat(database, "indeed:def", sekarang)
+
+    assert database.get_today_apply_count("indeed") == 2

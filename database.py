@@ -940,15 +940,20 @@ class Database:
             parameter.append(situs)
 
         with self._get_conn() as conn:
+            # Satu job = satu lamaran. Versi lama program bisa mencatat job
+            # yang sama lebih dari sekali (mis. setelah ulang/restart),
+            # sehingga COUNT(*) dahulu menghabiskan slot kuota untuk lamaran
+            # yang sebenarnya tidak pernah terkirim dua kali.
             rows = conn.execute(
                 f"""
-                SELECT a.applied_at
+                SELECT MIN(a.applied_at) AS applied_at
                 FROM applications a
                 LEFT JOIN jobs j ON a.job_id = j.job_id
                 WHERE a.applied_at >= ?
                   AND a.status IN ({placeholders})
                   {saringan}
-                ORDER BY a.applied_at ASC, a.id ASC
+                GROUP BY a.job_id
+                ORDER BY applied_at ASC
                 """,
                 parameter,
             ).fetchall()
@@ -1025,6 +1030,37 @@ class Database:
             )
             return cur.rowcount or 0
 
+    def hitung_lamaran_ganda(self, situs: str = "") -> int:
+        """Jumlah baris lamaran berlebih untuk job yang sama (diagnosa).
+
+        Database lama (sebelum `record_application` menolak baris kembar)
+        bisa memuat lebih dari satu baris untuk satu job. Hitungan kuota kini
+        memakai job unik; angka ini menunjukkan berapa baris yang diabaikan
+        supaya laporan tidak menyesatkan.
+        """
+        placeholders = ", ".join("?" for _ in QUOTA_STATUSES)
+        saringan = ""
+        parameter: list = [*QUOTA_STATUSES]
+
+        situs = str(situs or "").strip().lower()
+        if situs:
+            saringan = f"AND {_situs_aplikasi_sql()} = ?"
+            parameter.append(situs)
+
+        with self._get_conn() as conn:
+            baris = conn.execute(
+                f"""
+                SELECT COUNT(*) AS total, COUNT(DISTINCT a.job_id) AS unik
+                FROM applications a
+                LEFT JOIN jobs j ON a.job_id = j.job_id
+                WHERE a.status IN ({placeholders})
+                  {saringan}
+                """,
+                parameter,
+            ).fetchone()
+
+        return max(0, int(baris["total"] or 0) - int(baris["unik"] or 0))
+
     def get_today_apply_count(self, situs: str = "") -> int:
         """Jumlah lamaran terkirim hari ini (dipakai untuk kuota harian).
 
@@ -1045,7 +1081,7 @@ class Database:
         with self._get_conn() as conn:
             result = conn.execute(
                 f"""
-                SELECT COUNT(*) AS count
+                SELECT COUNT(DISTINCT a.job_id) AS count
                 FROM applications a
                 LEFT JOIN jobs j ON a.job_id = j.job_id
                 WHERE a.applied_at >= ? AND a.applied_at < ?

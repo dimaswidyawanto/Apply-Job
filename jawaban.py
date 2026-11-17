@@ -21,6 +21,16 @@ from database import db
 # Batas kemiripan teks pertanyaan agar dianggap pertanyaan yang sama.
 AMBANG_MIRIP = 0.86
 
+# Batas kemiripan untuk pertanyaan YA/TIDAK yang kalimatnya disusun ulang
+# ("do you have sales negotiation experience?" vs "do you have experience in
+# sales negotiation?" bernilai 0.70 — di bawah AMBANG_MIRIP). Hanya dipakai
+# untuk jawaban ya/tidak dan hanya bila pemenangnya jelas (selisih di bawah).
+AMBANG_MIRIP_YA_TIDAK = 0.72
+SELISIH_YA_TIDAK = 0.06
+
+# Batas kemiripan jawaban dengan teks opsi ("No" vs "No, I don't have any").
+AMBANG_OPSI = 0.80
+
 _TANDA_BACA = re.compile(r"[^\w\s]+", re.UNICODE)
 
 # Normalisasi teks kini tinggal di `teks.py` (audit E-12) supaya aturan
@@ -29,9 +39,52 @@ TAK_TERLIHAT = teks.TAK_TERLIHAT
 bersihkan_teks = teks.bersihkan
 
 
+# Hiasan yang menempel pada teks pertanyaan dan tidak mengubah maksudnya.
+# JobStreet menambahkan penanda wajib pada setiap pertanyaan kuesioner
+# ("Do you have sales negotiation experience? This question is required."),
+# sedangkan jawaban yang disimpan pengguna lewat `jawaban --isi` hanyalah
+# kalimat pertanyaannya. Tanpa dibuang, kuncinya berbeda dan jawaban yang
+# SUDAH ada tidak pernah terpakai.
+_HIASAN_AKHIR = re.compile(
+    r"\s*(?:"
+    r"this question is required"
+    r"|required field"
+    r"|pertanyaan ini wajib diisi"
+    r"|wajib diisi"
+    r"|please select"
+    r"|select one"
+    r"|pilih salah satu"
+    r")\s*[.:!]?\s*$",
+    re.IGNORECASE,
+)
+_HIASAN_KURUNG = re.compile(
+    r"\s*[\(\[]\s*(?:wajib|required|optional|opsional|harus diisi)\s*[\)\]]\s*$",
+    re.IGNORECASE,
+)
+_HIASAN_NOMOR = re.compile(
+    r"^\s*(?:q|pertanyaan|question)?\s*\d{1,2}\s*[.):\-]\s+", re.IGNORECASE
+)
+
+
+def _rapikan_pertanyaan(teks: str) -> str:
+    """Buang penanda wajib/nomor urut yang menempel pada teks pertanyaan."""
+    hasil = bersihkan_teks(teks)
+
+    for _ in range(3):
+        sebelum = hasil
+        hasil = _HIASAN_AKHIR.sub("", hasil)
+        hasil = _HIASAN_KURUNG.sub("", hasil)
+        hasil = _HIASAN_NOMOR.sub("", hasil)
+        hasil = " ".join(hasil.split())
+        if hasil == sebelum:
+            break
+
+    return hasil or bersihkan_teks(teks)
+
+
 def kunci_pertanyaan(pertanyaan: str) -> str:
     """Kunci pencarian stabil dari teks pertanyaan."""
-    teks = bersihkan_teks(pertanyaan).casefold()
+    teks = _rapikan_pertanyaan(pertanyaan).casefold()
     teks = _TANDA_BACA.sub(" ", teks)
     return " ".join(teks.split())
 
@@ -478,6 +531,127 @@ def sama_nilai(a, b) -> bool:
     return selisih <= max(1e-9, nilai_a[0] * 0.01)
 
 
+# ------------------------------------------------------------ pilihan opsi ---
+# Pertanyaan ya/tidak adalah yang paling sering memblokir lamaran: jawabannya
+# sudah tersimpan, tetapi label opsinya berbeda ("No" vs "Tidak" vs
+# "No, I don't have any"), sehingga bot melaporkan "belum bisa dijawab
+# otomatis" dan membakar waktu tunggu. Peta di bawah menyamakan sisi YA dan
+# sisi TIDAK tanpa mengarang nilai baru: hanya memakai jawaban yang sudah ada.
+_YA_KATA = frozenset((
+    "ya", "yes", "iya", "y", "benar", "betul", "true", "sudah", "have", "has",
+    "punya", "memiliki", "ada", "bersedia", "siap", "setuju", "sure", "bisa",
+    "mampu", "mau",
+))
+_TIDAK_KATA = frozenset((
+    "no", "not", "tidak", "bukan", "belum", "nggak", "gak", "ga", "tdk",
+    "none", "never", "nope", "tanpa",
+))
+# Kata penghubung yang boleh menemani "Yes"/"No" pada label opsi panjang
+# ("Yes, I have", "No, I don't", "Tidak, saya belum pernah").
+_KATA_PENGHUBUNG = frozenset((
+    "i", "saya", "aku", "kami", "anda", "you", "do", "does", "did", "am",
+    "is", "are", "have", "has", "had", "pernah", "sudah", "sih", "kok",
+    "yang", "itu", "memang", "juga", "t", "don", "doesn", "isn", "won",
+    "in", "of", "the", "a", "an", "lah", "pun", "sekali", "any", "at",
+    "all", "now", "currently", "right", "sama", "juga", "dengan", "untuk",
+))
+
+
+def padanan_ya_tidak(nilai) -> str:
+    """"ya" / "tidak" bila teks benar-benar jawaban ya/tidak; "" bila bukan.
+
+    Hanya teks pendek yang seluruh katanya berasal dari kosakata ya/tidak yang
+    dianggap cocok. "No experience" dan "Sudah vaksinasi lengkap" SENGAJA
+    tidak termasuk: keduanya jawaban bernilai, bukan ya/tidak.
+    """
+    kata = kunci_pertanyaan(nilai).split()
+    if not kata:
+        return ""
+
+    for sisi, kosakata in (("ya", _YA_KATA), ("tidak", _TIDAK_KATA)):
+        if not any(item in kosakata for item in kata):
+            continue
+        if all(item in kosakata or item in _KATA_PENGHUBUNG for item in kata):
+            return sisi
+
+    return ""
+
+
+def _sisi_tunggal(opsi) -> tuple[str, str] | None:
+    """(opsi_ya, opsi_tidak) bila grup itu benar-benar pasangan ya/tidak."""
+    if len(opsi) > 3:
+        return None
+
+    ya = [item for item in opsi if padanan_ya_tidak(item) == "ya"]
+    tidak = [item for item in opsi if padanan_ya_tidak(item) == "tidak"]
+
+    if len(ya) == 1 and len(tidak) == 1:
+        return ya[0], tidak[0]
+
+    return None
+
+
+def _memuat(teks: str, bagian: str) -> bool:
+    """True bila `bagian` muncul sebagai kata utuh di dalam `teks`."""
+    if not teks or not bagian:
+        return False
+    return re.search(rf"(?<!\w){re.escape(bagian)}(?!\w)", teks) is not None
+
+
+def cocok_opsi(nilai, opsi) -> str:
+    """Opsi yang mewakili jawaban tersimpan ("" bila tidak ada yang cocok).
+
+    Urutan: kunci persis → sisi ya/tidak → kata utuh → angka/satuan →
+    kemiripan teks. Semua jalur hanya MEMILIH di antara opsi yang benar-benar
+    ada di formulir; tidak ada nilai baru yang dibuat.
+    """
+    daftar = [str(item) for item in (opsi or []) if str(item or "").strip()]
+    teks_nilai = " ".join(str(nilai or "").split())
+
+    if not daftar or not teks_nilai:
+        return ""
+
+    kunci_nilai = kunci_pertanyaan(teks_nilai)
+
+    for item in daftar:
+        if kunci_pertanyaan(item) == kunci_nilai:
+            return item
+
+    pasangan = _sisi_tunggal(daftar)
+    sisi = padanan_ya_tidak(teks_nilai)
+    if pasangan and sisi:
+        return pasangan[0] if sisi == "ya" else pasangan[1]
+
+    # Jawaban ya/tidak pada grup yang TIDAK jelas pasangannya (mis. ada dua
+    # opsi "tidak"): jangan menebak, biarkan pengguna yang memutuskan.
+    if sisi:
+        return ""
+
+    for item in daftar:
+        kunci_opsi = kunci_pertanyaan(item)
+        if _memuat(kunci_opsi, kunci_nilai) or _memuat(kunci_nilai, kunci_opsi):
+            return item
+
+    for item in daftar:
+        if sama_nilai(teks_nilai, item):
+            return item
+
+    # Kemiripan teks hanya untuk opsi yang BUKAN angka: "Rp 5 jt" dan
+    # "Rp 1 jt" mirip 0.86 padahal nilainya berbeda, dan itu sudah diputuskan
+    # oleh `sama_nilai` di atas.
+    terbaik = ""
+    skor_terbaik = 0.0
+    for item in daftar:
+        if angka_dari_teks(item) and angka_dari_teks(teks_nilai):
+            continue
+
+        skor = SequenceMatcher(None, kunci_nilai, kunci_pertanyaan(item)).ratio()
+        if skor >= AMBANG_OPSI and skor > skor_terbaik:
+            terbaik, skor_terbaik = item, skor
+
+    return terbaik
+
+
 def _aktif() -> bool:
     return bool(getattr(config, "ingat_jawaban", True))
 
@@ -531,7 +705,93 @@ def cari(pertanyaan: str) -> str | None:
         db.tandai_jawaban_dipakai(terbaik["kunci"])
         return str(terbaik["jawaban"])
 
-    return None
+    # Cadangan 3: pertanyaan ya/tidak yang disusun ulang. Hanya jawaban
+    # ya/tidak yang boleh dipakai di sini (ruang kemungkinannya sempit) dan
+    # hanya bila kandidat terbaik jelas mengungguli kandidat berikutnya.
+    return _cadangan_ya_tidak(pertanyaan)
+
+
+_SAPAAN_YA_TIDAK = re.compile(
+    r"\b(do|does|did|have|has|are|is|can|could|will|would|pernahkah|apakah"
+    r"|sudahkah|bisakah|dapatkah)\b",
+    re.IGNORECASE,
+)
+
+
+def _pertanyaan_ya_tidak(pertanyaan: str) -> bool:
+    return bool(_SAPAAN_YA_TIDAK.search(bersihkan_teks(pertanyaan)))
+
+
+# Kata yang tidak membedakan isi pertanyaan ya/tidak ("do you have … experience").
+_KATA_UMUM_YA_TIDAK = frozenset((
+    "do", "does", "did", "have", "has", "had", "are", "is", "was", "were",
+    "can", "could", "will", "would", "you", "your", "i", "me", "my", "we",
+    "the", "a", "an", "of", "in", "on", "for", "with", "to", "at", "as",
+    "any", "experience", "pengalaman", "kerja", "work", "working", "pernah",
+    "apakah", "kamu", "anda", "saya", "sudah", "bisa", "dapat", "mampu",
+    "bersedia", "siap", "memiliki", "punya", "ada", "yang", "itu", "ini",
+    "tahun", "years", "year", "bulan", "month", "months", "atas", "dan",
+    "atau", "di", "ke", "question", "required", "this",
+))
+
+
+def kata_isi(pertanyaan: str) -> set:
+    """Kata pembeda maksud pertanyaan (tanpa kata tanya dan kata jenis)."""
+    return {
+        kata
+        for kata in kunci_pertanyaan(pertanyaan).split()
+        if kata not in _KATA_UMUM_YA_TIDAK
+    }
+
+
+def _isi_sejalan(a: set, b: set) -> bool:
+    """True bila dua pertanyaan benar-benar membicarakan hal yang sama.
+
+    "Are you able to work under pressure?" dan "Can you work under pressure?"
+    berbagi inti {pressure}; "ERP implementation" dan "sales negotiation"
+    tidak berbagi apa pun sehingga tidak boleh saling meminjam jawaban.
+    """
+    if not a or not b:
+        return False
+
+    if a <= b or b <= a:
+        return True
+
+    return len(a & b) / len(a | b) >= 0.6
+
+
+def _cadangan_ya_tidak(pertanyaan: str) -> str | None:
+    """Pakai jawaban ya/tidak lama untuk pertanyaan yang disusun ulang."""
+    if not _pertanyaan_ya_tidak(pertanyaan):
+        return None
+
+    kandidat = []
+    for baris in db.daftar_jawaban():
+        nilai = str(baris.get("jawaban") or "")
+        if not nilai or not padanan_ya_tidak(nilai):
+            continue
+
+        if not _isi_sejalan(kata_isi(pertanyaan), kata_isi(baris.get("kunci") or "")):
+            continue
+
+        skor = _mirip_kunci(pertanyaan, baris.get("kunci") or "")
+        skor += min(int(baris.get("dipakai") or 0), 20) / 1000
+        kandidat.append((skor, baris))
+
+    if not kandidat:
+        return None
+
+    kandidat.sort(key=lambda item: item[0], reverse=True)
+    skor_terbaik, terbaik = kandidat[0]
+    skor_kedua = kandidat[1][0] if len(kandidat) > 1 else 0.0
+
+    if skor_terbaik < AMBANG_MIRIP_YA_TIDAK:
+        return None
+    if skor_terbaik - skor_kedua < SELISIH_YA_TIDAK:
+        return None
+
+    db.tandai_jawaban_dipakai(terbaik["kunci"])
+    return str(terbaik["jawaban"])
 
 
 def ingat(pertanyaan: str, jawaban: str, jenis: str = "",
@@ -574,9 +834,26 @@ _KATA_JABATAN = frozenset(
 _KELUARGA_TANPA_SUBJEK = frozenset(("gaji", "hak_kerja", "ketersediaan", "sim"))
 
 
+# Kata jenis pertanyaan yang tidak membedakan SUBJEK. Tanpa dibuang,
+# "Do you have ERP implementation experience?" dan "Do you have sales
+# negotiation experience?" dianggap sejenis (0.70) semata-mata karena
+# keduanya berakhiran "experience" — jawaban yang salah pun ikut terpakai.
+_KATA_JENIS = frozenset((
+    "experience", "experiences", "pengalaman", "kerja", "work", "working",
+    "salary", "gaji", "upah", "pendapatan", "compensation", "remuneration",
+    "education", "pendidikan", "kualifikasi", "qualification", "gelar",
+    "degree", "industry", "industri", "years", "year", "tahun", "bulan",
+    "month", "months",
+))
+
+
 def subjek_utama(pertanyaan: str) -> str:
     """Subjek tanpa kata tingkat jabatan: "purchasing specialist" → "purchasing"."""
-    kata = [k for k in subjek(pertanyaan).split() if k not in _KATA_JABATAN]
+    kata = [
+        k
+        for k in subjek(pertanyaan).split()
+        if k not in _KATA_JABATAN and k not in _KATA_JENIS
+    ]
     return " ".join(kata)
 
 

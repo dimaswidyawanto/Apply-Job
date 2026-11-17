@@ -750,6 +750,36 @@ Anda ubah. Begitu juga di mode manual `AUTO_APPLY=false` — setelah Anda meninj
 halaman lowongan dan menekan Enter di terminal, isian yang Anda lakukan ikut
 disimpan.
 
+Sejak pembaruan 2026-11-17 pertanyaan **ya/tidak** ikut terpakai ulang. Tiga
+sebab jawaban yang sudah tersimpan dulu tetap ditanyakan (dan tiap pertanyaan
+seperti itu membakar waktu tunggu penuh) sudah diperbaiki:
+
+1. **Label opsi tak terbaca.** Sebagian formulir JobStreet hanya mengisi
+   `value="Yes"`/`value="No"` tanpa label/aria sama sekali; opsi kini dibaca
+   dari atribut itu juga (nilai seperti `opt_3` tetap diabaikan).
+2. **Klik yang "nyangkut" belakangan.** Kuesioner React baru menandai radio
+   terpilih beberapa ratus milidetik setelah diklik. Dulu hasilnya dibaca
+   seketika, sehingga klik yang berhasil dianggap gagal; sekarang statusnya
+   ditunggu (≤0,8 detik) sebelum dinyatakan gagal.
+3. **Kalimat pertanyaan disusun ulang.** "Do you have sales negotiation
+   experience?" vs "Do you have experience in sales negotiation?" hanya mirip
+   0,70 — di bawah ambang 0,86. Pencocokan kini menyamakan sisi **ya/tidak**
+   ("No" ↔ "Tidak" ↔ "No, I don't have any") dan memakai kemiripan 0,72
+   khusus untuk pertanyaan ya/tidak, dengan syarat kata pembedanya sama
+   (pertanyaan berbeda tetap ditanya, mis. ERP vs negosiasi penjualan).
+
+Kalau satu pertanyaan tetap tidak terjawab, alasannya kini tertulis di
+`logs/aktivitas.log` **dan** di layar:
+
+```text
+Radio tidak terjawab: do you have sales negotiation experience? ·
+opsi=['Yes', 'No'] · jawaban tersimpan='No'
+```
+
+Bila jawabannya sudah tersimpan tetapi opsinya tidak cocok, waktu tunggu
+`AUTO_ANSWER_WAIT` dipersingkat (maksimal 20 detik), sebab Anda tidak perlu
+mengisi apa pun — masalahnya ada di pencocokan opsi.
+
 Kelola ingatannya:
 
 ```bash

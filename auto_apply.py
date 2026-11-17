@@ -136,6 +136,15 @@ KATA_SETUJU = (
     "do you", "are you", "menguasai", "mampu",
 )
 
+# Batas waktu tunggu bila jawaban yang diminta SUDAH ada di ingatan: tidak
+# ada gunanya menunggu penuh, sebab pengguna tidak perlu mengisi apa pun.
+BATAS_TUNGGU_TERSIMPAN = 20
+
+# Berapa lama status "terpilih" ditunggu setelah radio diklik. Formulir React
+# (JobStreet) memperbarui `checked` secara asinkron; tanpa jeda ini klik yang
+# berhasil terbaca sebagai gagal.
+JEDA_VERIFIKASI_PILIH = 0.8
+
 # Pertanyaan berskala ("how would you rate your japanese language skills?").
 # Dijawab dengan tingkat TERENDAH yang jujur, bukan dikosongkan dan bukan
 # dilebih-lebihkan.
@@ -150,6 +159,12 @@ SKALA_URUT = (
     "intermediate", "menengah", "conversational", "cukup",
     "advanced", "lanjutan", "upper intermediate",
     "fluent", "mahir", "native", "expert", "ahli",
+)
+
+# Nilai atribut `value` yang jelas ID internal, bukan teks opsi.
+_BUKAN_LABEL = re.compile(
+    r"^(?:opt|option|choice|answer|value|radio|id|item|pilihan)[-_ ]?\d*$",
+    re.IGNORECASE,
 )
 
 # Penanda atribut internal JobStreet, bukan pertanyaan.
@@ -996,13 +1011,36 @@ class AutoApplier:
                 element,
             )
 
+    def _terpilih_setelah_klik(self, element, batas: float | None = None) -> bool:
+        """Tunggu radio benar-benar terpilih (bukan menebak sesaat setelah klik).
+
+        Kuesioner JobStreet dikendalikan React: setelah klik, status `checked`
+        baru berubah beberapa ratus milidetik kemudian. Dulu hasilnya dibaca
+        seketika, sehingga klik yang sebenarnya BERHASIL dianggap gagal,
+        pertanyaannya dilaporkan "belum bisa dijawab otomatis", dan sesi
+        menunggu 60 detik sia-sia — padahal jawabannya sudah tersimpan.
+        """
+        if self._selected(element):
+            return True
+
+        batas = JEDA_VERIFIKASI_PILIH if batas is None else batas
+        akhir = time.time() + max(0.0, batas)
+
+        while time.time() < akhir:
+            time.sleep(0.1)
+            if self._selected(element):
+                return True
+
+        return False
+
     def _pilih_radio(self, element, pilihan: str = "") -> bool:
         """Klik satu opsi radio dan pastikan benar-benar terpilih.
 
-        Urutan: klik input → klik label for=id → klik elemen induk. Dipakai
-        karena input asli sering tidak bisa diklik langsung.
+        Urutan: klik input → klik label for=id → klik elemen induk → set
+        checked lewat skrip. Dipakai karena input asli sering tidak bisa
+        diklik langsung. Setiap langkah diperiksa dengan jeda singkat.
         """
-        if self._click(element) and self._selected(element):
+        if self._click(element) and self._terpilih_setelah_klik(element):
             self._picu_perubahan(element)
             return True
 
@@ -1010,14 +1048,31 @@ class AutoApplier:
             id_el = (element.get_attribute("id") or "").strip()
             if id_el:
                 for label in self._find_all(f"label[for='{id_el}']"):
-                    if self._click(label) and self._selected(element):
+                    if self._click(label) and self._terpilih_setelah_klik(element):
                         self._picu_perubahan(element)
                         return True
 
         with contextlib.suppress(Exception):
             induk = element.find_element(By.XPATH, "..")
-            if induk is not None and self._click(induk) and self._selected(element):
+            if (
+                induk is not None
+                and self._click(induk)
+                and self._terpilih_setelah_klik(element)
+            ):
                 self._picu_perubahan(element)
+                return True
+
+        # Jalan terakhir: klik + set checked lewat skrip, lalu kirim event.
+        with contextlib.suppress(Exception):
+            self.driver.execute_script(
+                "const el = arguments[0];"
+                "el.click();"
+                "el.checked = true;"
+                "el.dispatchEvent(new Event('input', {bubbles: true}));"
+                "el.dispatchEvent(new Event('change', {bubbles: true}));",
+                element,
+            )
+            if self._terpilih_setelah_klik(element):
                 return True
 
         return self._selected(element)
@@ -1073,6 +1128,20 @@ class AutoApplier:
                     and not tampak_id_internal(teks)
                 ):
                     return teks
+
+        # 6. atribut value yang berupa teks. Sebagian formulir JobStreet tidak
+        #    memberi label/aria sama sekali pada radio ya/tidak, hanya
+        #    value="Yes"/value="No". Tanpa jalur ini seluruh opsi dianggap
+        #    tanpa label sehingga pertanyaannya tidak pernah bisa dijawab.
+        with contextlib.suppress(Exception):
+            nilai = " ".join((element.get_attribute("value") or "").split())
+            if (
+                0 < len(nilai) <= 60
+                and _BUKAN_LABEL.search(nilai) is None
+                and re.search(r"[A-Za-z]", nilai)
+                and not tampak_id_internal(nilai)
+            ):
+                return nilai
 
         return ""
 
@@ -1320,33 +1389,23 @@ class AutoApplier:
 
     @staticmethod
     def _dari_ingatan(pertanyaan: str, opsi) -> tuple:
-        """Pilih opsi dari ingatan jawaban pengguna. (pilihan, dari_ingatan)."""
+        """Pilih opsi dari ingatan jawaban pengguna. (pilihan, dari_ingatan).
+
+        Pencocokan jawaban↔opsi ada di `jawaban.cocok_opsi` supaya bisa diuji
+        tanpa browser: kunci persis, sisi ya/tidak ("No" ↔ "Tidak" ↔
+        "No, I don't have any"), kata utuh, angka/satuan, lalu kemiripan.
+        """
         ingat = jawaban.cari(pertanyaan)
 
         if not ingat:
             return "", False
 
-        kunci_ingat = jawaban.kunci_pertanyaan(ingat)
-        for item in opsi or []:
-            if jawaban.kunci_pertanyaan(item) == kunci_ingat:
-                return item, True
+        pilihan = jawaban.cocok_opsi(ingat, opsi)
 
-        # Toleransi ejaan: "Menengah" vs "menengah " / "Ahli" vs "ahli".
-        for item in opsi or []:
-            kunci_opsi = jawaban.kunci_pertanyaan(item)
-            if kunci_ingat and kunci_opsi and (
-                kunci_ingat in kunci_opsi or kunci_opsi in kunci_ingat
-            ):
-                return item, True
+        if not pilihan:
+            return "", False
 
-        # Toleransi angka: "Rp 5 Jt" == "Rp 5 jt" == "Rp 5 million" ==
-        # "Rp 5.000.000". Ini yang membuat pertanyaan gaji berhenti dilewati
-        # padahal jawabannya sudah pernah diberikan.
-        for item in opsi or []:
-            if jawaban.sama_nilai(ingat, item):
-                return item, True
-
-        return "", False
+        return pilihan, True
 
     def _potret_jawaban(self) -> dict:
         """Isian formulir saat ini: {kunci pertanyaan: (pertanyaan, jawaban)}."""
@@ -1577,20 +1636,32 @@ class AutoApplier:
                 gagal.append(pertanyaan or "pertanyaan persetujuan")
                 continue
 
-            pilihan, dari_ingatan = self._dari_ingatan(pertanyaan, opsi)
+            # Jawaban tersimpan dibaca sekali saja supaya hitungan pemakaian
+            # (`dipakai`) tidak bertambah dua kali untuk satu pertanyaan.
+            ingat = jawaban.cari(pertanyaan)
+            pilihan = jawaban.cocok_opsi(ingat, opsi) if ingat else ""
+            dari_ingatan = bool(pilihan)
 
             if not pilihan:
                 pilihan = pilih_jawaban_radio(pertanyaan, opsi)
 
             if not pilihan:
                 gagal.append(pertanyaan or "pertanyaan pilihan")
+                self._catat_radio_gagal(pertanyaan, opsi, ingat)
                 continue
 
-            diklik = False
-            for item in element_grup:
-                if _norm(self._label_untuk(item)) == _norm(pilihan):
-                    diklik = self._pilih_radio(item, pilihan)
-                    break
+            # Opsi yang dipilih dicari lewat pasangan (elemen, label) yang
+            # sudah dibaca, bukan dengan membaca ulang label semua elemen.
+            peta = {label: item for item, label in pasangan}
+            sasaran = peta.get(pilihan)
+
+            if sasaran is None:
+                for item, label in pasangan:
+                    if _norm(label) == _norm(pilihan):
+                        sasaran = item
+                        break
+
+            diklik = sasaran is not None and self._pilih_radio(sasaran, pilihan)
 
             if diklik:
                 catatan = " (ingatan)" if dari_ingatan else ""
@@ -1600,8 +1671,33 @@ class AutoApplier:
                 )
             else:
                 gagal.append(pertanyaan or "pertanyaan pilihan")
+                self._catat_radio_gagal(pertanyaan, opsi, ingat, pilihan)
 
         return gagal
+
+    @staticmethod
+    def _catat_radio_gagal(pertanyaan: str, opsi, ingat, terpilih: str = "") -> None:
+        """Catat diagnosa pertanyaan radio yang tidak bisa dijawab otomatis.
+
+        Tanpa ini, laporan sesi hanya menyebut "butuh isian khusus" sehingga
+        penyebabnya (opsi tidak terbaca? jawaban tersimpan tidak cocok?)
+        hanya bisa ditebak. Sejak audit #25 alasannya ditulis ke log.
+        """
+        opsi_terbaca = [str(item)[:40] for item in (opsi or [])][:6]
+        pesan = (
+            f"Radio tidak terjawab: {pertanyaan[:120] or 'pertanyaan tanpa teks'}"
+            f" · opsi={opsi_terbaca}"
+        )
+
+        if ingat:
+            pesan += f" · jawaban tersimpan={str(ingat)[:60]!r}"
+            if not opsi_terbaca:
+                pesan += " · tidak ada opsi yang terbaca dari halaman"
+        if terpilih:
+            pesan += f" · opsi terpilih={terpilih[:40]!r} tetapi klik tidak terpasang"
+
+        console.print(f"[dim]   {pesan}[/]")
+        log_aktivitas.catat(pesan, "warning")
 
     def _jawab_teks(self) -> list:
         """Isi kolom teks/nomor untuk pertanyaan gaji atau pengalaman."""
@@ -1858,6 +1954,19 @@ class AutoApplier:
 
         if batas <= 0:
             return "habis"
+
+        # Bila jawabannya SUDAH tersimpan, menunggu penuh hanya membuang waktu:
+        # masalahnya ada di pencocokan opsi, bukan di ketiadaan jawaban
+        # (audit #25: 13 pertanyaan × 60 detik = 13 menit per sesi). Beri
+        # waktu singkat untuk tindakan manual, lalu lanjut ke lowongan lain.
+        tersimpan = jawaban.cari(rinci) if rinci else None
+        if tersimpan:
+            batas = min(batas, BATAS_TUNGGU_TERSIMPAN)
+            console.print(
+                "[dim]   jawaban sudah tersimpan "
+                f"({str(tersimpan)[:40]!r}) tetapi opsinya tidak dikenali — "
+                "waktu tunggu dipersingkat[/]"
+            )
 
         console.print(
             "[bold yellow]Ada pertanyaan yang belum terisi:[/] "

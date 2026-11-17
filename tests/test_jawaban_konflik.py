@@ -52,9 +52,14 @@ def test_subjek_utama_membuang_kata_jabatan():
     )
 
 
-def test_subjek_utama_tetap_kosong_untuk_pertanyaan_gaji():
+def test_subjek_utama_membuang_kata_jenis_pertanyaan():
+    # Kata jenis ("salary", "experience", …) tidak membedakan subjek: semua
+    # pertanyaan gaji tetap satu kelompok karena `_KELUARGA_TANPA_SUBJEK`,
+    # sedangkan pada pertanyaan pengalaman kata itu dulu membuat
+    # "ERP implementation experience" dianggap sejenis dengan
+    # "sales negotiation experience" (audit #25).
     assert jawaban.subjek_utama("What's your expected monthly basic salary?") == (
-        "what s expected monthly basic salary"
+        "what s expected monthly basic"
     )
 
 
