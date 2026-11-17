@@ -156,6 +156,10 @@ def test_lowongan_sama_tidak_dilamar_dua_kali(siapkan, monkeypatch):
 def test_lokasi_tidak_dikenal_pakai_alias(siapkan, monkeypatch):
     monkeypatch.setattr(config, "collect_before_apply", False)
     monkeypatch.setattr(config, "locations", ["Jababeka"])
+    # Fokus tes ini: alias Jababeka → Cikarang dan lowongan tetap dilamar.
+    # Kartu tiruan di bawah berlokasi "Bandung", jadi saringan kota dimatikan
+    # di sini (bukan karena perilakunya berubah).
+    monkeypatch.setattr(config, "strict_location", False)
 
     diminta = []
 

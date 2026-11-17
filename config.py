@@ -117,6 +117,18 @@ class Config:
         "EXCLUDE_KEYWORDS",
         "principal,director,head,senior,lead"
     ))
+    # Kata fungsi lain yang menandakan lowongan bukan bidang PPIC/inventory.
+    # Tanpa ini, judul seperti "Warehouse Sales Executive" lolos hanya karena
+    # satu kata kunci kebetulan sama. Hanya berlaku saat REQUIRE_KEYWORD_MATCH
+    # aktif; isi kosong untuk mematikan.
+    exclude_title_words: list[str] = field(
+        default_factory=lambda: _list_setting(
+            "EXCLUDE_TITLE_WORDS",
+            "sales,marketing,driver,kurir,kasir,barista,waiter,waitress,"
+            "satpam,security,cleaning service,collector,teller,"
+            "agen asuransi,personal assistant",
+        )
+    )
     # Nama perusahaan yang tidak ingin dilamar lagi (mantan perusahaan,
     # dsb). Dicocokkan longgar: "royal abadi" juga menangkap
     # "PT Royal Abadi Sejahtera".
@@ -137,7 +149,7 @@ class Config:
     glints_min_salary: int = _int_setting("GLINTS_MIN_SALARY", 4_500_000)
 
     # Tolak lowongan yang lokasinya jelas di luar LOCATION.
-    strict_location: bool = _bool_setting("STRICT_LOCATION", False)
+    strict_location: bool = _bool_setting("STRICT_LOCATION", True)
 
     # JobStreet: lamar hanya lowongan yang kartunya menampilkan logo
     # perusahaan. Bawaan false agar perilaku lama tidak berubah.
@@ -248,8 +260,11 @@ class Config:
     sort_mode: str = os.getenv("SORT_MODE", "ListedDate").strip()
     prefer_newest: bool = _bool_setting("PREFER_NEWEST", True)
 
-    # 0 = tanpa batas umur. Nilai yang didukung JobStreet: 1, 3, 7, 14, 31.
-    max_age_days: int = _int_setting("MAX_AGE_DAYS", 0)
+    # Batas umur lowongan (hari, inklusif): umur 7 diterima, 8 ditolak.
+    # 0 = tanpa batas. Nilai yang didukung JobStreet: 1, 3, 7, 14, 31.
+    # Bawaan 7 sejak validasi final supaya lowongan lama tidak ikut dilamar;
+    # isi MAX_AGE_DAYS=0 untuk mematikan.
+    max_age_days: int = _int_setting("MAX_AGE_DAYS", 7)
     # Lowongan yang tanggal publikasinya tidak terbaca: bawaan tetap boleh
     # dicoba (banyak kartu memang tanpa tanggal), tetapi bila diaktifkan
     # "tidak terbaca" TIDAK dianggap baru.

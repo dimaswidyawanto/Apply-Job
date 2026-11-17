@@ -178,7 +178,8 @@ cp .env.example .env
 | `BLOCKED_COMPANIES` | `royal abadi,ifa` | Perusahaan yang **selalu** ditolak di JobStreet maupun Glints. Nama pendek seperti `ifa` dicocokkan per kata, jadi `Kafifa` tidak ikut tertolak |
 | `GLINTS_MIN_SALARY` | `4500000` | **Tidak dipakai lagi.** Batas gaji sekarang satu untuk semua situs: `MIN_SALARY` |
 | `EXCLUDE_KEYWORDS` | `principal,director,head,senior,lead` | Kata yang membuat judul otomatis ditolak |
-| `STRICT_LOCATION` | `false` | `true` = tolak lowongan yang lokasinya di luar `LOCATION` |
+| `EXCLUDE_TITLE_WORDS` | `sales,marketing,driver,kurir,kasir,...` | Kata peran lain: judul seperti "Warehouse Sales Executive" ditolak walau satu kata kuncinya cocok (hanya aktif bila `REQUIRE_KEYWORD_MATCH=true`) |
+| `STRICT_LOCATION` | `true` | `true` = tolak lowongan yang lokasinya di luar `LOCATIONS` (bawaan sejak validasi final; `false` = lamar di kota mana pun). Lowongan tanpa nama kota tetap boleh |
 | `REQUIRE_COMPANY_LOGO` | `true` | Wajib logo/gambar di **JobStreet & Glints**; Indeed dikecualikan karena kartunya tidak memuat logo |
 | `MAX_APPLY_PER_DAY` | `50` | Target **sekaligus batas** lamaran **per situs per siklus 24 jam** (JobStreet 50, Glints 50, Indeed 50; hitungan terpisah, siklus dimulai dari lamaran pertama). `0` = tanpa batas. Riset & penilaian tetap tanpa batas |
 | `DELAY_BETWEEN_APPLY` | `3` | Jeda (detik) antar lowongan |
@@ -198,7 +199,7 @@ cp .env.example .env
 | `RANK_BY` | `relevance` | Urutan pemilihan saat `COLLECT_BEFORE_APPLY=true`: `relevance` = kecocokan tertinggi dulu, `newest` = posting terbaru dulu |
 | `SORT_MODE` | `ListedDate` | Urutan hasil; `ListedDate` = terbaru dulu, `KeywordRelevance` = relevansi |
 | `PREFER_NEWEST` | `true` | Dahulukan lowongan paling baru saat antrean melamar |
-| `MAX_AGE_DAYS` | `0` | Hanya lowongan N hari terakhir (0 = semua). Nilai valid JobStreet: 1, 3, 7, 14, 31 |
+| `MAX_AGE_DAYS` | `7` | Hanya lowongan N hari terakhir (inklusif; 7 diterima, 8 ditolak). `0` = semua umur. Nilai valid JobStreet: 1, 3, 7, 14, 31 |
 | `USE_PROFILE` | `true` | Simpan sesi login di profil Chrome khusus |
 | `CHROME_PROFILE_DIR` | `~/.dimastes/chrome-profile` | Lokasi profil Chrome |
 | `LOGIN_WAIT` | `true` | `false` = jangan menunggu; berhenti bila belum login |
@@ -516,6 +517,20 @@ Remove-Item -Recurse -Force "$HOME\.dimastes\chrome-profile"
 
 atau jalankan sekali dengan `--no-profile`.
 
+#### Blacklist tidak boleh menolak perusahaan lain
+
+Pencocokan nama perusahaan memakai **batas kata**. Tanpa itu, nama pendek
+seperti `PT A` (menjadi `"a"`) atau `Abadi` ikut cocok dengan entri
+`royal abadi` — seluruh lowongan perusahaan yang tidak terkait tertolak dengan
+alasan "Perusahaan di-blacklist". Arah "nama perusahaan bagian dari entri
+blacklist" (mis. `PT Royal Abadi` ⊂ `royal abadi`) hanya dipakai bila nama
+perusahaan terdiri dari ≥ 2 kata.
+
+| Masukan | Hasil |
+|---|---|
+| `PT A`, `Abadi`, `PT Abadi Jaya`, `Kafifa` | lolos |
+| `PT Royal Abadi Sejahtera`, `Royal Abadi`, `PT IFA Indonesia` | ditolak |
+
 ### Banyak lokasi
 
 Isi `.env`:
@@ -676,7 +691,9 @@ Aturan yang berlaku:
 * perhitungan memakai **WIB (Asia/Jakarta)**, bukan jam komputer/server;
 * tanggal yang tidak terbaca **tetap dicoba** secara bawaan, tetapi bisa
   dijadikan penolakan dengan `TOLAK_UMUR_TAK_DIKETAHUI=true` — supaya
-  "tidak terbaca" tidak otomatis dianggap lowongan baru.
+  "tidak terbaca" tidak otomatis dianggap lowongan baru;
+* **bawaan sejak validasi final: `MAX_AGE_DAYS=7`** supaya lowongan lama tidak
+  ikut dilamar. Isi `0` untuk mematikan batas ini.
 
 ```powershell
 .\jalankan.bat set-env MAX_AGE_DAYS=7
@@ -758,6 +775,41 @@ Semua isian **diverifikasi**, tidak langsung dianggap berhasil: klik yang tidak
 mengubah status dilaporkan sebagai kegagalan (dan alasannya masuk log). Combobox
 hanya diisi bila jawabannya sudah ada di ingatan — bila tidak, bot membiarkannya
 dan menulis "combobox belum dijawab (menunggu pengguna)" daripada menebak.
+
+#### Diagnosa kontrol: apa yang gagal, tanpa membocorkan isian
+
+Setiap kegagalan mengisi kontrol dicatat dalam satu baris terstruktur, sehingga
+penyebabnya terbaca — bukan ditebak:
+
+```
+diagnosa: CONTROL_TYPE=radio TAG=div ROLE=radio ARIA_LABEL=opsi ya
+NAME=pengalaman AVAILABLE_OPTIONS=['Ya', 'Tidak'] EXPECTED_ANSWER=Ya
+DETECTED_STATE=not_selected VERIFICATION_RESULT=failed
+FAILURE_REASON=click_not_verified
+```
+
+Arti `FAILURE_REASON`: `no_safe_answer` (pertanyaannya tidak dikenali — bot
+tidak menebak), `no_option_label_read` (label opsi tidak terbaca dari halaman),
+`option_not_found`, `click_not_verified`, `value_not_verified`,
+`send_keys_failed`, `no_option_match`, `no_remembered_answer`.
+
+Yang **tidak pernah** dicatat: isi kolom (`value`), kata sandi, token, cookie,
+atau session. Nilai teks bebas diringkas menjadi `<12 karakter>`; hanya angka
+gaji/pengalaman yang ditulis apa adanya.
+
+#### Isian wajib yang gagal diverifikasi MENAHAN pengiriman
+
+Bila sebuah isian wajib (`required` / `aria-required="true"`) gagal diisi atau
+gagal diverifikasi, tombol Kirim **tidak diklik**. Lowongan dilaporkan:
+
+```
+Status: manual_required — Isian wajib tidak terverifikasi
+(CONTROL_TYPE=radio … FAILURE_REASON=click_not_verified) — lamaran TIDAK dikirim
+```
+
+Alasannya: lamaran terkirim dengan jawaban kosong tetap tercatat "berhasil"
+padahal isinya tidak benar. Lebih baik satu lowongan masuk daftar manual
+daripada satu lamaran salah terkirim.
 
 ### Ingatan jawaban: sekali diisi, selamanya otomatis
 
@@ -1205,6 +1257,35 @@ isi database (tanpa membuka browser dan tanpa melamar), jalankan:
 python cli.py cek-target            # bawaan: jobstreet
 python cli.py cek-target --situs indeed
 ```
+
+Untuk melihat **keputusan per lowongan** (bukan hanya jumlah), jalankan dry-run.
+Perintah ini tidak membuka browser, tidak menambah kuota, dan tidak mengubah
+status lamaran:
+
+```bash
+python cli.py dry-run --limit 5
+python cli.py dry-run --situs glints
+```
+
+Keluarannya menelusuri tahap yang benar-benar dijalankan mesin keputusan —
+`FOUND → DUPLICATE → FILTER → SCORE → AGE → DECISION` — sehingga terlihat
+tahap mana yang menolak sebuah lowongan:
+
+```
+DRY RUN — tidak ada lamaran yang dikirim
+1. APPLY · skor 50 · glints:fixture-1
+  FOUND     OK     Inventory Control Staff @ PT Sumber Makmur · glints
+  DUPLICATE OK
+  FILTER    OK
+  SCORE     OK     posisi 10, lokasi 8, kualifikasi 8, gaji 10
+  AGE       OK     umur 1 hari · MAX_AGE_DAYS=7
+  DECISION  APPLY  OK
+```
+
+Catatan: urutan itu mengikuti kode apa adanya (duplikat diperiksa lebih dulu),
+bukan urutan yang enak dibaca. Skor hanya dipakai untuk mengurutkan — keputusan
+melamar tetap dari aturan `should_apply()` yang sama untuk JobStreet, Glints,
+dan Indeed.
 
 Keluarannya menilai ulang seluruh lowongan tersimpan pada beberapa skenario
 aturan, sehingga selisihnya menunjukkan aturan mana yang menahan:

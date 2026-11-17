@@ -978,3 +978,80 @@ dengan DOM tiruan. LIVE PLATFORM TEST belum dilakukan dari sisi pengembang
 berasal dari label yang sudah tercatat pada sesi nyata 17 Nov 2026
 ("Hari ini", "3 hari yang lalu", "30+ hari yang lalu"), bukan hasil scraping
 baru.
+
+## 27. Validasi final: false positive filter, diagnosa kontrol, penahan kirim
+
+Validasi ulang mesin keputusan memakai data **FIXTURE** (bukan data LIVE)
+menemukan tiga hal yang sebelumnya tidak terlihat.
+
+### a. Blacklist perusahaan menolak nama yang tidak terkait (false positive)
+
+`_perusahaan_dikecualikan()` memakai pencocokan longgar dua arah. Untuk nama
+pendek, `normalisasi_perusahaan("PT A")` menjadi `"a"`, lalu `"a" in
+"royal abadi"` bernilai benar — **seluruh lowongan PT A ditolak** dengan alasan
+"Perusahaan di-blacklist: royal abadi". Kasus lain: `"Abadi"` ikut tertolak
+karena hanya berupa potongan kata dari entri blacklist.
+
+Perbaikan: pencocokan memakai batas kata (`kata_utuh()`), dan arah "nama
+perusahaan bagian dari entri blacklist" hanya dipakai bila nama perusahaan
+punya ≥ 2 kata.
+
+| Masukan | Sebelum | Sesudah |
+|---|---|---|
+| `PT A` | ditolak (`royal abadi`) | lolos |
+| `Abadi` | ditolak (`royal abadi`) | lolos |
+| `PT Abadi Jaya` | lolos | lolos |
+| `PT Royal Abadi Sejahtera` | ditolak | ditolak (benar) |
+| `PT IFA Indonesia` | ditolak | ditolak (benar) |
+| `Kafifa` | lolos | lolos (benar) |
+
+### b. Judul peran lain lolos karena satu kata kunci
+
+`Warehouse Sales Executive` diterima karena kata "warehouse" cocok dengan
+`TITLE_KEYWORDS`, padahal perannya sales. Ini persis yang dilarang: jangan
+menganggap Sales/Marketing/Driver sebagai match hanya karena satu kata kunci
+kebetulan sama.
+
+Perbaikan: `EXCLUDE_TITLE_WORDS` (baru, dapat diubah lewat `.env`) berisi kata
+fungsi lain; pencocokan memakai batas kata dan **hanya aktif bersama
+`REQUIRE_KEYWORD_MATCH=true`** supaya `REQUIRE_KEYWORD_MATCH=false` tetap
+berarti "jangan saring judul".
+
+### c. Isian wajib bisa "terkirim kosong", dan kegagalan centang tidak tercatat
+
+Sebelumnya jawaban yang gagal dipasang hanya dilaporkan sebagai "belum bisa
+dijawab otomatis" dan alur tetap boleh menekan Kirim bila halaman tidak
+menampilkan pesan validasi. `_jawab_checkbox` bahkan tidak mencatat apa pun
+saat `_centang()` gagal.
+
+Perbaikan:
+* diagnosa terstruktur `BIDANG_DIAGNOSA` (`CONTROL_TYPE`, `TAG`, `ROLE`,
+  `ARIA_LABEL`, `TEXT`, `NAME`, `AVAILABLE_OPTIONS`, `EXPECTED_ANSWER`,
+  `DETECTED_STATE`, `VERIFICATION_RESULT`, `FAILURE_REASON`, `WAJIB`) —
+  tanpa isi kolom, kata sandi, token, cookie, atau session;
+* verifikasi isi kolom teks setelah `send_keys` (`_terpasang_teks`);
+* **penahan kirim**: bila ada isian wajib yang gagal diverifikasi, tombol Kirim
+  tidak diklik dan lowongan dilaporkan `manual_required` dengan alasan
+  "lamaran TIDAK dikirim".
+
+### d. Dry-run yang bisa dibaca
+
+`python cli.py dry-run` menampilkan jejak `FOUND → DUPLICATE → FILTER → SCORE →
+AGE → DECISION` dari lowongan tersimpan, memakai fungsi keputusan yang sama
+(`should_apply()`), tanpa browser dan tanpa menambah kuota. Urutan tahap
+mengikuti kode apa adanya (duplikat diperiksa lebih dulu).
+
+### Hasil uji
+
+`tests/test_validasi_final.py` (55 tes): matriks 8 kategori × 2 platform,
+kuota per status (`applied` +1; `failed`/`requires_human`/`duplicate`/`skipped`
+0), duplikat + retry setelah Cloudflare, batas umur 7/8 dan `DATE_UNKNOWN`,
+diagnosa aman, penahan kirim, dan dry-run tanpa kirim.
+
+Total suite: **982 passed, 1 skipped**; ruff (`E9,F,E501,I,B,SIM,ISC`) bersih;
+`compileall` bersih.
+
+**Batas verifikasi:** seluruh bukti di atas adalah unit/integration test dengan
+elemen DOM tiruan dan data FIXTURE. LIVE PLATFORM TEST (JobStreet/Glints/Indeed
+sungguhan) **belum** dilakukan karena lingkungan pengujian tidak punya akses ke
+situs tersebut.

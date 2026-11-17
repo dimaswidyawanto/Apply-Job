@@ -258,6 +258,88 @@ def tampak_id_internal(teks: str) -> bool:
     return bool(_ID_INTERNAL.search(str(teks or "")))
 
 
+# ----------------------------------------------------------------------
+# Diagnosa kontrol formulir (audit validasi final)
+# ----------------------------------------------------------------------
+# Bidang yang dicatat saat satu kontrol gagal diisi. Semuanya berasal dari
+# IDENTITAS kontrol (tag, role, aria-label, name, teks pertanyaan, label opsi).
+# Isi kolom (`value`), kata sandi, cookie, token, dan session TIDAK pernah
+# dibaca atau dilaporkan — supaya log aman dibagikan.
+BIDANG_DIAGNOSA = (
+    "CONTROL_TYPE",
+    "TAG",
+    "ROLE",
+    "ARIA_LABEL",
+    "TEXT",
+    "NAME",
+    "AVAILABLE_OPTIONS",
+    "EXPECTED_ANSWER",
+    "DETECTED_STATE",
+    "VERIFICATION_RESULT",
+    "FAILURE_REASON",
+)
+
+
+def _potong_diagnosa(nilai, batas: int = 60) -> str:
+    """Rapikan satu nilai diagnosa: satu baris, dibatasi panjangnya."""
+    return " ".join(str(nilai or "").split())[:batas]
+
+
+def diagnosa_kontrol(
+    element=None,
+    *,
+    control_type: str,
+    text: str = "",
+    options=(),
+    expected: str = "",
+    detected: str = "",
+    verification: str = "failed",
+    failure: str = "",
+    wajib: bool = False,
+) -> dict:
+    """Susun satu catatan diagnosa kontrol TANPA data sensitif.
+
+    `CONTROL_TYPE/TAG/ROLE/ARIA_LABEL/TEXT/NAME` menjawab "kontrol apa ini",
+    `AVAILABLE_OPTIONS/EXPECTED_ANSWER/DETECTED_STATE/VERIFICATION_RESULT`
+    menjawab "kenapa gagal", dan `FAILURE_REASON` menyebut sebabnya secara
+    eksplisit (bukan ditebak). `WAJIB` menandai isian yang wajib sehingga
+    pengiriman harus ditahan.
+    """
+    return {
+        "CONTROL_TYPE": _potong_diagnosa(control_type, 20),
+        "TAG": _potong_diagnosa(
+            getattr(element, "tag_name", "") if element is not None else "", 20
+        ),
+        "ROLE": _potong_diagnosa(
+            _atribut(element, "role") if element is not None else "", 20
+        ),
+        "ARIA_LABEL": _potong_diagnosa(
+            _atribut(element, "aria-label") if element is not None else "", 60
+        ),
+        "TEXT": _potong_diagnosa(text, 60),
+        "NAME": _potong_diagnosa(
+            _atribut(element, "name") if element is not None else "", 40
+        ),
+        "AVAILABLE_OPTIONS": [
+            _potong_diagnosa(opsi, 40) for opsi in list(options or [])[:6]
+        ],
+        "EXPECTED_ANSWER": _potong_diagnosa(expected, 40),
+        "DETECTED_STATE": _potong_diagnosa(detected, 40),
+        "VERIFICATION_RESULT": _potong_diagnosa(verification, 20) or "unknown",
+        "FAILURE_REASON": _potong_diagnosa(failure, 120),
+        "WAJIB": bool(wajib),
+    }
+
+
+def format_diagnosa(catatan: dict) -> str:
+    """Satu baris `BIDANG=nilai …` untuk log dan alasan sesi."""
+    return " ".join(
+        f"{bidang}={catatan[bidang]}"
+        for bidang in BIDANG_DIAGNOSA
+        if catatan.get(bidang) not in (None, "", [])
+    )
+
+
 def ambil_pertanyaan(teks: str, opsi=()) -> str:
     """Ambil baris pertanyaan dari teks wadah (mengabaikan teks opsi)."""
     opsi_norm = {_norm(item) for item in (opsi or [])}
@@ -586,6 +668,10 @@ class AutoApplier:
         self.submit_timeout = config.auto_apply_submit_timeout
         self.debug_dumps = 0
         self.di_kerangka = False
+        # Diagnosa kontrol formulir yang gagal diisi pada putaran terakhir
+        # `jawab_pertanyaan()`. Dipakai untuk bukti (log) DAN untuk menahan
+        # pengiriman bila isian wajibnya tidak terverifikasi.
+        self._diagnosa_gagal = []
 
     # ------------------------------------------------------------------
     # Utilitas elemen
@@ -1725,7 +1811,18 @@ class AutoApplier:
 
             if not pilihan:
                 gagal.append(pertanyaan or "pertanyaan pilihan")
-                self._catat_radio_gagal(pertanyaan, opsi, ingat)
+                self._catat_radio_gagal(
+                    pertanyaan,
+                    opsi,
+                    ingat,
+                    element=element_grup[0],
+                    wajib=any(self._is_required(item) for item in element_grup),
+                    sebab=(
+                        "no_safe_answer"
+                        if opsi
+                        else "no_option_label_read"
+                    ),
+                )
                 continue
 
             # Opsi yang dipilih dicari lewat pasangan (elemen, label) yang
@@ -1749,17 +1846,50 @@ class AutoApplier:
                 )
             else:
                 gagal.append(pertanyaan or "pertanyaan pilihan")
-                self._catat_radio_gagal(pertanyaan, opsi, ingat, pilihan)
+                self._catat_radio_gagal(
+                    pertanyaan,
+                    opsi,
+                    ingat,
+                    pilihan,
+                    element=sasaran if sasaran is not None else element_grup[0],
+                    wajib=any(self._is_required(item) for item in element_grup),
+                    sebab=(
+                        "option_not_found" if sasaran is None
+                        else "click_not_verified"
+                    ),
+                )
 
         return gagal
 
-    @staticmethod
-    def _catat_radio_gagal(pertanyaan: str, opsi, ingat, terpilih: str = "") -> None:
+    def _catat_diagnosa(self, catatan: dict) -> None:
+        """Simpan, cetak, dan log satu diagnosa kontrol yang gagal diisi."""
+        if len(self._diagnosa_gagal) < 20:
+            self._diagnosa_gagal.append(catatan)
+
+        baris = format_diagnosa(catatan)
+        console.print(f"[dim]     diagnosa: {baris}[/]")
+        log_aktivitas.catat(f"Diagnosa kontrol: {baris[:400]}", "warning")
+
+    def _diagnosa_wajib_gagal(self) -> list:
+        """Diagnosa isian WAJIB yang tidak terverifikasi pada putaran ini."""
+        return [item for item in self._diagnosa_gagal if item.get("WAJIB")]
+
+    def _catat_radio_gagal(
+        self,
+        pertanyaan: str,
+        opsi,
+        ingat,
+        terpilih: str = "",
+        element=None,
+        wajib: bool = False,
+        sebab: str = "no_safe_answer",
+    ) -> None:
         """Catat diagnosa pertanyaan radio yang tidak bisa dijawab otomatis.
 
         Tanpa ini, laporan sesi hanya menyebut "butuh isian khusus" sehingga
         penyebabnya (opsi tidak terbaca? jawaban tersimpan tidak cocok?)
-        hanya bisa ditebak. Sejak audit #25 alasannya ditulis ke log.
+        hanya bisa ditebak. Sejak audit #25 alasannya ditulis ke log; sejak
+        validasi final alasannya juga terstruktur (BIDANG_DIAGNOSA).
         """
         opsi_terbaca = [str(item)[:40] for item in (opsi or [])][:6]
         pesan = (
@@ -1776,6 +1906,20 @@ class AutoApplier:
 
         console.print(f"[dim]   {pesan}[/]")
         log_aktivitas.catat(pesan, "warning")
+
+        self._catat_diagnosa(
+            diagnosa_kontrol(
+                element,
+                control_type="radio",
+                text=pertanyaan,
+                options=opsi_terbaca,
+                expected=str(terpilih or ingat or ""),
+                detected="not_selected",
+                verification="failed",
+                failure=sebab,
+                wajib=wajib,
+            )
+        )
 
     def _jawab_teks(self) -> list:
         """Isi kolom teks/nomor untuk pertanyaan gaji atau pengalaman."""
@@ -1824,13 +1968,74 @@ class AutoApplier:
 
                 try:
                     element.send_keys(nilai)
-                    console.print(
-                        f'[dim]   isi "{nilai}" untuk: {pertanyaan[:70]}[/]'
-                    )
                 except Exception:
                     gagal.append(pertanyaan)
+                    self._catat_diagnosa(
+                        diagnosa_kontrol(
+                            element,
+                            control_type="teks",
+                            text=pertanyaan,
+                            expected=self._nilai_diagnosa(nilai, jenis),
+                            detected="",
+                            verification="failed",
+                            failure="send_keys_failed",
+                            wajib=self._is_required(element),
+                        )
+                    )
+                    continue
+
+                if not self._terpasang_teks(element, nilai):
+                    gagal.append(pertanyaan or "kolom teks")
+                    console.print(
+                        "[dim]   kolom teks: verifikasi gagal — isi tidak "
+                        f"terpasang untuk: {pertanyaan[:70]}[/]"
+                    )
+                    self._catat_diagnosa(
+                        diagnosa_kontrol(
+                            element,
+                            control_type="teks",
+                            text=pertanyaan,
+                            expected=self._nilai_diagnosa(nilai, jenis),
+                            detected=self._nilai_diagnosa(
+                                self._teks_kontrol(element), jenis
+                            ),
+                            verification="failed",
+                            failure="value_not_verified",
+                            wajib=self._is_required(element),
+                        )
+                    )
+                    continue
+
+                console.print(
+                    f'[dim]   isi "{nilai}" untuk: {pertanyaan[:70]}[/]'
+                )
 
         return gagal
+
+    @staticmethod
+    def _nilai_diagnosa(nilai: str, jenis: str) -> str:
+        """Nilai isian untuk diagnosa: angka apa adanya, teks bebas disamarkan."""
+        teks = str(nilai or "").strip()
+        if not teks:
+            return ""
+        if jenis in ("gaji", "pengalaman"):
+            return teks[:40]
+        return f"<{len(teks)} karakter>"
+
+    def _terpasang_teks(self, element, nilai: str) -> bool:
+        """True bila isi kolom benar-benar terpasang setelah diketik."""
+        try:
+            terisi = (element.get_attribute("value") or "").strip()
+        except Exception:
+            return False
+
+        if not terisi:
+            return False
+        if _norm(terisi) == _norm(nilai):
+            return True
+
+        angka = lambda teks: re.sub(r"[^0-9]", "", str(teks or ""))
+        return bool(angka(terisi)) and angka(terisi) == angka(nilai)
 
     def _kumpulkan_kontrol(self, jenis: str) -> list:
         """Semua kontrol formulir bertipe `jenis` (radio/checkbox), termasuk ARIA.
@@ -1967,6 +2172,24 @@ class AutoApplier:
                             f'[dim]   centang "{label}" (ingatan) untuk: '
                             f"{pertanyaan[:70]}[/]"
                         )
+                    else:
+                        gagal.append(pertanyaan or "pertanyaan centang")
+                        self._catat_diagnosa(
+                            diagnosa_kontrol(
+                                item,
+                                control_type="checkbox",
+                                text=pertanyaan,
+                                options=opsi,
+                                expected=label,
+                                detected="not_selected",
+                                verification="failed",
+                                failure="click_not_verified",
+                                wajib=any(
+                                    self._is_required(anggota)
+                                    for anggota in element_grup
+                                ),
+                            )
+                        )
                 continue
 
             pilihan = [
@@ -1982,6 +2205,23 @@ class AutoApplier:
 
             if not pilihan:
                 gagal.append(pertanyaan or "pertanyaan centang")
+                self._catat_diagnosa(
+                    diagnosa_kontrol(
+                        element_grup[0],
+                        control_type="checkbox",
+                        text=pertanyaan,
+                        options=opsi,
+                        detected="not_selected",
+                        verification="failed",
+                        failure=(
+                            "no_safe_answer" if opsi else "no_option_label_read"
+                        ),
+                        wajib=any(
+                            self._is_required(anggota)
+                            for anggota in element_grup
+                        ),
+                    )
+                )
                 continue
 
             for item, label in pasangan:
@@ -1990,6 +2230,24 @@ class AutoApplier:
                 if self._centang(item):
                     console.print(
                         f'[dim]   centang "{label}" untuk: {pertanyaan[:70]}[/]'
+                    )
+                else:
+                    gagal.append(pertanyaan or "pertanyaan centang")
+                    self._catat_diagnosa(
+                        diagnosa_kontrol(
+                            item,
+                            control_type="checkbox",
+                            text=pertanyaan,
+                            options=opsi,
+                            expected=label,
+                            detected="not_selected",
+                            verification="failed",
+                            failure="click_not_verified",
+                            wajib=any(
+                                self._is_required(anggota)
+                                for anggota in element_grup
+                            ),
+                        )
                     )
 
         return gagal
@@ -2058,6 +2316,18 @@ class AutoApplier:
                         "[dim]   combobox belum dijawab (menunggu pengguna): "
                         f"{pertanyaan[:70] or 'tanpa teks pertanyaan'}[/]"
                     )
+                    self._catat_diagnosa(
+                        diagnosa_kontrol(
+                            element,
+                            control_type="combobox",
+                            text=pertanyaan,
+                            expected="",
+                            detected="empty",
+                            verification="skipped",
+                            failure="no_remembered_answer",
+                            wajib=self._is_required(element),
+                        )
+                    )
                     continue
 
                 self._click(element)
@@ -2076,6 +2346,23 @@ class AutoApplier:
                         f"{str(ingat)[:40]!r} tidak ada di daftar opsi "
                         f"{[teks for teks, _ in opsi][:5]}[/]"
                     )
+                    self._catat_diagnosa(
+                        diagnosa_kontrol(
+                            element,
+                            control_type="combobox",
+                            text=pertanyaan,
+                            options=[teks for teks, _ in opsi],
+                            expected=str(ingat),
+                            detected=self._teks_kontrol(element),
+                            verification="failed",
+                            failure=(
+                                "no_option_match"
+                                if not cocok
+                                else "option_click_failed"
+                            ),
+                            wajib=self._is_required(element),
+                        )
+                    )
                     continue
 
                 terpilih = self._teks_kontrol(element)
@@ -2087,6 +2374,18 @@ class AutoApplier:
                     console.print(
                         "[dim]   combobox: verifikasi gagal (expected "
                         f"{cocok[:40]!r}, terlihat {terpilih[:40]!r})[/]"
+                    )
+                    self._catat_diagnosa(
+                        diagnosa_kontrol(
+                            element,
+                            control_type="combobox",
+                            text=pertanyaan,
+                            expected=cocok,
+                            detected=terpilih,
+                            verification="failed",
+                            failure="value_not_verified",
+                            wajib=self._is_required(element),
+                        )
                     )
                     continue
 
@@ -2139,6 +2438,9 @@ class AutoApplier:
         if not config.auto_answer_questions:
             return []
 
+        # Diagnosa selalu dihitung ulang per putaran supaya penahan kirim
+        # hanya melihat kondisi formulir saat ini.
+        self._diagnosa_gagal = []
         gagal = []
 
         for element in self._find_all("select"):
@@ -2149,8 +2451,21 @@ class AutoApplier:
 
             if hasil == "-":
                 opsi = self._teks_opsi(element)
-                gagal.append(
-                    self._pertanyaan(element, opsi) or "pertanyaan pilihan"
+                pertanyaan = self._pertanyaan(element, opsi)
+                gagal.append(pertanyaan or "pertanyaan pilihan")
+                self._catat_diagnosa(
+                    diagnosa_kontrol(
+                        element,
+                        control_type="select",
+                        text=pertanyaan,
+                        options=opsi,
+                        detected="kosong",
+                        verification="failed",
+                        failure=(
+                            "no_safe_answer" if opsi else "no_option_read"
+                        ),
+                        wajib=self._is_required(element),
+                    )
                 )
 
         gagal.extend(self._jawab_radio())
@@ -2558,6 +2873,25 @@ class AutoApplier:
                             "manual_required",
                             "Formulir meminta isian yang belum bisa dijawab "
                             f"otomatis: {rinci} — dilewati",
+                        )
+
+                    # Penahan kirim: isian WAJIB yang gagal diisi atau
+                    # gagal diverifikasi tidak boleh dikirim. Tanpa ini
+                    # lamaran bisa terkirim dengan jawaban kosong lalu
+                    # tercatat "applied" padahal isinya tidak benar.
+                    wajib_gagal = self._diagnosa_wajib_gagal()
+                    if wajib_gagal:
+                        rinci = format_diagnosa(wajib_gagal[0])
+                        console.print(
+                            "[yellow]   isian wajib belum terverifikasi — "
+                            "lamaran tidak dikirim[/]"
+                        )
+                        self._dump_debug(job)
+                        return ApplyResult(
+                            False,
+                            "manual_required",
+                            "Isian wajib tidak terverifikasi "
+                            f"({rinci}) — lamaran TIDAK dikirim",
                         )
 
                     blocker = self._blocker()

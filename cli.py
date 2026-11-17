@@ -535,6 +535,125 @@ def cek_target(situs: str = "jobstreet", batas: int = 0):
     return hasil
 
 
+def _situs_lowongan(job: dict) -> str:
+    """Situs asal lowongan dari awalan `job_id` atau kolom `sumber`."""
+    sumber = str(job.get("sumber") or job.get("situs") or "").strip().lower()
+    job_id = str(job.get("job_id") or "")
+    awalan = job_id.split(":", 1)[0].strip().lower() if ":" in job_id else ""
+
+    for calon in (awalan, sumber):
+        if calon in ("jobstreet", "glints", "indeed"):
+            return calon
+
+    return awalan or sumber or "jobstreet"
+
+
+def _umur_lowongan(job: dict):
+    """Umur lowongan (hari) dari tanggal yang tersimpan; None bila tak terbaca."""
+    import umur as umur_modul
+
+    teks = str(job.get("date_posted") or job.get("posted_at") or "").strip()
+
+    if not teks or teks.lower().startswith("0000"):
+        return None
+
+    return umur_modul.umur_dari_teks(teks)
+
+
+def dry_run(situs: str = "", batas: int = 5):
+    """Jejak keputusan lowongan tersimpan TANPA mengirim lamaran.
+
+    Menunjukkan urutan yang benar-benar dijalankan: FOUND → DUPLICATE →
+    FILTER → SCORE → AGE → DECISION. Tidak membuka browser, tidak menyentuh
+    kuota, dan tidak mengubah status lamaran.
+    """
+    from job_filter import JobFilter, telusuri_keputusan
+
+    nama = str(situs or "").strip().lower()
+    saringan = JobFilter()
+    semua = db.lowongan_belum_dilamar()
+    dinilai = []
+
+    for job in semua:
+        asal = _situs_lowongan(job)
+
+        if nama and asal != nama:
+            continue
+
+        data = dict(job)
+        data["situs"] = asal
+        data["age_days"] = _umur_lowongan(job)
+        data["has_logo"] = (
+            None if data.get("has_logo") is None else bool(data.get("has_logo"))
+        )
+        dinilai.append(telusuri_keputusan(data, saringan))
+
+    console.print("[bold]DRY RUN[/] — tidak ada lamaran yang dikirim")
+    console.print(
+        f"[dim]Kode: {versi_kode()} · situs: {nama or 'semua'} · "
+        f"{len(dinilai)} lowongan tersimpan belum dilamar[/]"
+    )
+
+    if not dinilai:
+        console.print(
+            "[yellow]Tidak ada lowongan tersimpan untuk diuji. Jalankan riset "
+            "dulu (run --auto), lalu dry-run lagi.[/]"
+        )
+        return {"total": 0, "apply": 0, "skip": 0, "lowongan": []}
+
+    batas = max(1, int(batas or 5))
+    for nomor, hasil in enumerate(dinilai[:batas], start=1):
+        console.print(
+            f"\n[bold]{nomor}. {hasil['keputusan']}[/] · skor "
+            f"{hasil['skor']} · {hasil['job_id']}"
+        )
+
+        for langkah in hasil["tahapan"]:
+            warna = {
+                "SKIP": "yellow",
+                "APPLY": "green",
+                "OK": "dim",
+            }.get(langkah["status"], "white")
+            keterangan = langkah.get("alasan") or ""
+
+            if langkah["tahap"] == "SCORE":
+                rincian = ", ".join(
+                    f"{nama_dimensi} {nilai}"
+                    for nama_dimensi, nilai in langkah.get("rincian", {}).items()
+                    if nilai
+                )
+                keterangan = rincian or "tanpa dimensi bernilai"
+
+            if langkah["tahap"] == "AGE" and not keterangan:
+                umur_hari = langkah.get("umur_hari")
+                batas_umur = int(getattr(config, "max_age_days", 0) or 0)
+                keterangan = (
+                    f"umur {umur_hari} hari · MAX_AGE_DAYS={batas_umur}"
+                    if isinstance(umur_hari, int)
+                    else "tanggal tidak terbaca (DATE_UNKNOWN) · "
+                    f"MAX_AGE_DAYS={batas_umur}"
+                )
+
+            console.print(
+                f"  [{warna}]{langkah['tahap']:<9}[/] "
+                f"{langkah['status']:<6} {keterangan}"
+            )
+
+    jumlah_apply = sum(1 for item in dinilai if item["keputusan"] == "APPLY")
+    console.print(
+        f"\n[bold]Ringkasan:[/] {jumlah_apply} APPLY · "
+        f"{len(dinilai) - jumlah_apply} SKIP dari {len(dinilai)} lowongan "
+        "(tidak ada yang dikirim)"
+    )
+
+    return {
+        "total": len(dinilai),
+        "apply": jumlah_apply,
+        "skip": len(dinilai) - jumlah_apply,
+        "lowongan": dinilai,
+    }
+
+
 def kelola_jawaban(hapus: str = "", reset: bool = False,
                    isi: str = "", rapikan: bool = False,
                    tetapkan: str = ""):
@@ -1818,6 +1937,20 @@ if __name__ == "__main__":
         help="Batasi lowongan yang dinilai (0 = semua)",
     )
 
+    dry_parser = subparsers.add_parser(
+        "dry-run",
+        help="Jejak keputusan FOUND→DUPLICATE→FILTER→SCORE→AGE→DECISION "
+        "tanpa melamar",
+    )
+    dry_parser.add_argument(
+        "--situs", default="",
+        help="jobstreet, glints, indeed (kosong = semua)",
+    )
+    dry_parser.add_argument(
+        "--limit", type=int, default=5,
+        help="Jumlah lowongan yang ditampilkan (bawaan: 5)",
+    )
+
     indeed_parser = subparsers.add_parser(
         "indeed", help="Cari & lamar lowongan di Indeed"
     )
@@ -2033,6 +2166,8 @@ if __name__ == "__main__":
             indeed_parser.print_help()
     elif args.command == "cek-target":
         cek_target(args.situs, args.limit)
+    elif args.command == "dry-run":
+        dry_run(args.situs, args.limit)
     elif args.command == "jawaban":
         kelola_jawaban(
             args.hapus,

@@ -51,6 +51,21 @@ def normalisasi_perusahaan(nama: str) -> str:
     )
 
 
+def kata_utuh(bagian: str, teks: str) -> bool:
+    """True bila `bagian` muncul di `teks` sebagai kata utuh.
+
+    Dipakai untuk mencocokkan nama perusahaan dan kata fungsi judul. Tanpa
+    batas kata, nama pendek seperti "a" atau "abadi" ikut cocok dengan
+    "royal abadi" sehingga perusahaan yang tidak terkait ikut tertolak
+    (false positive yang ditemukan pada validasi final).
+    """
+    bagian = str(bagian or "").strip()
+    teks = str(teks or "")
+    if not bagian or not teks:
+        return False
+    return re.search(rf"(?<!\w){re.escape(bagian)}(?!\w)", teks) is not None
+
+
 def normalisasi_judul(judul: str) -> str:
     """Bentuk baku judul lowongan untuk mendeteksi duplikat."""
     teks = str(judul or "").lower()
@@ -147,6 +162,96 @@ def alasan_tidak_layak(job: dict, saringan: Optional["JobFilter"] = None) -> str
     return "" if lolos else kenapa
 
 
+# Tahap jejak keputusan dry-run. Urutannya mengikuti aturan yang BENAR-BENAR
+# dijalankan `should_apply()` (duplikat lebih dulu, lalu penyaringan, umur,
+# skor, keputusan) — bukan urutan yang enak dibaca.
+TAHAP_DRY_RUN = ("FOUND", "DUPLICATE", "FILTER", "SCORE", "AGE", "DECISION")
+
+
+def tahap_dari_alasan(alasan: str) -> str:
+    """Tahap mana yang memutuskan penolakan (untuk jejak dry-run)."""
+    teks = str(alasan or "").lower()
+    if "sudah" in teks and ("lamar" in teks or "apply" in teks):
+        return "DUPLICATE"
+    if "max_age_days" in teks or "terlalu lama" in teks or "date_unknown" in teks:
+        return "AGE"
+    return "FILTER"
+
+
+def telusuri_keputusan(job: dict, saringan: Optional["JobFilter"] = None) -> dict:
+    """Jejak keputusan satu lowongan TANPA melamar dan TANPA mengubah data.
+
+    Satu-satunya sumber keputusan tetap `should_apply()`; fungsi ini hanya
+    MENJELASKAN hasilnya per tahap (FOUND → DUPLICATE → FILTER → SCORE → AGE
+    → DECISION) supaya dry-run bisa dibaca dan diuji.
+    """
+    saringan = saringan or JobFilter()
+    job_id = str(job.get("job_id") or "").strip()
+    platform = str(job.get("situs") or "").strip().lower()
+
+    if not platform and ":" in job_id:
+        platform = job_id.split(":", 1)[0].strip().lower()
+
+    lolos, alasan = saringan.should_apply(job)
+    rincian = saringan.score_breakdown(job)
+    tahap_gagal = "" if lolos else tahap_dari_alasan(alasan)
+
+    umur_hari = job.get("age_days")
+    alasan_umur = umur.batas_umur(
+        umur_hari if isinstance(umur_hari, int) else None,
+        int(config.max_age_days or 0),
+        bool(getattr(config, "tolak_umur_tak_diketahui", False)),
+    )
+
+    tahapan = [
+        {
+            "tahap": "FOUND",
+            "status": "OK",
+            "alasan": (
+                f"{job.get('title') or '-'} @ {job.get('company') or '-'}"
+                + (f" · {platform}" if platform else "")
+            ),
+        },
+        {
+            "tahap": "DUPLICATE",
+            "status": "SKIP" if tahap_gagal == "DUPLICATE" else "OK",
+            "alasan": alasan if tahap_gagal == "DUPLICATE" else "",
+        },
+        {
+            "tahap": "FILTER",
+            "status": "SKIP" if tahap_gagal == "FILTER" else "OK",
+            "alasan": alasan if tahap_gagal == "FILTER" else "",
+        },
+        {
+            "tahap": "SCORE",
+            "status": "OK",
+            "alasan": "",
+            "skor": sum(rincian.values()),
+            "rincian": dict(rincian),
+        },
+        {
+            "tahap": "AGE",
+            "status": "SKIP" if alasan_umur else "OK",
+            "alasan": alasan_umur,
+            "umur_hari": umur_hari,
+        },
+        {
+            "tahap": "DECISION",
+            "status": "APPLY" if lolos else "SKIP",
+            "alasan": alasan or "OK",
+        },
+    ]
+
+    return {
+        "job_id": job_id,
+        "platform": platform,
+        "tahapan": tahapan,
+        "keputusan": "APPLY" if lolos else "SKIP",
+        "alasan": alasan or "OK",
+        "skor": sum(rincian.values()),
+    }
+
+
 class JobFilter:
     def __init__(self):
         self.exclude_keywords = [
@@ -155,6 +260,15 @@ class JobFilter:
         self.senior_keywords = [
             "senior", "sr.", "lead", "principal", "director", "head of",
             "chief", "vp ", "vice president", "manager",
+        ]
+        # Kata fungsi lain (sales, driver, ...). Judul seperti "Warehouse Sales
+        # Executive" dulu lolos hanya karena kata "warehouse" kebetulan cocok,
+        # padahal perannya sales. Hanya dipakai bersama filter minat supaya
+        # REQUIRE_KEYWORD_MATCH=0 tetap berarti "jangan saring judul".
+        self.exclude_title_words = [
+            kata.strip().lower()
+            for kata in (getattr(config, "exclude_title_words", []) or [])
+            if kata.strip()
         ]
 
     def should_apply(self, job: dict) -> tuple[bool, str]:
@@ -197,6 +311,11 @@ class JobFilter:
         for keyword in self.exclude_keywords:
             if keyword in title_lower:
                 return False, f"Title mengandung excluded: '{keyword}'"
+
+        if config.require_keyword_match:
+            for kata in self.exclude_title_words:
+                if kata_utuh(kata, title_lower):
+                    return False, f"Judul peran lain: '{kata}'"
 
         for keyword in self.senior_keywords:
             if keyword in title_lower:
@@ -255,11 +374,20 @@ class JobFilter:
             # Nama pendek seperti "ifa" dicocokkan per kata supaya tidak
             # menolak perusahaan lain yang kebetulan memuat huruf sama.
             if len(kunci) <= 4:
-                if re.search(rf"\b{re.escape(kunci)}\b", nama):
+                if kata_utuh(kunci, nama):
                     return str(item).strip()
                 continue
 
-            if kunci in nama or nama in kunci:
+            # Nama yang diblokir muncul di nama lengkap perusahaan.
+            if kata_utuh(kunci, nama):
+                return str(item).strip()
+
+            # Arah sebaliknya (nama perusahaan bagian dari entri blacklist,
+            # mis. "royal abadi" untuk "PT Royal Abadi Sejahtera") hanya
+            # dipakai bila nama perusahaan punya >= 2 kata. Tanpa syarat ini,
+            # nama seperti "PT A" (menjadi "a") atau "Abadi" ikut dianggap
+            # blacklist karena hanya berupa potongan kata (false positive).
+            if len(nama.split()) >= 2 and kata_utuh(nama, kunci):
                 return str(item).strip()
 
         return ""
