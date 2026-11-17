@@ -1,5 +1,8 @@
 selenium>=4.15.0
 webdriver-manager>=4.0.1
 python-dotenv>=1.0.0
+# Database zona IANA: Windows tidak menyertakannya, dan tanpa ini
+# ZoneInfo("Asia/Jakarta") gagal (kode tetap punya cadangan +07:00).
+tzdata>=2024.1; sys_platform == "win32"
 rich>=13.7.0
 requests>=2.31.0

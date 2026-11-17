@@ -1055,3 +1055,51 @@ Total suite: **982 passed, 1 skipped**; ruff (`E9,F,E501,I,B,SIM,ISC`) bersih;
 elemen DOM tiruan dan data FIXTURE. LIVE PLATFORM TEST (JobStreet/Glints/Indeed
 sungguhan) **belum** dilakukan karena lingkungan pengujian tidak punya akses ke
 situs tersebut.
+
+## 28. LIVE VALIDATION Windows: `ZoneInfoNotFoundError` mematikan seluruh program
+
+Ditemukan pada **live validation di mesin pengguna** (Windows 11, Python 3.12,
+commit `c8af9dc`) — bukan dari unit test, karena Linux selalu punya database
+zona IANA.
+
+### Gejala
+
+```
+File "...\zoneinfo\_common.py", line 24, in load_tzdata
+    raise ZoneInfoNotFoundError(f"No time zone found with key {key}")
+ModuleNotFoundError: No module named 'tzdata'
+...
+File "...\umur.py", line 24, in <module>
+    WIB = ZoneInfo("Asia/Jakarta")
+```
+
+Perintah yang gagal: `dry-run` (dan, karena `job_filter` mengimpor `umur`,
+semua perintah lain yang menyentuh filter: `run`, `glints`, `indeed`,
+`cek-target`, `lamar`). Artinya sejak `umur.py` ditambahkan (PR #24), program
+**tidak bisa dijalankan sama sekali** di Windows tanpa paket `tzdata`.
+
+### Akar masalah
+
+`umur.py` membuat `ZoneInfo("Asia/Jakarta")` pada level modul. Windows tidak
+menyertakan database zona IANA; `zoneinfo` hanya bisa memakainya bila paket
+`tzdata` terpasang. `requirements.txt` tidak mencantumkannya, dan instalasi
+lama di mesin pengguna ditandai "Dependensi sudah terpasang, dilewati"
+sehingga paket baru pun tidak akan masuk tanpa pemasangan ulang.
+
+### Perbaikan (minimal)
+
+| Berkas | Fungsi | Perubahan |
+|---|---|---|
+| `umur.py` | `zona_wib()` (baru) | `try: ZoneInfo("Asia/Jakarta")` → `except: timezone(timedelta(hours=7), "WIB")`; `WIB = zona_wib()` |
+| `requirements.txt` | — | tambah `tzdata>=2024.1; sys_platform == "win32"` (untuk instalasi baru) |
+| `tests/test_umur_lowongan.py` | 3 tes baru | zona cadangan dipakai saat `ZoneInfo` melempar, offset setara `Asia/Jakarta` sepanjang tahun (tanpa DST), dan modul tetap bisa diimpor (`importlib.reload`) tanpa `tzdata` |
+
+WIB tidak memakai DST, sehingga offset tetap +07:00 identik dengan
+`Asia/Jakarta` pada tanggal mana pun — bukan pendekatan "kurang tepat tapi
+cukup".
+
+### Hasil
+
+`pytest -q` → **985 passed, 1 skipped** (+3); ruff (`E9,F,E501,I,B,SIM,ISC`)
+bersih; `compileall` bersih. Perbaikan ini **wajib** agar live validation
+JobStreet/Glints/Indeed bisa dilanjutkan di Windows.

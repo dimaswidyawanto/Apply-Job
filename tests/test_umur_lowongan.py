@@ -10,7 +10,9 @@ Aturan (audit #26):
   bila TOLAK_UMUR_TAK_DIKETAHUI diaktifkan.
 """
 
-from datetime import UTC, datetime
+import importlib
+import zoneinfo
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 
@@ -160,3 +162,61 @@ def test_max_age_days_nol_tanpa_batas(saringan, monkeypatch):
 
     assert saringan.should_apply(_job(age_days=999))[0] is True
     assert saringan.should_apply(_job(age_days=None))[0] is True
+
+
+# ------------------------------------------------- zona WIB tanpa tzdata ---
+def test_zona_wib_jatuh_ke_offset_tetap_bila_tzdata_tidak_ada(monkeypatch):
+    """Windows tanpa paket `tzdata`: jangan berhenti, pakai +07:00.
+
+    Gejala nyata di mesin pengguna (commit c8af9dc):
+      ModuleNotFoundError: No module named 'tzdata'
+      zoneinfo._common.ZoneInfoNotFoundError: 'No time zone found with key
+      Asia/Jakarta'
+    Seluruh perintah (dry-run, run, glints, indeed) mati saat impor.
+    """
+
+    def gagal(_kunci):
+        raise zoneinfo.ZoneInfoNotFoundError("Asia/Jakarta")
+
+    monkeypatch.setattr(umur, "ZoneInfo", gagal)
+    zona = umur.zona_wib()
+
+    assert zona.utcoffset(datetime(2026, 1, 15, 9, 0)) == timedelta(hours=7)
+    assert zona.utcoffset(datetime(2026, 7, 15, 9, 0)) == timedelta(hours=7)
+
+
+def test_cadangan_wib_setara_dengan_asia_jakarta():
+    """WIB tanpa DST: offset tetap +07:00 sama sepanjang tahun."""
+    asli = zoneinfo.ZoneInfo("Asia/Jakarta")
+    cadangan = timezone(timedelta(hours=7), "WIB")
+
+    for bulan in (1, 4, 7, 10, 12):
+        saat = datetime(2026, bulan, 15, 12, 0)
+        assert (
+            saat.replace(tzinfo=asli).utcoffset()
+            == saat.replace(tzinfo=cadangan).utcoffset()
+            == timedelta(hours=7)
+        )
+
+
+def test_impor_umur_tetap_berhasil_tanpa_tzdata(monkeypatch):
+    """Modul harus bisa diimpor walau ZoneInfo melempar (bukan crash saat impor)."""
+
+    def gagal(_kunci):
+        raise zoneinfo.ZoneInfoNotFoundError("Asia/Jakarta")
+
+    monkeypatch.setattr(zoneinfo, "ZoneInfo", gagal)
+    modul = importlib.reload(umur)
+
+    try:
+        assert modul.WIB.utcoffset(datetime(2026, 11, 17, 9, 0)) == timedelta(
+            hours=7
+        )
+        # Perhitungan umur tetap jalan memakai offset cadangan.
+        assert modul.umur_dari_teks("3 hari lalu") == 3
+        assert modul.batas_umur(8, 7) == (
+            "Lowongan terlalu lama (8 hari > MAX_AGE_DAYS=7)"
+        )
+    finally:
+        monkeypatch.undo()
+        importlib.reload(umur)

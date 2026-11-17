@@ -2016,6 +2016,28 @@ tombol Lamar agar selector di `auto_apply.py` bisa disesuaikan.
 Pastikan Anda mengetik `y` saat terminal bertanya, bukan hanya Enter. Lamaran
 tanpa konfirmasi dicatat sebagai `skipped` dan tidak dihitung di batas harian.
 
+**`ZoneInfoNotFoundError: No time zone found with key Asia/Jakarta`**
+(didahului `ModuleNotFoundError: No module named 'tzdata'`).
+
+Windows tidak menyertakan database zona IANA, sehingga `ZoneInfo("Asia/Jakarta")`
+gagal — dulu ini menghentikan **seluruh** program saat impor, pada perintah apa
+pun yang memakai filter lowongan (`dry-run`, `run`, `glints`, `indeed`).
+
+Sudah diperbaiki: `umur.zona_wib()` otomatis memakai offset tetap **+07:00**
+bila database zona tidak ada (WIB tanpa DST, jadi hasilnya sama persis).
+Perbarui kode lalu jalankan lagi:
+
+```
+.\tarik.bat
+.\jalankan.bat config
+```
+
+Bila ingin tetap memakai database zona, pasang paketnya sekali:
+
+```
+.\.venv\Scripts\python.exe -m pip install tzdata
+```
+
 ## Catatan
 
 Gunakan alat ini dengan wajar dan sesuai ketentuan layanan JobStreet. Program

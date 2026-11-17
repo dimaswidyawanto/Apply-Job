@@ -18,10 +18,30 @@ Aturan yang dipakai (audit #26):
 """
 
 import re
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-WIB = ZoneInfo("Asia/Jakarta")
+
+def zona_wib():
+    """Zona WIB; jatuh ke offset tetap +07:00 bila database zona tidak ada.
+
+    Windows tidak menyertakan database zona IANA. Tanpa paket `tzdata`,
+    `ZoneInfo("Asia/Jakarta")` melempar `ZoneInfoNotFoundError` **saat impor**,
+    sehingga seluruh program berhenti sebelum sempat berjalan (gejalanya:
+    `ModuleNotFoundError: No module named 'tzdata'` lalu
+    `ZoneInfoNotFoundError: 'No time zone found with key Asia/Jakarta'`
+    pada perintah apa pun yang memakai filter lowongan).
+
+    WIB tidak memakai DST, jadi offset tetap +07:00 menghasilkan waktu yang
+    sama persis dengan `Asia/Jakarta`.
+    """
+    try:
+        return ZoneInfo("Asia/Jakarta")
+    except Exception:  # ZoneInfoNotFoundError / tzdata tidak terpasang
+        return timezone(timedelta(hours=7), "WIB")
+
+
+WIB = zona_wib()
 
 # Singkatan dan nama bulan (Indonesia + Inggris).
 BULAN = {
