@@ -711,6 +711,39 @@ supaya lowongan lama tidak tampak baru.
 .\jalankan.bat set-env TOLAK_UMUR_TAK_DIKETAHUI=true
 ```
 
+#### Menyusun bukti validasi dari database (`laporan-bukti`)
+
+`laporan-bukti` mencetak tabel bukti siap tempel ke laporan: satu baris per
+lowongan tersimpan yang belum dilamar, berisi platform, `job_id`, judul,
+perusahaan, lokasi, tanggal, umur, hasil blacklist/judul/lokasi/duplikat, skor,
+keputusan, dan alasannya — ditutup ringkasan per situs. Tidak membuka browser,
+tidak memakai kuota, tidak mengubah data.
+
+```powershell
+.\jalankan.bat laporan-bukti --situs jobstreet --limit 25
+.\jalankan.bat laporan-bukti --limit 50 --simpan   # simpan ke reports/bukti-live-*.md
+```
+
+Contoh keluaran (dipotong):
+
+```
+| platform | job_id | judul | perusahaan | lokasi | tanggal | umur (hari) | blacklist | judul | lokasi | duplikat | skor | keputusan | alasan |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| indeed | indeed:e | Sales Executive | PT Sales | Bandung | 1 hari lalu | 1 | - | TOLAK | - | - | 40 | SKIP | Judul tidak sesuai minat |
+| glints | glints:d | Inventory Controller | PT Glints | Bandung | 3 hari lalu | 3 | - | - | - | - | 59 | APPLY | OK |
+| jobstreet | jobstreet:b | Staff PPIC | PT Tanpa Tanggal | Bandung | - | - | - | - | - | - | 47 | APPLY | OK |
+
+## Ringkasan per situs
+
+| platform | total | apply | skip | duplikat | terlalu tua | tanpa tanggal | judul | lokasi | blacklist | lain |
+|---|---|---|---|---|---|---|---|---|---|---|
+| glints | 1 | 1 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| jobstreet | 2 | 1 | 1 | 0 | 1 | 1 | 0 | 0 | 0 | 0 |
+```
+
+Kolom `umur (hari)` berisi `-` bila tanggalnya tak terbaca — itu tanda
+`DATE_UNKNOWN`, bukan "baru diposting".
+
 #### Memeriksa dari mana tanggal terbaca (`cek-tanggal`)
 
 `cek-tanggal` membuka pencarian JobStreet seperti biasa, lalu menampilkan —

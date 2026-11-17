@@ -441,3 +441,76 @@ def test_cek_tanggal_menampilkan_tabel_dan_hitungan(capsys, monkeypatch, bot):
     assert "DATE_UNKNOWN" in keluaran
     assert "1 dari 2 kartu" in keluaran
     assert "tidak ada lamaran dikirim" in keluaran
+
+
+# ------------------------- 6. `laporan-bukti`: tabel bukti dari database nyata ---
+def _isi_db(db):
+    for jid, judul, pt, lok, tgl in (
+        ("jobstreet:a", "Team Fleet Warehouse - Bogor", "Astro", "Bogor", "2026-11-01"),
+        ("jobstreet:b", "Staff PPIC", "PT Tanpa Tanggal", "Bandung", ""),
+        ("glints:d", "Inventory Controller", "PT Glints", "Bandung", "3 hari lalu"),
+        ("indeed:e", "Sales Executive", "PT Sales", "Bandung", "1 hari lalu"),
+    ):
+        db.add_job(
+            {
+                "job_id": jid,
+                "title": judul,
+                "company": pt,
+                "location": lok,
+                "salary": "Rp 7.000.000",
+                "description": "stok gudang, SAP",
+                "url": f"https://x/{jid}",
+                "date_posted": tgl,
+                "has_logo": 1,
+            }
+        )
+
+
+def test_laporan_bukti_menghasilkan_markdown_dari_database(
+    basis, capsys, monkeypatch
+):
+    tetap = datetime(2026, 11, 17, 9, 0)
+    monkeypatch.setattr(umur, "sekarang_wib", lambda *a, **k: tetap)
+    monkeypatch.setattr(cli, "db", basis)
+    _isi_db(basis)
+
+    hasil = cli.laporan_bukti("", 10)
+
+    keluaran = capsys.readouterr().out
+    assert "## Tabel bukti per lowongan" in keluaran
+    assert "| platform | job_id | judul |" in keluaran
+    assert "| jobstreet | jobstreet:a |" in keluaran
+    assert "## Ringkasan per situs" in keluaran
+    assert "| jobstreet | 2 |" in keluaran
+    assert "tanpa tanggal tersimpan" in keluaran  # 1 baris DATE_UNKNOWN
+    assert hasil["total"] == 4
+    assert hasil["per_situs"]["jobstreet"]["tanpa_tgl"] == 1
+
+
+def test_laporan_bukti_menyaring_situs(basis, capsys, monkeypatch):
+    monkeypatch.setattr(cli, "db", basis)
+    _isi_db(basis)
+
+    hasil = cli.laporan_bukti("glints", 10)
+    keluaran = capsys.readouterr().out
+
+    assert hasil["total"] == 1
+    assert "glints:d" in keluaran
+    assert "jobstreet:a" not in keluaran
+
+
+def test_laporan_bukti_simpan_ke_reports(basis, capsys, monkeypatch, tmp_path):
+    import laporan as laporan_modul
+
+    monkeypatch.setattr(cli, "db", basis)
+    monkeypatch.setattr(laporan_modul, "FOLDER_LAPORAN", tmp_path)
+    _isi_db(basis)
+
+    cli.laporan_bukti("", 5, simpan=True)
+
+    berkas = list(tmp_path.glob("bukti-live-*.md"))
+    assert len(berkas) == 1
+    isi = berkas[0].read_text(encoding="utf-8")
+    assert isi.startswith("# Bukti validasi dari database")
+    assert "| platform | job_id |" in isi
+    assert "Tersimpan" in capsys.readouterr().out

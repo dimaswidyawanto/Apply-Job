@@ -590,21 +590,20 @@ def kategori_penolakan(alasan: str) -> str:
     return "lainnya"
 
 
-def dry_run(situs: str = "", batas: int = 5):
-    """Jejak keputusan lowongan tersimpan TANPA mengirim lamaran.
+def _penilaian_tersimpan(situs: str = ""):
+    """Nilai semua lowongan tersimpan yang belum dilamar (tanpa melamar).
 
-    Menunjukkan urutan yang benar-benar dijalankan: FOUND → DUPLICATE →
-    FILTER → SCORE → AGE → DECISION. Tidak membuka browser, tidak menyentuh
-    kuota, dan tidak mengubah status lamaran.
+    Mengembalikan daftar pasangan `(data_lowongan, hasil_telusuri)` supaya
+    pemakai bisa memilih: `dry_run` cukup butuh hasilnya, `laporan_bukti`
+    butuh judul/perusahaan/lokasi/tanggalnya juga.
     """
     from job_filter import JobFilter, telusuri_keputusan
 
     nama = str(situs or "").strip().lower()
     saringan = JobFilter()
-    semua = db.lowongan_belum_dilamar()
-    dinilai = []
+    penilaian = []
 
-    for job in semua:
+    for job in db.lowongan_belum_dilamar():
         asal = _situs_lowongan(job)
 
         if nama and asal != nama:
@@ -616,7 +615,20 @@ def dry_run(situs: str = "", batas: int = 5):
         data["has_logo"] = (
             None if data.get("has_logo") is None else bool(data.get("has_logo"))
         )
-        dinilai.append(telusuri_keputusan(data, saringan))
+        penilaian.append((data, telusuri_keputusan(data, saringan)))
+
+    return penilaian
+
+
+def dry_run(situs: str = "", batas: int = 5):
+    """Jejak keputusan lowongan tersimpan TANPA mengirim lamaran.
+
+    Menunjukkan urutan yang benar-benar dijalankan: FOUND → DUPLICATE →
+    FILTER → SCORE → AGE → DECISION. Tidak membuka browser, tidak menyentuh
+    kuota, dan tidak mengubah status lamaran.
+    """
+    nama = str(situs or "").strip().lower()
+    dinilai = [hasil for _data, hasil in _penilaian_tersimpan(nama)]
 
     console.print("[bold]DRY RUN[/] — tidak ada lamaran yang dikirim")
     console.print(
@@ -778,6 +790,185 @@ def dry_run(situs: str = "", batas: int = 5):
         "per_situs": per_situs,
         "lowongan": dinilai,
     }
+
+
+def laporan_bukti(situs: str = "", batas: int = 20, simpan: bool = False):
+    """Tabel bukti validasi (pasal 3) + ringkasan per situs (pasal 14).
+
+    Seluruh isinya berasal dari lowongan yang SUDAH tersimpan: tidak membuka
+    browser, tidak memakai kuota, tidak mengubah data. Dipakai untuk menyusun
+    laporan akhir tanpa menghitung manual.
+    """
+    import umur as umur_modul
+
+    nama = str(situs or "").strip().lower()
+    penilaian = _penilaian_tersimpan(nama)
+    batas = max(1, int(batas or 20))
+    tampil = penilaian[:batas]
+
+    waktu = umur_modul.sekarang_wib().strftime("%Y-%m-%d %H:%M")
+
+    judul_atas = (
+        "# Bukti validasi dari database\n\n"
+        f"- Kode: {versi_kode()}\n"
+        f"- Waktu (WIB): {waktu}\n"
+        f"- Database: {config.db_path}\n"
+        f"- Situs: {nama or 'semua'}\n"
+        f"- Lowongan tersimpan belum dilamar: {len(penilaian)} "
+        f"(ditampilkan {len(tampil)})"
+    )
+
+    aturan = (
+        "\n- Aturan aktif: "
+        f"MAX_AGE_DAYS={int(config.max_age_days or 0)} · "
+        f"filter judul={'aktif' if config.require_keyword_match else 'tidak'} · "
+        f"filter lokasi ketat={'aktif' if config.strict_location else 'tidak'} · "
+        f"wajib logo={'aktif' if config.require_company_logo else 'tidak'}"
+    )
+
+    kolom = (
+        "platform", "job_id", "judul", "perusahaan", "lokasi", "tanggal",
+        "umur (hari)", "blacklist", "judul", "lokasi", "duplikat", "skor",
+        "keputusan", "alasan",
+    )
+    baris = ["| " + " | ".join(kolom) + " |"]
+    baris.append("|" + "|".join(["---"] * len(kolom)) + "|")
+
+    def sel(teks, lebar=40):
+        return str(teks if teks not in (None, "") else "-").replace("|", "/")[:lebar]
+
+    for data, hasil in tampil:
+        tahap = {t["tahap"]: t for t in hasil["tahapan"]}
+        umur_hari = tahap.get("AGE", {}).get("umur_hari")
+        kategori = kategori_penolakan(hasil["alasan"])
+
+        baris.append(
+            "| "
+            + " | ".join(
+                [
+                    sel(hasil.get("platform")),
+                    sel(hasil.get("job_id")),
+                    sel(data.get("title")),
+                    sel(data.get("company"), 24),
+                    sel(data.get("location"), 18),
+                    sel(data.get("date_posted"), 12),
+                    sel(umur_hari, 4),
+                    "TOLAK" if kategori == "blacklist" else "-",
+                    "TOLAK" if kategori == "judul" else "-",
+                    "TOLAK" if kategori == "lokasi" else "-",
+                    "YA" if tahap.get("DUPLICATE", {}).get("status") == "SKIP" else "-",
+                    sel(hasil.get("skor"), 4),
+                    sel(hasil.get("keputusan")),
+                    sel(hasil["alasan"], 44),
+                ]
+            )
+            + " |"
+        )
+
+    # Ringkasan per situs (pasal 14).
+    rekap: dict = {}
+    for _data, hasil in penilaian:
+        nama_situs = hasil.get("platform") or "tidak diketahui"
+        bar = rekap.setdefault(
+            nama_situs,
+            {
+                "total": 0, "apply": 0, "duplikat": 0, "terlalu_tua": 0,
+                "tanpa_tgl": 0, "judul": 0, "lokasi": 0, "blacklist": 0,
+                "lain": 0,
+            },
+        )
+        bar["total"] += 1
+
+        tahap = {t["tahap"]: t for t in hasil["tahapan"]}
+        if tahap.get("AGE", {}).get("umur_hari") is None:
+            bar["tanpa_tgl"] += 1
+
+        if hasil["keputusan"] == "APPLY":
+            bar["apply"] += 1
+            continue
+
+        kategori = kategori_penolakan(hasil["alasan"])
+        if kategori in ("duplikat", "terlalu_tua", "judul", "lokasi", "blacklist"):
+            bar[kategori] += 1
+        else:
+            bar["lain"] += 1
+
+    kolom2 = (
+        "platform", "total", "apply", "skip", "duplikat", "terlalu tua",
+        "tanpa tanggal", "judul", "lokasi", "blacklist", "lain",
+    )
+    rekap_md = ["", "## Ringkasan per situs", "", "| " + " | ".join(kolom2) + " |"]
+    rekap_md.append("|" + "|".join(["---"] * len(kolom2)) + "|")
+
+    for nama_situs, bar in sorted(rekap.items()):
+        rekap_md.append(
+            "| "
+            + " | ".join(
+                str(nilai)
+                for nilai in (
+                    nama_situs,
+                    bar["total"],
+                    bar["apply"],
+                    bar["total"] - bar["apply"],
+                    bar["duplikat"],
+                    bar["terlalu_tua"],
+                    bar["tanpa_tgl"],
+                    bar["judul"],
+                    bar["lokasi"],
+                    bar["blacklist"],
+                    bar["lain"],
+                )
+            )
+            + " |"
+        )
+
+    catatan = []
+    if not penilaian:
+        catatan.append(
+            "Tidak ada lowongan tersimpan yang belum dilamar — jalankan riset dulu."
+        )
+
+    tanpa_tgl = sum(
+        1
+        for _data, hasil in penilaian
+        if {t["tahap"]: t for t in hasil["tahapan"]}.get("AGE", {}).get(
+            "umur_hari"
+        )
+        is None
+    )
+    if tanpa_tgl:
+        catatan.append(
+            f"{tanpa_tgl} dari {len(penilaian)} lowongan tanpa tanggal tersimpan "
+            "(DATE_UNKNOWN) — aturan MAX_AGE_DAYS tidak dapat menilainya. "
+            "Baris seperti ini ditandai '-' pada kolom umur."
+        )
+
+    teks = (
+        judul_atas
+        + aturan
+        + "\n\n## Tabel bukti per lowongan\n\n"
+        + "\n".join(baris)
+        + "\n"
+        + "\n".join(rekap_md)
+        + "\n"
+        + ("\n".join(f"\n> {c}" for c in catatan) if catatan else "")
+    )
+
+    # soft_wrap: jangan bungkus baris — tabel markdown harus utuh saat
+    # disalin ke laporan.
+    console.print(teks, markup=False, highlight=False, soft_wrap=True)
+
+    if simpan:
+        import laporan as laporan_modul
+
+        folder = Path(laporan_modul.FOLDER_LAPORAN)
+        folder.mkdir(parents=True, exist_ok=True)
+        jejak = umur_modul.sekarang_wib().strftime("%Y-%m-%d-%H%M")
+        berkas = folder / f"bukti-live-{jejak}.md"
+        berkas.write_text(teks, encoding="utf-8")
+        console.print(f"\n[green]Tersimpan:[/] {berkas}")
+
+    return {"total": len(penilaian), "ditampilkan": len(tampil), "per_situs": rekap}
 
 
 def kelola_jawaban(hapus: str = "", reset: bool = False,
@@ -2086,6 +2277,20 @@ if __name__ == "__main__":
         "--tanpa-browser", action="store_true", help="Jangan buka browser"
     )
 
+    bukti_parser = subparsers.add_parser(
+        "laporan-bukti",
+        help="Tabel bukti validasi dari database (tanpa browser, tanpa kuota)",
+    )
+    bukti_parser.add_argument(
+        "--situs", default="", help="jobstreet / glints / indeed (kosong = semua)"
+    )
+    bukti_parser.add_argument(
+        "--limit", type=int, default=20, help="Jumlah lowongan yang ditampilkan"
+    )
+    bukti_parser.add_argument(
+        "--simpan", action="store_true", help="Simpan ke reports/bukti-live-*.md"
+    )
+
     lapor_parser = subparsers.add_parser(
         "laporan", help="Laporan kinerja + saran perbaikan"
     )
@@ -2376,6 +2581,8 @@ if __name__ == "__main__":
         tampilkan_cv(args.path, args.pasang)
     elif args.command == "dashboard":
         buka_dashboard(args.port, args.tanpa_browser)
+    elif args.command == "laporan-bukti":
+        laporan_bukti(args.situs, args.limit, args.simpan)
     elif args.command == "laporan":
         tampilkan_laporan(args.simpan)
     elif args.command == "performa":

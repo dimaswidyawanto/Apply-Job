@@ -1246,3 +1246,27 @@ dinamis di tabel di-`escape`. Tanpa itu baris ringkasan tercetak kosong.
 Tes: `tests/test_live_fixes.py` +4 (sumber selector, sumber label, tanpa
 tanggal, dan perintah `cek-tanggal` ujung-ke-ujung dengan bot tiruan).
 Suite: **1008 passed, 1 skipped**.
+
+## 32. `laporan-bukti`: tabel bukti validasi dari database
+
+Laporan akhir menuntut tabel per lowongan (platform, `job_id`, judul,
+perusahaan, lokasi, tanggal, umur, hasil blacklist/judul/lokasi/duplikat, skor,
+keputusan, alasan) yang sebelumnya harus dirakit manual dari `dry-run`.
+
+Perbaikan: `cli.laporan_bukti()` memakai jalur penilaian yang sama dengan
+`dry-run` — keduanya kini berbagi `_penilaian_tersimpan()` (satu implementasi,
+bukan dua salinan yang bisa menyimpang) — lalu mencetak markdown:
+
+* `## Tabel bukti per lowongan` — satu baris per lowongan, kolom `umur (hari)`
+  berisi `-` untuk `DATE_UNKNOWN`;
+* `## Ringkasan per situs` — total/apply/skip/duplikat/terlalu tua/tanpa
+  tanggal/judul/lokasi/blacklist/lain;
+* catatan berapa baris tanpa tanggal, supaya "0 terlalu tua" tidak disalahartikan.
+
+Tidak membuka browser, tidak memakai kuota, tidak mengubah data.
+`--simpan` menulis `reports/bukti-live-YYYY-MM-DD-HHMM.md` (folder `reports/`
+sudah di `.gitignore`). Cetakan memakai `soft_wrap=True` supaya tabel markdown
+tidak terpotong oleh pembungkusan terminal.
+
+Tes: `tests/test_live_fixes.py` +3 (tabel+ringkasan, penyaringan `--situs`,
+`--simpan`). Suite: **1011 passed, 1 skipped**; ruff & compileall bersih.
