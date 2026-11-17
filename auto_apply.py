@@ -161,6 +161,75 @@ SKALA_URUT = (
     "fluent", "mahir", "native", "expert", "ahli",
 )
 
+# Selector kontrol formulir. Selain `input` biasa, sebagian formulir modern
+# memakai elemen semantik (ARIA) yang tidak pernah dibaca kode lama sehingga
+# pertanyaannya tidak terlihat sama sekali (audit #26).
+SEL_RADIO = ("input[type='radio']", "[role='radio']")
+SEL_CHECKBOX = ("input[type='checkbox']", "[role='checkbox']")
+SEL_COMBOBOX = ("[role='combobox']", "input[aria-haspopup='listbox']")
+
+
+def _atribut(element, nama: str) -> str:
+    """Atribut elemen dalam huruf kecil ("" bila tidak ada / gagal dibaca)."""
+    try:
+        return " ".join(str(element.get_attribute(nama) or "").split()).lower()
+    except Exception:
+        return ""
+
+
+def peran_kontrol(element) -> str:
+    """Jenis kontrol formulir menurut tag DAN peran ARIA-nya.
+
+    Kembalikan "radio", "checkbox", "combobox", "pilihan" (select), "teks",
+    atau "" bila bukan kontrol isian. `div role="radio"` harus dikenali
+    sebagai radio walau tag-nya bukan `input`.
+    """
+    peran = _atribut(element, "role")
+    tag = str(getattr(element, "tag_name", "") or "").lower()
+    tipe = _atribut(element, "type")
+
+    if peran in ("radio", "menuitemradio"):
+        return "radio"
+    if peran in ("checkbox", "menuitemcheckbox", "switch"):
+        return "checkbox"
+    if peran == "combobox" or _atribut(element, "aria-haspopup") == "listbox":
+        return "combobox"
+    if tag == "input" and tipe == "radio":
+        return "radio"
+    if tag == "input" and tipe == "checkbox":
+        return "checkbox"
+    if tag == "select":
+        return "pilihan"
+    if tag in ("input", "textarea"):
+        return "teks"
+
+    return ""
+
+
+def aria_terpilih(element) -> bool:
+    """True bila atribut ARIA menandai kontrol ini terpilih/aktif.
+
+    Dibutuhkan karena `div role="radio"` tidak punya properti `checked`
+    seperti `input`: statusnya hanya terlihat di `aria-checked`.
+    """
+    return (
+        _atribut(element, "aria-checked") == "true"
+        or _atribut(element, "aria-selected") == "true"
+        or _atribut(element, "aria-pressed") == "true"
+    )
+
+
+def terpilih_kontrol(element) -> bool:
+    """Status terpilih satu kontrol — properti asli MAUPUN atribut ARIA."""
+    try:
+        if element.is_selected():
+            return True
+    except Exception:
+        pass
+
+    return aria_terpilih(element)
+
+
 # Nilai atribut `value` yang jelas ID internal, bukan teks opsi.
 _BUKAN_LABEL = re.compile(
     r"^(?:opt|option|choice|answer|value|radio|id|item|pilihan)[-_ ]?\d*$",
@@ -1011,6 +1080,10 @@ class AutoApplier:
                 element,
             )
 
+    def _terpilih(self, element) -> bool:
+        """Terpilih menurut properti asli (via `_selected`) atau atribut ARIA."""
+        return bool(self._selected(element)) or aria_terpilih(element)
+
     def _terpilih_setelah_klik(self, element, batas: float | None = None) -> bool:
         """Tunggu radio benar-benar terpilih (bukan menebak sesaat setelah klik).
 
@@ -1020,7 +1093,7 @@ class AutoApplier:
         pertanyaannya dilaporkan "belum bisa dijawab otomatis", dan sesi
         menunggu 60 detik sia-sia — padahal jawabannya sudah tersimpan.
         """
-        if self._selected(element):
+        if self._terpilih(element):
             return True
 
         batas = JEDA_VERIFIKASI_PILIH if batas is None else batas
@@ -1028,7 +1101,7 @@ class AutoApplier:
 
         while time.time() < akhir:
             time.sleep(0.1)
-            if self._selected(element):
+            if self._terpilih(element):
                 return True
 
         return False
@@ -1075,7 +1148,7 @@ class AutoApplier:
             if self._terpilih_setelah_klik(element):
                 return True
 
-        return self._selected(element)
+        return self._terpilih(element)
 
     def _label_untuk(self, element) -> str:
         """Teks label untuk satu input (radio/checkbox)."""
@@ -1416,12 +1489,7 @@ class AutoApplier:
         # `name`. Dulu keduanya dilewati, sehingga jawaban yang diisi pengguna
         # di formulir Glints tidak pernah terekam.
         grup = {}
-        for element in self._find_all("input[type='radio']"):
-            if not self._enabled(element):
-                continue
-            if not self._visible(element) and not self._label_terlihat(element):
-                continue
-
+        for element in self._kumpulkan_kontrol("radio"):
             try:
                 nama = (element.get_attribute("name") or "").strip()
             except Exception:
@@ -1429,12 +1497,19 @@ class AutoApplier:
 
             if nama:
                 grup.setdefault("nama:" + nama, []).append(element)
+            elif peran_kontrol(element) == "radio":
+                # Radio ARIA hampir selalu tanpa `name`; kelompoknya ditentukan
+                # teks pertanyaan (wadah opsi hanya memuat opsi itu sendiri).
+                kunci = _norm(self._pertanyaan(element)) or (
+                    self._kunci_grup_tanpa_nama(element)
+                )
+                grup.setdefault("aria:" + kunci, []).append(element)
             else:
                 kunci = self._kunci_grup_tanpa_nama(element)
                 grup.setdefault("grup:" + kunci, []).append(element)
 
         for elemen in grup.values():
-            terpilih = [item for item in elemen if self._selected(item)]
+            terpilih = [item for item in elemen if self._terpilih(item)]
             if not terpilih:
                 continue
 
@@ -1453,7 +1528,7 @@ class AutoApplier:
             terpilih = [
                 self._label_untuk(item)
                 for item in elemen
-                if self._selected(item)
+                if self._terpilih(item)
             ]
             terpilih = [item for item in terpilih if item]
             if not terpilih:
@@ -1580,14 +1655,8 @@ class AutoApplier:
         """Jawab pertanyaan radio (ya/tidak) yang polanya dikenali."""
         grup = {}
 
-        for element in self._find_all("input[type='radio']"):
-            if not self._enabled(element):
-                continue
-
-            # Input asli boleh tersembunyi selama labelnya terlihat.
-            if not self._visible(element) and not self._label_terlihat(element):
-                continue
-
+        # Termasuk `div role="radio"` dan `[role='menuitemradio']`.
+        for element in self._kumpulkan_kontrol("radio"):
             try:
                 nama = (element.get_attribute("name") or "").strip()
             except Exception:
@@ -1595,6 +1664,15 @@ class AutoApplier:
 
             if nama:
                 grup.setdefault("nama:" + nama, []).append(element)
+            elif peran_kontrol(element) == "radio":
+                # Radio ARIA (`div role="radio"`) hampir selalu tanpa `name`.
+                # Wadah tiap opsi hanya memuat opsi itu sendiri, jadi wadah
+                # tidak bisa dipakai sebagai kunci kelompok: pakai teks
+                # pertanyaannya (semua opsi satu pertanyaan berbagi teks ini).
+                kunci = _norm(self._pertanyaan(element)) or (
+                    self._kunci_grup_tanpa_nama(element)
+                )
+                grup.setdefault("aria:" + kunci, []).append(element)
             else:
                 # Sebagian formulir menghilangkan atribut name. Dulu radio
                 # seperti itu diabaikan total sehingga pertanyaannya tidak
@@ -1609,7 +1687,7 @@ class AutoApplier:
             if len(element_grup) < 2:
                 continue
 
-            if any(self._selected(item) for item in element_grup):
+            if any(self._terpilih(item) for item in element_grup):
                 continue
 
             # Pasangan (elemen, label) dijaga agar indeks tidak bergeser bila
@@ -1754,16 +1832,43 @@ class AutoApplier:
 
         return gagal
 
+    def _kumpulkan_kontrol(self, jenis: str) -> list:
+        """Semua kontrol formulir bertipe `jenis` (radio/checkbox), termasuk ARIA.
+
+        Elemen yang sama bisa muncul dari dua selector; identitasnya dicek
+        supaya tidak diproses dua kali.
+        """
+        selector = SEL_RADIO if jenis == "radio" else SEL_CHECKBOX
+        hasil = []
+        terlihat = set()
+
+        for pilihan in selector:
+            for element in self._find_all(pilihan):
+                if id(element) in terlihat:
+                    continue
+
+                # Peran tak terbaca (elemen tanpa tag/atribut yang jelas)
+                # dipercaya dari selector yang menemukannya; peran yang jelas
+                # berbeda ditolak supaya `[role='radio']` tidak menyeret
+                # checkbox.
+                peran = peran_kontrol(element)
+                if peran and peran != jenis:
+                    continue
+                if not self._enabled(element):
+                    continue
+                if not self._visible(element) and not self._label_terlihat(element):
+                    continue
+
+                terlihat.add(id(element))
+                hasil.append(element)
+
+        return hasil
+
     def _kelompok_checkbox(self) -> dict:
         """Kotak centang dikelompokkan per `name` atau per pertanyaannya."""
         grup = {}
 
-        for element in self._find_all("input[type='checkbox']"):
-            if not self._enabled(element):
-                continue
-            if not self._visible(element) and not self._label_terlihat(element):
-                continue
-
+        for element in self._kumpulkan_kontrol("checkbox"):
             try:
                 nama = (element.get_attribute("name") or "").strip()
             except Exception:
@@ -1832,7 +1937,7 @@ class AutoApplier:
             if len(element_grup) < 2:
                 continue
 
-            if any(self._selected(item) for item in element_grup):
+            if any(self._terpilih(item) for item in element_grup):
                 continue
 
             # Pasangan (elemen, label) dijaga agar indeks tidak bergeser bila
@@ -1889,12 +1994,120 @@ class AutoApplier:
 
         return gagal
 
+    def _teks_kontrol(self, element) -> str:
+        """Teks yang sedang tampil pada sebuah kontrol (value atau isi)."""
+        nilai = ""
+
+        with contextlib.suppress(Exception):
+            nilai = " ".join((element.get_attribute("value") or "").split())
+
+        if nilai:
+            return nilai
+
+        return " ".join(self._text(element).split())
+
+    def _opsi_listbox(self) -> list:
+        """Opsi yang sedang tampil setelah combobox dibuka.
+
+        Hanya `[role='option']` yang dianggap opsi: daftar navigasi biasa
+        tidak boleh ikut terbaca sebagai pilihan formulir.
+        """
+        hasil = []
+        terlihat = set()
+
+        for item in self._find_all("[role='option']"):
+            if id(item) in terlihat or not self._visible(item):
+                continue
+            teks = " ".join(str(self._text(item) or "").split())
+            if not teks:
+                continue
+            terlihat.add(id(item))
+            hasil.append((teks, item))
+
+        return hasil
+
+    def _jawab_combobox(self) -> list:
+        """Isi combobox kustom (`[role='combobox']`) HANYA dari ingatan.
+
+        Combobox tidak punya daftar opsi sebelum dibuka, jadi opsinya dibaca
+        setelah diklik. Bila jawabannya tidak ada di ingatan, kontrol ini
+        DIBIARKAN (tidak menebak) dan tidak dihitung gagal — validasi
+        formulir tetap yang menentukan apakah pertanyaannya wajib.
+        """
+        gagal = []
+        terlihat = set()
+
+        for pilihan_selector in SEL_COMBOBOX:
+            for element in self._find_all(pilihan_selector):
+                if id(element) in terlihat:
+                    continue
+                if peran_kontrol(element) != "combobox":
+                    continue
+                if not self._visible(element) or not self._enabled(element):
+                    continue
+                terlihat.add(id(element))
+
+                if self._teks_kontrol(element):
+                    continue
+
+                pertanyaan = self._pertanyaan(element)
+                ingat = jawaban.cari(pertanyaan) if pertanyaan else None
+
+                if not ingat:
+                    console.print(
+                        "[dim]   combobox belum dijawab (menunggu pengguna): "
+                        f"{pertanyaan[:70] or 'tanpa teks pertanyaan'}[/]"
+                    )
+                    continue
+
+                self._click(element)
+                time.sleep(0.2)
+                opsi = self._opsi_listbox()
+                cocok = jawaban.cocok_opsi(ingat, [teks for teks, _ in opsi])
+
+                item = next(
+                    (el for teks, el in opsi if teks == cocok), None
+                )
+
+                if not cocok or item is None or not self._click(item):
+                    gagal.append(pertanyaan or "pertanyaan combobox")
+                    console.print(
+                        "[dim]   combobox: jawaban "
+                        f"{str(ingat)[:40]!r} tidak ada di daftar opsi "
+                        f"{[teks for teks, _ in opsi][:5]}[/]"
+                    )
+                    continue
+
+                terpilih = self._teks_kontrol(element)
+                if not terpilih or (
+                    _norm(cocok) not in _norm(terpilih)
+                    and _norm(terpilih) not in _norm(cocok)
+                ):
+                    gagal.append(pertanyaan or "pertanyaan combobox")
+                    console.print(
+                        "[dim]   combobox: verifikasi gagal (expected "
+                        f"{cocok[:40]!r}, terlihat {terpilih[:40]!r})[/]"
+                    )
+                    continue
+
+                console.print(
+                    f'[dim]   pilih "{cocok}" (ingatan) untuk: '
+                    f"{pertanyaan[:70]}[/]"
+                )
+
+        return gagal
+
     def _centang(self, element) -> bool:
-        """Centang satu kotak dan pastikan statusnya berubah."""
-        if self._selected(element):
+        """Centang satu kotak dan pastikan statusnya berubah.
+
+        Status dibaca lewat `terpilih_kontrol` supaya `div role="checkbox"`
+        (yang tidak punya properti `checked`) ikut terverifikasi lewat
+        `aria-checked`.
+        """
+        if self._terpilih(element):
             return True
 
-        if self._click(element) and self._selected(element):
+        if self._click(element) and self._terpilih_setelah_klik(element):
             self._picu_perubahan(element)
             return True
 
@@ -1902,17 +2115,21 @@ class AutoApplier:
             id_el = (element.get_attribute("id") or "").strip()
             if id_el:
                 for label in self._find_all(f"label[for='{id_el}']"):
-                    if self._click(label) and self._selected(element):
+                    if self._click(label) and self._terpilih_setelah_klik(element):
                         self._picu_perubahan(element)
                         return True
 
         with contextlib.suppress(Exception):
             induk = element.find_element(By.XPATH, "..")
-            if induk is not None and self._click(induk) and self._selected(element):
+            if (
+                induk is not None
+                and self._click(induk)
+                and self._terpilih_setelah_klik(element)
+            ):
                 self._picu_perubahan(element)
                 return True
 
-        return self._selected(element)
+        return self._terpilih(element)
 
     def jawab_pertanyaan(self) -> list:
         """Jawab pertanyaan formulir yang polanya dikenali.
@@ -1938,6 +2155,7 @@ class AutoApplier:
 
         gagal.extend(self._jawab_radio())
         gagal.extend(self._jawab_checkbox())
+        gagal.extend(self._jawab_combobox())
         gagal.extend(self._jawab_teks())
 
         return gagal
@@ -2089,7 +2307,7 @@ class AutoApplier:
                 return "Ada pertanyaan yang wajib dijawab"
 
             group = self._find_all(f"input[type='radio'][name='{name}']")
-            if not any(self._selected(item) for item in group):
+            if not any(self._terpilih(item) for item in group):
                 return "Ada pertanyaan yang wajib dijawab"
 
         return ""

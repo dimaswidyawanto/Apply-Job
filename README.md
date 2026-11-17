@@ -653,6 +653,36 @@ internal).
 Matikan semuanya dengan `AUTO_ANSWER_QUESTIONS=false` bila ingin semua
 pertanyaan dilewati.
 
+### Umur lowongan: `MAX_AGE_DAYS` dihitung sampai ke kartu
+
+Sejak audit #26 umur lowongan dihitung satu tempat (`umur.py`) untuk
+JobStreet, Glints, dan Indeed:
+
+| Label di kartu | Umur yang dipakai |
+|---|---|
+| "Hari ini", "Baru saja", "5 jam lalu" | 0 hari |
+| "Kemarin", "yesterday" | 1 hari |
+| "3 hari yang lalu", "3 days ago" | 3 hari |
+| "1 minggu lalu", "2 months ago", "1 tahun lalu" | 7 / 60 / 365 hari |
+| "30+ hari yang lalu" | 30 hari |
+| "2026-11-15", "15 Nov 2026", "Nov 15, 2026", "15/11/2026" | dihitung dari hari ini |
+| tidak ada tanggal | `DATE_UNKNOWN` (bukan 0) |
+
+Aturan yang berlaku:
+
+* **batas inklusif** — `MAX_AGE_DAYS=7` menerima lowongan berumur 7 hari dan
+  menolak 8 hari; alasan penolakan menyebut angkanya:
+  `Lowongan terlalu lama (10 hari > MAX_AGE_DAYS=7)`;
+* perhitungan memakai **WIB (Asia/Jakarta)**, bukan jam komputer/server;
+* tanggal yang tidak terbaca **tetap dicoba** secara bawaan, tetapi bisa
+  dijadikan penolakan dengan `TOLAK_UMUR_TAK_DIKETAHUI=true` — supaya
+  "tidak terbaca" tidak otomatis dianggap lowongan baru.
+
+```powershell
+.\jalankan.bat set-env MAX_AGE_DAYS=7
+.\jalankan.bat set-env TOLAK_UMUR_TAK_DIKETAHUI=true
+```
+
 ### Kuesioner yang belum terisi: bot menunggu Anda
 
 Tidak semua pertanyaan perusahaan bisa dijawab bot (mis. *"Warna favorit?"*,
@@ -709,6 +739,25 @@ yang **KOSONG** beserta opsinya. Untuk berkas tertentu:
 ```
 
 Tambahkan `--semua` bila ingin melihat pertanyaan yang sudah terisi juga.
+
+### Formulir modern: `div role="radio"`, `role="checkbox"`, combobox
+
+Tidak semua formulir memakai `<input>`. Sejak audit #26 mesin isian mengenali
+jenis kontrol lebih dulu (tag **dan** peran ARIA), lalu memilih cara
+berinteraksi yang benar:
+
+| Kontrol | Cara diisi | Verifikasi |
+|---|---|---|
+| `input` / `textarea` | ketik nilai | nilai `value` sama dengan yang diketik |
+| `select` | pilih opsi | teks opsi terpilih |
+| `input[type=radio]` / `div role="radio"` | klik (input → label → wadah → skrip) | `checked` **atau** `aria-checked="true"` |
+| `input[type=checkbox]` / `div role="checkbox"` | klik | sama seperti radio |
+| `[role="combobox"]` | buka → pilih `[role="option"]` | teks yang tampil di combobox |
+
+Semua isian **diverifikasi**, tidak langsung dianggap berhasil: klik yang tidak
+mengubah status dilaporkan sebagai kegagalan (dan alasannya masuk log). Combobox
+hanya diisi bila jawabannya sudah ada di ingatan — bila tidak, bot membiarkannya
+dan menulis "combobox belum dijawab (menunggu pengguna)" daripada menebak.
 
 ### Ingatan jawaban: sekali diisi, selamanya otomatis
 
@@ -891,6 +940,20 @@ python cli.py history --situs indeed --alasan --limit 20
 Kolom **Alasan** berisi catatan bot untuk tiap lamaran (mis. "Tombol Lamar
 tidak ditemukan di halaman" atau "Lowongan menggunakan 'Lamar di situs
 perusahaan'"), sehingga penyebabnya bisa dipastikan dari data, bukan dugaan.
+
+Sejak audit #26 dinding verifikasi Indeed ditangani sebagai **kondisi butuh
+manusia**, bukan galat biasa:
+
+| Kejadian | Perilaku |
+|---|---|
+| Halaman/jendela menampilkan tanda Cloudflare/captcha | percobaan **tidak diulang** (tidak ada loop), lamaran dicatat berstatus `requires_human` |
+| Verifikasi terjadi 3 kali berturut-turut | situs **dihentikan**; kandidat berikutnya tidak ikut hangus, dan muncul `BUTUH TINDAKAN ANDA` di layar + Telegram |
+| Hitungan kuota | tidak bertambah: hanya status `applied` yang dihitung, `requires_human` tidak pernah dianggap terkirim |
+| Duplikat | aman: yang dianggap "sudah dilamar" hanya `applied`/`already_applied` |
+
+Selesaikan verifikasi di jendela Chrome, lalu jalankan perintah yang sama lagi —
+lamaran yang tadinya tertahan akan dicoba ulang dengan status yang benar.
+Tidak ada upaya menembus Cloudflare: jeda/berhenti adalah perilaku yang benar.
 
 Bila tombol Lamar **tidak ditemukan**, bot sekarang:
 

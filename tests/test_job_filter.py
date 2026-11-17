@@ -150,7 +150,9 @@ def test_tolak_lowongan_terlalu_lama(filter_baru, monkeypatch):
 
     lolos, alasan = filter_baru.should_apply(make_job(age_days=5))
     assert lolos is False
-    assert "3 hari" in alasan
+    # Alasan kini menyebut umur lowongan DAN batasnya (audit #26).
+    assert "5 hari" in alasan
+    assert "MAX_AGE_DAYS=3" in alasan
 
     assert filter_baru.should_apply(make_job(age_days=1))[0] is True
     # Umur tidak diketahui -> jangan dibuang.

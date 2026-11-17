@@ -94,6 +94,12 @@ def jalankan_indeed(max_pages: int = 0, keywords: str = "", batas: int = 0):
         f"{laporan['perlu_manual']} perlu manual · "
         f"{laporan['dilewati']} dilewati · {laporan['gagal']} gagal"
     )
+    if laporan.get("perlu_manusia"):
+        console.print(
+            "[bold red]BUTUH TINDAKAN ANDA:[/] Indeed meminta verifikasi "
+            "(Cloudflare). Selesaikan di jendela Chrome, lalu jalankan lagi — "
+            "status lamaran tertahan dicatat sebagai requires_human."
+        )
 
 
 def cari_indeed(keywords: str = "", max_pages: int = 1, batas: int = 10,
@@ -936,6 +942,11 @@ def jalankan_glints(max_pages: int = 0, keywords: str = "", batas: int = 0):
         f"{laporan['dilewati']} dilewati · {laporan['gagal']} gagal · "
         f"{laporan['khusus_aplikasi']} hanya via aplikasi"
     )
+    if laporan.get("perlu_manusia"):
+        console.print(
+            "[bold red]BUTUH TINDAKAN ANDA:[/] Glints meminta verifikasi. "
+            "Selesaikan di jendela Chrome, lalu jalankan lagi."
+        )
 
 
 def diagnosa_glints_cli(keyword: str = ""):
@@ -1219,6 +1230,10 @@ def show_config():
         "Hanya lowongan baru",
         f"Maksimal {config.max_age_days} hari"
         if config.max_age_days > 0 else "Tanpa batas umur",
+    )
+    table.add_row(
+        "Tanggal tak terbaca",
+        "Ditolak" if config.tolak_umur_tak_diketahui else "Tetap dicoba",
     )
     table.add_row("Halaman per kata kunci", str(config.max_pages))
     table.add_row(

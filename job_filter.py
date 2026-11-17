@@ -4,6 +4,7 @@ import contextlib
 import re
 from typing import Optional
 
+import umur
 from config import config
 from database import db
 
@@ -201,15 +202,17 @@ class JobFilter:
             if keyword in title_lower:
                 return False, f"Posisi terlalu senior: '{keyword}'"
 
+        # Batas umur bersifat INKLUSIF: umur 7 hari masih diterima saat
+        # MAX_AGE_DAYS=7, umur 8 hari ditolak. Tanggal yang tidak terbaca
+        # hanya ditolak bila TOLAK_UMUR_TAK_DIKETAHUI diaktifkan.
         age_days = job.get("age_days")
-        if (
-            config.max_age_days > 0
-            and isinstance(age_days, int)
-            and age_days > config.max_age_days
-        ):
-            return False, (
-                f"Lowongan lebih lama dari {config.max_age_days} hari"
-            )
+        alasan_umur = umur.batas_umur(
+            age_days if isinstance(age_days, int) else None,
+            int(config.max_age_days or 0),
+            bool(getattr(config, "tolak_umur_tak_diketahui", False)),
+        )
+        if alasan_umur:
+            return False, alasan_umur
 
         if (
             config.strict_location

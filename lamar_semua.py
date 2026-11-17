@@ -248,6 +248,18 @@ def _tabel(hasil: dict[str, dict], dilewati: dict[str, str]) -> None:
                           dilewati[nama])
 
     console.print()
+    butuh_manusia = [
+        NAMA_SITUS[nama]
+        for nama, data in hasil.items()
+        if data.get("perlu_manusia")
+    ]
+    if butuh_manusia:
+        console.print(
+            "[bold red]BUTUH TINDAKAN ANDA:[/] "
+            f"{', '.join(butuh_manusia)} meminta verifikasi (Cloudflare). "
+            "Selesaikan di jendela Chrome, lalu jalankan lagi — lamaran yang "
+            "tertahan dicatat sebagai requires_human, bukan terkirim."
+        )
     console.print(tabel)
 
 

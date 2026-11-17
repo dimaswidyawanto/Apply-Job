@@ -250,6 +250,12 @@ class Config:
 
     # 0 = tanpa batas umur. Nilai yang didukung JobStreet: 1, 3, 7, 14, 31.
     max_age_days: int = _int_setting("MAX_AGE_DAYS", 0)
+    # Lowongan yang tanggal publikasinya tidak terbaca: bawaan tetap boleh
+    # dicoba (banyak kartu memang tanpa tanggal), tetapi bila diaktifkan
+    # "tidak terbaca" TIDAK dianggap baru.
+    tolak_umur_tak_diketahui: bool = _bool_setting(
+        "TOLAK_UMUR_TAK_DIKETAHUI", False
+    )
 
     # Target sekaligus batas harian PER SITUS (JobStreet/Glints/Indeed
     # masing-masing 50). 0 = tanpa batas harian.

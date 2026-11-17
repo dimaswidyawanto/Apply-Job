@@ -28,6 +28,7 @@ from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.common.by import By
 
 import antrean
+import blokir
 import cache_riset
 import kendali
 import kuota
@@ -934,6 +935,9 @@ class IndeedBot:
             if (
                 hasil.status == "error"
                 and antrean.sementara(hasil.reason)
+                # Dinding verifikasi tidak diulang: percobaan kedua tertahan
+                # juga, dan setiap percobaan memakan waktu tunggu penuh.
+                and not blokir.kena_blokir(hasil.reason)
                 and ulang < antrean.maks_ulang()
             ):
                 ulang += 1
@@ -959,10 +963,24 @@ class IndeedBot:
                 "[bold red]Sesi login Indeed sudah habis. Sesi dihentikan.[/]"
             )
         elif hasil.status == "manual_required":
-            self._catat(job_id, "manual_required", hasil.reason)
+            self._catat(
+                job_id,
+                blokir.STATUS_PERLU_MANUSIA
+                if blokir.kena_blokir(hasil.reason)
+                else "manual_required",
+                hasil.reason,
+            )
             console.print(f"[yellow]Dilewati: {hasil.reason}[/]")
         else:
-            self._catat(job_id, "error", hasil.reason)
+            # Cloudflare/captcha bukan "galat" biasa: butuh tindakan manusia,
+            # dan TIDAK boleh dihitung sebagai lamaran terkirim.
+            self._catat(
+                job_id,
+                blokir.STATUS_PERLU_MANUSIA
+                if blokir.kena_blokir(hasil.reason)
+                else "error",
+                hasil.reason,
+            )
             console.print(f"[bold red]Gagal melamar otomatis: {hasil.reason}[/]")
 
         return hasil
@@ -1283,7 +1301,7 @@ def jalankan_indeed(max_pages: int = 0, keywords: list[str] | None = None,
     laporan = {
         "dibaca": 0, "baru": 0, "dilamar": 0, "sudah": 0,
         "dilewati": 0, "gagal": 0, "perlu_manual": 0,
-        "khusus_aplikasi": 0,
+        "khusus_aplikasi": 0, "perlu_manusia": 0,
     }
 
     tampilkan_konfigurasi()
@@ -1377,6 +1395,7 @@ def jalankan_indeed(max_pages: int = 0, keywords: list[str] | None = None,
         tampilkan_rincian_skor(dipilih, situs="Indeed")
 
         batas_sesi = int(getattr(config, "auto_apply_max_per_session", 0) or 0)
+        penghitung_blokir = blokir.PenghitungBlokir()
 
         for job in dipilih:
             kendali.periksa()
@@ -1444,6 +1463,23 @@ def jalankan_indeed(max_pages: int = 0, keywords: list[str] | None = None,
                     f"Gagal: {job['title']} — {hasil.reason}", "error"
                 )
                 console.print(f"[red]Gagal: {job['title']} — {hasil.reason}[/]")
+
+            # Dinding verifikasi berulang = situs butuh tindakan manusia.
+            # Berhenti di sini supaya kandidat lain tidak ikut hangus.
+            if penghitung_blokir.catat(
+                (not hasil.applied) and blokir.kena_blokir(hasil.reason)
+            ):
+                laporan["perlu_manusia"] += 1
+                pesan = (
+                    f"Indeed meminta verifikasi {penghitung_blokir.jumlah} kali "
+                    "berturut-turut — sisa lowongan dilewati. Selesaikan "
+                    "verifikasi di jendela Chrome, lalu jalankan lagi."
+                )
+                console.print(f"[bold red]{pesan}[/]")
+                log_aktivitas.catat(pesan, "warning")
+                with contextlib.suppress(Exception):
+                    notifier.send_error(pesan)
+                break
 
             if hasil.applied or hasil.status == "error":
                 jeda = max(0.0, float(config.delay_between_apply or 0))

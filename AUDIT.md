@@ -916,3 +916,65 @@ Tes: 823 → **851 passed, 1 skipped** (`tests/test_jawaban_ya_tidak.py` baru,
 terjawab. Formulir yang memakai komponen non-standar (mis. tombol opsi tanpa
 `input`) tetap dilaporkan beserta alasannya, lalu lamaran dilewati seperti
 sebelumnya.
+
+## 26. Cloudflare Indeed, kontrol formulir non-`input`, dan umur lowongan
+
+Audit lanjutan setelah #25, tiga temuan yang masih menggantung.
+
+### a. Cloudflare Indeed: dari "galat" menjadi `requires_human`
+
+| Pemeriksaan | Sebelum | Sesudah |
+|---|---|---|
+| Deteksi | teks halaman (sudah ada) | tidak berubah |
+| Percobaan diulang? | ya, bila alasannya memuat kata "timeout" | **tidak**: alasan blokir dikecualikan (`blokir.kena_blokir`) |
+| Status tersimpan | `error` | `requires_human` (`blokir.STATUS_PERLU_MANUSIA`) |
+| Dihitung sebagai terkirim? | tidak (sudah benar) | tidak berubah — hanya status `applied` yang dihitung |
+| Kandidat berikutnya | tetap dicoba satu per satu, tiap percobaan memakan `AUTO_APPLY_STEP_TIMEOUT` | situs **berhenti** setelah 3 kegagalan beruntun (`BATAS_BLOKIR_BERHENTI`) |
+| Laporan | hanya pesan layar | `laporan["perlu_manusia"]` + `BUTUH TINDAKAN ANDA` di layar, log, dan Telegram |
+
+Glints memakai jalur yang sama. JobStreet sudah punya mekanisme setara
+(`_periksa_halaman_macet`, audit #24). Tidak ada upaya menembus Cloudflare.
+
+### b. Kontrol formulir non-`input`
+
+Kode lama hanya membaca `input[type='radio'|'checkbox']`. `div role="radio"`
+tidak pernah terlihat, sehingga pertanyaannya tidak pernah dicoba.
+
+* `peran_kontrol()` menentukan jenis dari **tag + peran ARIA**
+  (`radio`, `menuitemradio`, `checkbox`, `switch`, `combobox`,
+  `aria-haspopup="listbox"`).
+* `_kumpulkan_kontrol()` mengumpulkan radio/checkbox dari selector tag **dan**
+  ARIA, tanpa memproses elemen yang sama dua kali.
+* Radio ARIA hampir selalu tanpa `name`; kelompoknya ditentukan teks pertanyaan
+  (wadah tiap opsi hanya memuat opsi itu sendiri).
+* Verifikasi: `terpilih_kontrol()` membaca properti asli **atau**
+  `aria-checked`/`aria-selected`/`aria-pressed`.
+* Combobox kustom: buka → baca `[role='option']` → cocokkan dengan ingatan →
+  klik → verifikasi teks. Tanpa jawaban di ingatan, kontrol **dibiarkan**
+  (tidak menebak).
+
+### c. Umur lowongan (`MAX_AGE_DAYS`)
+
+Koreksi penting: filter umur **sudah** berjalan sejak sebelumnya
+(`job_filter.py`, teruji). Yang belum ada:
+
+1. parser tanggal absolut — `2026-11-15`, `15 Nov 2026`, `Nov 15, 2026`,
+   `15/11/2026`, `1 tahun lalu`, `30+ hari` kini dikenali `umur.py`
+   (dipakai JobStreet, Glints, Indeed);
+2. zona waktu — perhitungan memakai WIB, bukan jam komputer;
+3. kebijakan tanggal tak terbaca — `TOLAK_UMUR_TAK_DIKETAHUI` (bawaan
+   `false`): bila aktif, `DATE_UNKNOWN` **ditolak**, bukan dianggap baru;
+4. alasan penolakan menyebut angka: `Lowongan terlalu lama (10 hari >
+   MAX_AGE_DAYS=7)`. Batas bersifat **inklusif**.
+
+Tes: 851 → **927 passed, 1 skipped** (`test_umur_lowongan.py` 40,
+`test_kontrol_aria.py` 20, `test_blokir_perlu_manusia.py` 10,
+`test_regresi_audit26.py` 6, plus penyesuaian `test_job_filter.py`), ruff
+(`E9,F,E501,I,B,SIM,ISC`) bersih, `compileall` bersih.
+
+**Batas verifikasi yang jujur:** semua di atas adalah UNIT + INTEGRATION TEST
+dengan DOM tiruan. LIVE PLATFORM TEST belum dilakukan dari sisi pengembang
+(sandbox tanpa akses jobstreet/glints/indeed.com). Data kartu yang dipakai
+berasal dari label yang sudah tercatat pada sesi nyata 17 Nov 2026
+("Hari ini", "3 hari yang lalu", "30+ hari yang lalu"), bukan hasil scraping
+baru.

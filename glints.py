@@ -25,11 +25,13 @@ from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.common.by import By
 
 import antrean
+import blokir
 import cache_riset
 import kendali
 import kuota
 import log_aktivitas
 import skor_cv
+import umur
 from auto_apply import ApplyResult, AutoApplier
 from browser import buka_chrome, tutup_chrome
 from config import MAKS_HALAMAN_RISET, batas_halaman_riset, config
@@ -405,50 +407,15 @@ def tampilkan_perbandingan(kandidat: list[dict], maksimal: int = 10,
 
 
 # Teks umur lowongan yang biasa muncul di kartu Glints.
-_POLA_UMUR = (
-    (r"baru saja|hari ini|just posted|today", 0),
-    (r"(\d+)\s*menit|(\d+)\s*minute", 0),
-    (r"(\d+)\s*jam|(\d+)\s*hour", 0),
-    (r"(\d+)\s*hari|(\d+)\s*day", 1),
-    (r"(\d+)\s*minggu|(\d+)\s*week", 7),
-    (r"(\d+)\s*bulan|(\d+)\s*month", 30),
-)
+# Aturan umur lowongan kini tinggal di `umur.py` supaya JobStreet, Glints,
+# dan Indeed menafsirkan "3 hari lalu" / "15 Nov 2026" dengan cara yang sama
+# (audit #26). Fungsi di bawah dipertahankan sebagai nama lama.
+umur_dari_teks = umur.umur_dari_teks
 
 
-def umur_dari_teks(teks: str) -> int | None:
-    """Umur lowongan (hari) dari teks kartu Glints; None bila tak terbaca.
-
-    Kartu Glints menulis hal seperti "3 hari lalu", "2 minggu lalu",
-    "Baru saja", atau "5 jam lalu".
-    """
-    isi = " ".join(str(teks or "").lower().split())
-    if not isi:
-        return None
-
-    for pola, faktor in _POLA_UMUR:
-        cocok = re.search(pola, isi)
-        if not cocok:
-            continue
-
-        if faktor == 0:
-            return 0
-
-        angka = next((g for g in cocok.groups() if g), None)
-        if angka is None:
-            return 0
-
-        return int(angka) * faktor
-
-    return None
-
-
-def label_umur(umur: int | None) -> str:
+def label_umur(umur_hari: int | None) -> str:
     """Teks tanggal publikasi untuk laporan & penyortiran."""
-    if umur is None:
-        return ""
-    if umur <= 0:
-        return "Hari ini"
-    return f"{umur} hari lalu"
+    return umur.label_umur(umur_hari)
 
 
 def rapikan_kartu(data: dict) -> dict | None:
@@ -1188,6 +1155,8 @@ class GlintsBot:
             if (
                 hasil.status == "error"
                 and antrean.sementara(hasil.reason)
+                # Dinding verifikasi tidak diulang (lihat blokir.py).
+                and not blokir.kena_blokir(hasil.reason)
                 and ulang < antrean.maks_ulang()
             ):
                 ulang += 1
@@ -1220,10 +1189,24 @@ class GlintsBot:
                 "[bold red]Sesi login Glints sudah habis. Sesi dihentikan.[/]"
             )
         elif hasil.status == "manual_required":
-            self._catat(job_id, "manual_required", hasil.reason)
+            self._catat(
+                job_id,
+                blokir.STATUS_PERLU_MANUSIA
+                if blokir.kena_blokir(hasil.reason)
+                else "manual_required",
+                hasil.reason,
+            )
             console.print(f"[yellow]Dilewati: {hasil.reason}[/]")
         else:
-            self._catat(job_id, "error", hasil.reason)
+            # Cloudflare/captcha butuh tindakan manusia, bukan galat biasa —
+            # dan tidak pernah dihitung sebagai lamaran terkirim.
+            self._catat(
+                job_id,
+                blokir.STATUS_PERLU_MANUSIA
+                if blokir.kena_blokir(hasil.reason)
+                else "error",
+                hasil.reason,
+            )
             console.print(f"[bold red]Gagal melamar otomatis: {hasil.reason}[/]")
 
         return hasil
@@ -1384,7 +1367,7 @@ def jalankan_glints(max_pages: int = 0, keywords: list[str] | None = None,
     bot = GlintsBot()
     laporan = {
         "dibaca": 0, "baru": 0, "dilamar": 0, "sudah": 0,
-        "dilewati": 0, "gagal": 0, "perlu_manual": 0,
+        "dilewati": 0, "gagal": 0, "perlu_manual": 0, "perlu_manusia": 0,
         "khusus_aplikasi": 0,
     }
 
@@ -1571,6 +1554,7 @@ def jalankan_glints(max_pages: int = 0, keywords: list[str] | None = None,
         tampilkan_rincian_skor(dipilih)
 
         batas_sesi = int(getattr(config, "auto_apply_max_per_session", 0) or 0)
+        penghitung_blokir = blokir.PenghitungBlokir()
 
         for job in dipilih:
             kendali.periksa()
@@ -1642,6 +1626,22 @@ def jalankan_glints(max_pages: int = 0, keywords: list[str] | None = None,
                     f"Gagal: {job['title']} — {hasil.reason}", "error"
                 )
                 console.print(f"[red]Gagal: {job['title']} — {hasil.reason}[/]")
+
+            # Dinding verifikasi berulang = situs butuh tindakan manusia.
+            if penghitung_blokir.catat(
+                (not hasil.applied) and blokir.kena_blokir(hasil.reason)
+            ):
+                laporan["perlu_manusia"] += 1
+                pesan = (
+                    f"Glints meminta verifikasi {penghitung_blokir.jumlah} kali "
+                    "berturut-turut — sisa lowongan dilewati. Selesaikan "
+                    "verifikasi di jendela Chrome, lalu jalankan lagi."
+                )
+                console.print(f"[bold red]{pesan}[/]")
+                log_aktivitas.catat(pesan, "warning")
+                with contextlib.suppress(Exception):
+                    notifier.send_error(pesan)
+                break
 
             # Jeda hanya setelah lamaran benar-benar diproses, sama seperti
             # JobStreet; lowongan yang dilewati langsung lanjut.

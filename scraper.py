@@ -20,6 +20,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
 import teks as teks_modul
+import umur
 from auto_apply import ApplyResult, AutoApplier
 from browser import buka_chrome, tutup_chrome
 from config import config
@@ -541,36 +542,24 @@ class JobStreetBot:
 
     @staticmethod
     def _parse_listing_age(text: str) -> int | None:
-        """Mengubah label tanggal ("Hari ini", "3 hari yang lalu") jadi umur hari."""
+        """Umur lowongan (hari) dari label tanggal kartu JobStreet.
+
+        Memakai parser bersama `umur.umur_dari_teks` supaya tanggal relatif
+        ("3 hari yang lalu", "30+ hari yang lalu") dan tanggal absolut
+        ("15 Nov 2026") menghasilkan angka yang sama seperti Glints/Indeed.
+        """
         value = " ".join(str(text or "").split()).lower()
 
         if not value:
             return None
 
-        if any(word in value for word in ("hari ini", "today", "baru", "just now")):
+        umur_hari = umur.umur_dari_teks(value)
+        if umur_hari is not None:
+            return umur_hari
+
+        # Label JobStreet yang tidak memuat angka maupun tanggal.
+        if any(word in value for word in ("baru", "just now")):
             return 0
-
-        if any(word in value for word in ("kemarin", "yesterday")):
-            return 1
-
-        if "+" in value and any(word in value for word in ("hari", "day")):
-            return 30
-
-        match = re.search(r"(\d+)\s*(?:jam|hour|h)\b", value)
-        if match:
-            return 0
-
-        match = re.search(r"(\d+)\s*(?:hari|day|d)\b", value)
-        if match:
-            return int(match.group(1))
-
-        match = re.search(r"(\d+)\s*(?:minggu|week|w)\b", value)
-        if match:
-            return int(match.group(1)) * 7
-
-        match = re.search(r"(\d+)\s*(?:bulan|month|mo)\b", value)
-        if match:
-            return int(match.group(1)) * 30
 
         return None
 
