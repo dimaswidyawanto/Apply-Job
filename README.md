@@ -1311,6 +1311,17 @@ Peringatan itu jujur: `MAX_AGE_DAYS` hanya bisa bekerja pada lowongan yang
 tanggalnya benar-benar terbaca dari kartu. Baris lama di database yang
 dikumpulkan sebelum perbaikan tanggal tetap `DATE_UNKNOWN` sampai diriset ulang.
 
+Arti kolom ringkasan:
+
+| Kolom | Arti |
+|---|---|
+| `Total` / `APPLY` / `SKIP` | jumlah lowongan tersimpan, diputuskan lamar, dilewati |
+| `Duplikat` | sudah pernah dilamar atau tercatat |
+| `Tua` | ditolak karena `MAX_AGE_DAYS` |
+| `Tanpa tgl` | tanggal tak terbaca (diloloskan, tapi tak bisa dinilai umurnya) |
+| `Lokasi` / `Judul` | ditolak filter lokasi / filter judul minat |
+| `Lain` | blacklist, logo, gaji, pengalaman, senior, dan sisanya |
+
 Keluarannya menilai ulang seluruh lowongan tersimpan pada beberapa skenario
 aturan, sehingga selisihnya menunjukkan aturan mana yang menahan:
 

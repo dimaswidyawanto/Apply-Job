@@ -698,9 +698,18 @@ def dry_run(situs: str = "", batas: int = 5):
     for item in dinilai:
         nama_situs = item.get("platform") or "tidak diketahui"
         baris = per_situs.setdefault(
-            nama_situs, {"total": 0, "apply": 0}
+            nama_situs, {"total": 0, "apply": 0, "tanpa_tgl": 0}
         )
         baris["total"] += 1
+
+        # Baris tanpa tanggal (DATE_UNKNOWN) diloloskan, jadi tidak pernah
+        # muncul sebagai alasan penolakan. Dihitung sendiri supaya kelihatan
+        # berapa lowongan yang tidak bisa dinilai aturan umur.
+        tahap_umur = next(
+            (t for t in item["tahapan"] if t["tahap"] == "AGE"), {}
+        )
+        if tahap_umur.get("umur_hari") is None:
+            baris["tanpa_tgl"] += 1
 
         if item["keputusan"] == "APPLY":
             baris["apply"] += 1
@@ -717,7 +726,7 @@ def dry_run(situs: str = "", batas: int = 5):
         "SKIP",
         "Duplikat",
         "Tua",
-        "Tgl ?",
+        "Tanpa tgl",
         "Lokasi",
         "Judul",
         "Lain",
@@ -740,6 +749,7 @@ def dry_run(situs: str = "", batas: int = 5):
                 "duplikat",
                 "terlalu_tua",
                 "tanpa_tanggal",
+                "tanpa_tgl",
                 "lokasi",
                 "judul",
             )
@@ -751,7 +761,7 @@ def dry_run(situs: str = "", batas: int = 5):
             str(total - apply_count),
             str(baris.get("duplikat", 0)),
             str(baris.get("terlalu_tua", 0)),
-            str(baris.get("tanpa_tanggal", 0)),
+            str(baris.get("tanpa_tgl", 0)),
             str(baris.get("lokasi", 0)),
             str(baris.get("judul", 0)),
             str(lain),
@@ -1439,14 +1449,7 @@ def show_config():
         "Filter lokasi ketat",
         "Aktif" if config.strict_location else "Tidak aktif",
     )
-    table.add_row(
-        "Wajib ada logo perusahaan",
-        (
-            "Aktif (JobStreet & Glints; Indeed tanpa logo)"
-            if config.require_company_logo
-            else "Tidak aktif — lowongan tanpa logo tetap dilamar"
-        ),
-    )
+    table.add_row("Wajib ada logo perusahaan", config.teks_wajib_logo())
     table.add_row(
         "Pertanyaan pilihan otomatis",
         (

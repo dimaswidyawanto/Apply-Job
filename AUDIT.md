@@ -1184,3 +1184,38 @@ Suite: **1002 passed, 1 skipped**; ruff (`E9,F,E501,I,B,SIM,ISC`) dan
 **Yang masih NOT VERIFIED:** pembacaan tanggal pada markup JobStreet **hari
 ini** (butuh satu kali riset nyata), form lamaran, ARIA/required-field live, dan
 scoring Glints/Indeed live (Glints sempat putus, Indeed diblokir Cloudflare).
+
+## 30. Dua temuan tampilan setelah perbaikan §29
+
+Dari sesi nyata berikutnya (commit `811ca4e`), perilaku pelamaran sudah benar
+tetapi dua angka/teks masih menyesatkan.
+
+### a. Banner `run` masih mengaku filter logo aktif
+
+`cli.py` sudah mengikuti config, tetapi `main.py:890` punya salinan teks
+hardcoded `"Aktif (JobStreet & Glints; Indeed tanpa logo)"`. Akibatnya
+`jalankan.bat config` mencetak *Tidak aktif*, sementara banner di dalam `run`
+mencetak *Aktif* di sesi yang sama.
+
+Perbaikan: teks dipindah ke satu sumber, `Config.teks_wajib_logo()`
+(`config.py`), dipakai `cli.py` dan `main.py`. Salinan kedua tidak bisa lagi
+menyimpang.
+
+### b. Kolom `Tgl ?` pada ringkasan dry-run selalu 0
+
+Kolom itu menghitung **penolakan** bertema tanggal. Karena `DATE_UNKNOWN`
+justru **diloloskan** (`TOLAK_UMUR_TAK_DIKETAHUI=false`), angkanya mustahil > 0 —
+pengguna melihat `0` padahal 6113 dari 6118 lowongan tidak bertanggal.
+
+Perbaikan: kolom berganti nama `Tanpa tgl` dan menghitung **baris yang tanggalnya
+tak terbaca per situs** (informasi), bukan penolakan. Baris tanpa tanggal kini
+juga dihitung walau keputusannya `APPLY` — sebelumnya terlewat karena `continue`.
+
+### Hasil
+
+`tests/test_live_fixes.py` +3 tes (banner `run`, satu sumber teks, kolom
+`tanpa_tgl`). Suite: **1004 passed, 1 skipped**; ruff dan compileall bersih.
+
+**Masih NOT VERIFIED (tidak berubah):** pembacaan tanggal pada markup JobStreet
+hari ini (butuh sesi yang menyimpan tanggal), form/ARIA/required-field live, dan
+scoring Glints/Indeed live.

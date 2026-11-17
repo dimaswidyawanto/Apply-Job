@@ -190,6 +190,27 @@ def test_banner_logo_mati_saat_require_company_logo_false(capsys, monkeypatch):
     assert "Tidak aktif — lowongan tanpa logo tetap dilamar" in keluaran
 
 
+def test_banner_run_memakai_config_yang_sama(capsys, monkeypatch):
+    """Banner `run` (main.py) dulu punya teks 'Aktif' hardcoded sendiri."""
+    import main
+
+    monkeypatch.setattr(config, "require_company_logo", False)
+
+    main.AutoApplyEngine._print_config(object.__new__(main.AutoApplyEngine))
+    keluaran = _teks_banner(capsys.readouterr().out)
+
+    assert "Tidak aktif — lowongan tanpa logo tetap dilamar" in keluaran
+    assert "Aktif (JobStreet & Glints" not in keluaran
+
+
+def test_teks_wajib_logo_satu_sumber(monkeypatch):
+    monkeypatch.setattr(config, "require_company_logo", False)
+    assert "Tidak aktif" in config.teks_wajib_logo()
+
+    monkeypatch.setattr(config, "require_company_logo", True)
+    assert config.teks_wajib_logo().startswith("Aktif")
+
+
 # --------------------------------------------- 3. Chrome putus saat riset Glints ---
 class CacheRisetKosong:
     def kunci(self, *args, **kwargs):
@@ -343,3 +364,8 @@ def test_dry_run_menghitung_per_situs_dan_tanpa_tanggal(basis, monkeypatch):
     assert hasil["per_situs"]["indeed"].get("judul") == 1
     assert hasil["per_situs"]["jobstreet"].get("terlalu_tua") == 1
     assert hasil["tanpa_tanggal"] == 1
+    # Kolom "Tanpa tgl" menghitung baris yang tanggalnya tak terbaca
+    # (diloloskan, bukan ditolak) — dulu kolom ini selalu 0.
+    assert hasil["per_situs"]["jobstreet"]["tanpa_tgl"] == 1
+    assert hasil["per_situs"]["glints"]["tanpa_tgl"] == 0
+    assert hasil["per_situs"]["indeed"]["tanpa_tgl"] == 0

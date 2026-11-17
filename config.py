@@ -439,6 +439,18 @@ class Config:
             kata.strip() for kata in self.skill_keywords if kata.strip()
         ]
 
+    def teks_wajib_logo(self) -> str:
+        """Teks baris "Wajib ada logo perusahaan" untuk semua banner.
+
+        Dulu teks ini ditulis ulang di `cli.py` dan `main.py`; salinan di
+        `main.py` tertinggal hardcoded "Aktif", sehingga banner `run`
+        berbohong saat filter logo dimatikan. Sekarang satu sumber.
+        """
+        if self.require_company_logo:
+            return "Aktif (JobStreet & Glints; Indeed tanpa logo)"
+
+        return "Tidak aktif — lowongan tanpa logo tetap dilamar"
+
 
 # Baris ini yang dibutuhkan oleh: from config import config
 config = Config()
