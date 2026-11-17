@@ -43,6 +43,7 @@ from glints import (
     pilih_teratas,
     tampilkan_perbandingan,
     tampilkan_rincian_skor,
+    tanggal_simpan,
     umur_dari_teks,
 )
 from job_filter import (
@@ -317,7 +318,7 @@ def rapikan_kartu(data: dict) -> dict | None:
         "salary": " ".join(str(data.get("salary") or "").split()),
         "description": teks[:800],
         "url": f"{BASE}/viewjob?jk={kunci}",
-        "date_posted": label_umur(umur),
+        "date_posted": tanggal_simpan(umur) or label_umur(umur),
         "age_days": umur,
         "source": "indeed",
         "sudah_dilamar": any(tanda in teks.lower() for tanda in SUDAH_DILAMAR_TEXTS),

@@ -529,7 +529,9 @@ class JobStreetBot:
             ],
         )
 
-        date_posted = self._baca_tanggal(card)
+        # Label relatif ("9m ago") tidak boleh masuk database apa adanya:
+        # sebulan kemudian ia masih terbaca 0 hari, lowongan lama tampak baru.
+        date_posted = umur.tanggal_simpan(self._baca_tanggal(card))
 
         try:
             description = (card.text or "").strip()

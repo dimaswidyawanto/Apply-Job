@@ -108,7 +108,9 @@ def test_label_umur_di_badan_kartu_dipakai_bila_tidak_ada_elemen_tanggal(bot):
 
     job = bot._parse_job_card(kartu)
 
-    assert job["date_posted"] == "3 hari yang lalu"
+    # Label dibaca, lalu DISIMPAN sebagai tanggal absolut (BUG-6): label
+    # relatif yang tersimpan akan selamanya terbaca 0 hari.
+    assert job["date_posted"] == umur.tanggal_iso_dari_umur(3)
     assert job["age_days"] == 3
 
 
@@ -117,7 +119,7 @@ def test_label_baru_saja_berarti_nol_hari(bot):
         Kartu("Inventory Control Staff\nPT Contoh\nBandung\nBaru saja")
     )
 
-    assert job["date_posted"] == "Baru saja"
+    assert job["date_posted"] == umur.tanggal_iso_dari_umur(0)
     assert job["age_days"] == 0
 
 
@@ -514,3 +516,82 @@ def test_laporan_bukti_simpan_ke_reports(basis, capsys, monkeypatch, tmp_path):
     assert isi.startswith("# Bukti validasi dari database")
     assert "| platform | job_id |" in isi
     assert "Tersimpan" in capsys.readouterr().out
+
+
+# ------------------- 7. BUG-6: label Inggris singkat ("9m ago") dari JobStreet ---
+@pytest.mark.parametrize(
+    ("teks", "harap"),
+    [
+        ("9m ago", 0),
+        ("16m ago", 0),
+        ("1h ago", 0),
+        ("3h ago", 0),
+        ("2d ago", 2),
+        ("5 days ago", 5),
+        ("1w ago", 7),
+        ("2w ago", 14),
+        ("1mo ago", 30),
+        ("30+ days ago", 30),
+        ("just now", 0),
+        ("yesterday", 1),
+        ("3 hari lalu", 3),
+        ("kemarin", 1),
+    ],
+)
+def test_umur_label_singkat_inggris(teks, harap):
+    """JobStreet mengirim "9m ago" (cek-tanggal 17 Nov 2026), bukan "9 menit lalu"."""
+    assert umur.umur_dari_teks(teks) == harap
+
+
+def test_tanggal_simpan_mengubah_label_relatif_jadi_iso():
+    tetap = datetime(2026, 11, 17, 12, 0)
+
+    assert umur.tanggal_simpan("9m ago", tetap) == "2026-11-17"
+    assert umur.tanggal_simpan("2d ago", tetap) == "2026-11-15"
+    assert umur.tanggal_simpan("1mo ago", tetap) == "2026-10-18"
+    # Tanggal absolut dipertahankan apa adanya.
+    assert umur.tanggal_simpan("15 Nov 2026", tetap) == "2026-11-15"
+    assert umur.tanggal_simpan("2026-11-15", tetap) == "2026-11-15"
+    # Tak terbaca: kosong tetap kosong, teks aneh dikembalikan apa adanya.
+    assert umur.tanggal_simpan("", tetap) == ""
+    assert umur.tanggal_simpan("entah kapan", tetap) == "entah kapan"
+
+
+def test_kartu_9m_ago_disimpan_sebagai_tanggal_bukan_label(bot):
+    """Dulu yang tersimpan teks "9m ago" dan umurnya None selamanya."""
+    kartu = Kartu("Inventory Control Staff\nPT Contoh", ElemenTiruan("9m ago"))
+
+    job = bot._parse_job_card(kartu)
+
+    assert job["date_posted"][:4].isdigit(), job["date_posted"]
+    assert job["age_days"] == 0
+
+
+def test_kartu_5_days_ago_tersimpan_sebagai_tanggal_lima_hari_lalu(bot):
+    kartu = Kartu("Staff PPIC\nPT Contoh", ElemenTiruan("5 days ago"))
+
+    job = bot._parse_job_card(kartu)
+
+    assert job["age_days"] == 5
+    assert job["date_posted"] == umur.tanggal_iso_dari_umur(5)
+
+
+def test_kartu_9d_ago_ditolak_max_age_days(bot):
+    kartu = Kartu("Inventory Control Staff\nPT Contoh", ElemenTiruan("9d ago"))
+
+    job = bot._parse_job_card(kartu)
+    alasan = umur.batas_umur(job["age_days"], 7)
+
+    assert job["age_days"] == 9
+    assert "terlalu lama" in alasan.lower()
+
+
+def test_glints_dan_indeed_menyimpan_tanggal_iso():
+    import indeed
+
+    for umur_hari in (0, 3, None):
+        harap = umur.tanggal_iso_dari_umur(umur_hari)
+        assert glints.tanggal_simpan(umur_hari) == harap
+        assert indeed.tanggal_simpan(umur_hari) == harap
+
+    assert glints.tanggal_simpan(None) == ""

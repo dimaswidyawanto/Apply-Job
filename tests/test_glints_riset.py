@@ -6,6 +6,7 @@ dimensi tanggal ikut menilai, dan rincian skor ditampilkan.
 """
 
 import glints as glints_module
+import umur as umur_modul
 from config import config
 
 UUID = "123e4567-e89b-12d3-a456-426614174000"
@@ -55,7 +56,9 @@ def test_rapikan_kartu_mengisi_tanggal_publikasi():
 
     assert job is not None
     assert job["age_days"] == 2
-    assert job["date_posted"] == "2 hari lalu"
+    # Label relatif dikonversi ke tanggal absolut sebelum disimpan (BUG-6):
+    # "2 hari lalu" yang tersimpan akan selamanya terbaca 2 hari.
+    assert job["date_posted"] == umur_modul.tanggal_iso_dari_umur(2)
     assert job["has_logo"] is True
 
 

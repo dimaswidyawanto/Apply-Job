@@ -429,6 +429,11 @@ def label_umur(umur_hari: int | None) -> str:
     return umur.label_umur(umur_hari)
 
 
+def tanggal_simpan(umur_hari: int | None) -> str:
+    """Tanggal absolut (ISO) untuk disimpan; "" bila umur tak diketahui."""
+    return umur.tanggal_iso_dari_umur(umur_hari)
+
+
 def rapikan_kartu(data: dict) -> dict | None:
     """Ubah hasil skrip kartu menjadi dict lowongan; None bila tidak layak."""
     if not isinstance(data, dict):
@@ -456,7 +461,7 @@ def rapikan_kartu(data: dict) -> dict | None:
         "salary": " ".join(str(data.get("salary") or "").split()),
         "description": " ".join(str(data.get("text") or "").split())[:800],
         "url": url,
-        "date_posted": label_umur(umur),
+        "date_posted": tanggal_simpan(umur) or label_umur(umur),
         "age_days": umur,
         "source": "glints",
         "sudah_dilamar": any(tanda in teks for tanda in SUDAH_DILAMAR_TEXTS),

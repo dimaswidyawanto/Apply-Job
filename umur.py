@@ -63,8 +63,24 @@ _NAMA_BULAN = "|".join(sorted(BULAN, key=len, reverse=True))
 
 # Urutan penting: pola paling spesifik lebih dulu.
 _POLA_RELATIF = (
-    (r"baru saja|hari ini|just posted|today|baru dipasang|baru saja dipasang", 0),
+    (
+        (
+            r"baru saja|hari ini|just posted|just now|today|baru dipasang"
+            r"|baru saja dipasang"
+        ),
+        0,
+    ),
     (r"kemarin|yesterday", 1),
+    # Bentuk SINGKAT versi Inggris: JobStreet mengirim "9m ago", "3h ago",
+    # "2d ago" (bukti cek-tanggal 17 Nov 2026), bukan "9 minutes ago".
+    # Ditempatkan sebelum pola panjang, dan "mo" (month) sebelum "m" (minute)
+    # supaya "1mo ago" tidak terbaca 1 menit.
+    (r"(\d+)\s*\+?\s*mo(?:nth)?s?\s+ago", 30),
+    (r"(\d+)\s*\+?\s*y(?:ear)?s?\s+ago", 365),
+    (r"(\d+)\s*\+?\s*w(?:eek)?s?\s+ago", 7),
+    (r"(\d+)\s*\+?\s*d(?:ay)?s?\s+ago", 1),
+    (r"(\d+)\s*\+?\s*h(?:r|our)?s?\s+ago", 0),
+    (r"(\d+)\s*\+?\s*m(?:in)?s?\s+ago", 0),
     (r"(\d+)\s*menit|(\d+)\s*minute", 0),
     (r"(\d+)\s*jam\b|(\d+)\s*hour", 0),
     (r"(\d+)\s*\+?\s*hari|(\d+)\s*\+?\s*day", 1),
@@ -173,6 +189,39 @@ def umur_dari_teks(teks, sekarang: datetime | None = None) -> int | None:
 
     hari_ini = sekarang_wib(sekarang).date()
     return max(0, (hari_ini - tanggal).days)
+
+
+def tanggal_iso_dari_umur(umur_hari, sekarang: datetime | None = None) -> str:
+    """Tanggal absolut (ISO) dari umur relatif; "" bila umur tak diketahui."""
+    if not isinstance(umur_hari, int):
+        return ""
+
+    hari = sekarang_wib(sekarang).date() - timedelta(days=max(0, umur_hari))
+    return hari.isoformat()
+
+
+def tanggal_simpan(teks, sekarang: datetime | None = None) -> str:
+    """Tanggal yang layak DISIMPAN (ISO) dari label tanggal sebuah kartu.
+
+    Tanggal absolut dipertahankan; label relatif ("9m ago", "3 hari lalu",
+    "Hari ini") dikonversi ke tanggal absolut. Tanpa ini, label relatif yang
+    tersimpan akan selamanya terbaca 0 hari — lowongan lama tampak baru.
+    Teks yang tidak terbaca dikembalikan apa adanya ("" = DATE_UNKNOWN).
+    """
+    isi = " ".join(str(teks or "").split())
+
+    if not isi:
+        return ""
+
+    tanggal = tanggal_dari_teks(isi, sekarang)
+    if tanggal is not None:
+        return tanggal.isoformat()
+
+    umur_hari = umur_dari_teks(isi, sekarang)
+    if isinstance(umur_hari, int):
+        return tanggal_iso_dari_umur(umur_hari, sekarang)
+
+    return isi
 
 
 def label_umur(umur: int | None) -> str:

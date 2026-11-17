@@ -700,11 +700,20 @@ menemukan semua lowongan `DATE_UNKNOWN` karena hanya dua selector lama yang
 dipakai):
 
 1. atribut `datetime` pada elemen tanggal (`<time datetime="2026-11-15T…">`);
-2. teks elemen tanggal (`15 Nov 2026`, `3 hari yang lalu`);
+2. teks elemen tanggal (`15 Nov 2026`, `3 hari yang lalu`, `9m ago`);
 3. label umur di badan kartu (`Baru saja`, `30+ hari lalu`).
+
+JobStreet mengirim label **Inggris singkat** — `9m ago`, `1h ago`, `2d ago`
+(bukti `cek-tanggal` 17 Nov 2026), sedangkan Glints/Indeed mengirim teks
+Indonesia. Keduanya dikenali oleh parser yang sama (`umur.py`).
 
 Bila ketiganya tidak ada, lowongan dicatat **`DATE_UNKNOWN`** (bukan 0 hari),
 supaya lowongan lama tidak tampak baru.
+
+Yang **disimpan** ke database selalu tanggal absolut (`2026-11-15`), bukan label
+relatif. Alasannya: `"9m ago"` yang tersimpan hari ini akan tetap terbaca 0 hari
+bulan depan, sehingga lowongan lama tampak baru dan `MAX_AGE_DAYS` kembali
+tidak berguna.
 
 ```powershell
 .\jalankan.bat set-env MAX_AGE_DAYS=7

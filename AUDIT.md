@@ -1270,3 +1270,56 @@ tidak terpotong oleh pembungkusan terminal.
 
 Tes: `tests/test_live_fixes.py` +3 (tabel+ringkasan, penyaringan `--situs`,
 `--simpan`). Suite: **1011 passed, 1 skipped**; ruff & compileall bersih.
+
+## 33. BUG-6: `9m ago` — tanggal terbaca, umur tetap kosong
+
+Bukti live `cek-tanggal` (17 Nov 2026, JobStreet, kata kunci `inventory control`,
+Bandung):
+
+```
+10 dari 10 kartu tanggalnya terbaca; 0 tanpa tanggal (DATE_UNKNOWN).
+   sumber 'elemen jobListingDate': 10 kartu
+
+│ Branch Manager   │ 9m ago  │ elemen jobListingDate │ 9m ago  │  -   │
+│ Demand Planning  │ 1h ago  │ elemen jobListingDate │ 1h ago  │  -   │
+```
+
+Selector tanggal (§29a) **berhasil** — 10/10 terbaca, dari 0/10 sebelumnya.
+Tetapi kolom `Umur` kosong untuk semuanya, jadi `MAX_AGE_DAYS=7` tetap tidak
+bekerja.
+
+Akar masalah: JobStreet mengirim label Inggris **singkat** (`9m ago`, `1h ago`,
+`3h ago`), sedangkan `_POLA_RELATIF` hanya mengenal kata Indonesia (`menit`,
+`jam`, `hari`) dan kata Inggris **panjang** (`minute`, `hour`, `day`).
+`umur.umur_dari_teks("9m ago")` → `None` → `age_days = None`.
+
+Masalah kedua: karena `None`, `_diagnosa_tanggal` jatuh ke cabang "pakai teks apa
+adanya", sehingga **label relatif masuk database** (`date_posted = "9m ago"`).
+Label relatif tidak tahan waktu: baris itu akan terus terbaca 0 hari.
+
+Perbaikan:
+
+| File | Perubahan |
+|---|---|
+| `umur.py` | pola singkat Inggris: `(\d+)\s*\+?\s*mo(nth)?s?\s+ago` = 30, `y`=365, `w`=7, `d`=1, `h(r\|our)`=0, `m(in)`=0; `just now`/`today`=0, `yesterday`=1. Urutan `mo` sebelum `m` supaya "1mo ago" bukan 1 menit |
+| `umur.py` | `tanggal_iso_dari_umur()` dan `tanggal_simpan(teks)` — konversi label → tanggal absolut, tanggal absolut dipertahankan |
+| `scraper.py` | `_parse_job_card` menyimpan `umur.tanggal_simpan(...)`, bukan label mentah |
+| `glints.py` / `indeed.py` | `date_posted = tanggal_simpan(umur) or label_umur(umur)` — Glints/Indeed juga tidak lagi menyimpan "Hari ini" relatif |
+| `cli.py` (`cek-tanggal`) | kolom `Tersimpan` menampilkan tanggal yang benar-benar akan masuk database (ISO); peringatan bila masih ada label relatif |
+
+Hasil yang diharapkan di layar sesudah perbaikan:
+
+```
+│ Inventory Control │ 9m ago  │ elemen jobListingDate │ 2026-11-17 │ 0 hari  │
+│ Inventory Control │ 2d ago  │ elemen jobListingDate │ 2026-11-15 │ 2 hari  │
+│ Inventory Control │ 2w ago  │ elemen jobListingDate │ 2026-11-03 │ 14 hari │
+```
+
+Tes: `tests/test_live_fixes.py` +13 (12 label Inggris/Indonesia
+berparameter + konversi tanggal + kartu `9m ago`/`5 days ago`/`9d ago` ditolak
+`MAX_AGE_DAYS` + Glints/Indeed). Dua tes lama di dalamnya dan satu di
+`tests/test_glints_riset.py` disesuaikan karena `date_posted` kini ISO.
+Suite: **1030 passed, 1 skipped**; ruff & compileall bersih.
+
+**Status:** perbaikan belum LIVE VERIFIED sampai `cek-tanggal` di mesin
+pengguna menampilkan kolom `Umur` berisi angka.

@@ -1419,7 +1419,7 @@ def cek_tanggal(limit: int = 5, max_pages: int = 1, keywords: str = ""):
             escape((job.get("title") or "-")[:32]),
             escape(str(elemen)[:26]),
             escape(info["sumber"]),
-            escape((info["hasil"] or "DATE_UNKNOWN")[:20]),
+            escape((job.get("date_posted") or "DATE_UNKNOWN")[:20]),
             "-" if age_days is None else f"{age_days} hari",
         )
         kunci = info["sumber"]
@@ -1436,6 +1436,18 @@ def cek_tanggal(limit: int = 5, max_pages: int = 1, keywords: str = ""):
 
     for sumber, jumlah in sorted(sumber_dipakai.items()):
         console.print(f"[dim]   sumber '{escape(sumber)}': {jumlah} kartu[/]")
+
+    relatif = sum(
+        1
+        for job in terbaca[:diperiksa]
+        if job.get("date_posted")
+        and not str(job.get("date_posted"))[:4].isdigit()
+    )
+    if relatif:
+        console.print(
+            f"[yellow]{relatif} kartu masih menyimpan label relatif[/] — "
+            "umurnya akan terbaca 0 hari selamanya."
+        )
 
     if bertanggal == 0:
         console.print(
