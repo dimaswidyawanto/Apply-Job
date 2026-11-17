@@ -711,6 +711,35 @@ supaya lowongan lama tidak tampak baru.
 .\jalankan.bat set-env TOLAK_UMUR_TAK_DIKETAHUI=true
 ```
 
+#### Memeriksa dari mana tanggal terbaca (`cek-tanggal`)
+
+`cek-tanggal` membuka pencarian JobStreet seperti biasa, lalu menampilkan —
+per kartu — elemen tanggal yang ditemukan, **sumber** yang dipakai, nilai yang
+tersimpan, dan umur hasil hitung. Tidak ada lamaran dikirim dan database tidak
+disentuh, jadi aman dijalankan walau kuota harian sudah penuh:
+
+```powershell
+.\jalankan.bat cek-tanggal
+.\jalankan.bat cek-tanggal --limit 10 --keywords "inventory,ppic"
+```
+
+```
+┃ Judul          ┃ Elemen tanggal  ┃ Sumber         ┃ Tersimpan       ┃  Umur  ┃
+│ Inventory      │ 2026-11-15T03:… │ elemen         │ 2026-11-15      │ 2 hari │
+│ Control Staff  │                 │ jobListingDate │                 │        │
+│ Inventory      │ -               │ label kartu    │ 3 hari yang     │ 3 hari │
+│ Control Staff  │                 │                │ lalu            │        │
+│ Inventory      │ -               │ tidak ada      │ DATE_UNKNOWN    │   -    │
+2 dari 3 kartu tanggalnya terbaca; 1 tanpa tanggal (DATE_UNKNOWN).
+   sumber 'elemen jobListingDate': 1 kartu
+   sumber 'label kartu': 1 kartu
+   sumber 'tidak ada': 1 kartu
+```
+
+Kalau kolom **Tersimpan** berisi `DATE_UNKNOWN` untuk semua kartu, berarti
+markup situs berubah lagi: kirimkan tabel ini (kolom *Elemen tanggal* yang
+penting) supaya selectornya disesuaikan.
+
 ### Kuesioner yang belum terisi: bot menunggu Anda
 
 Tidak semua pertanyaan perusahaan bisa dijawab bot (mis. *"Warna favorit?"*,

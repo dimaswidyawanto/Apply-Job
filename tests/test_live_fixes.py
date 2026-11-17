@@ -369,3 +369,75 @@ def test_dry_run_menghitung_per_situs_dan_tanpa_tanggal(basis, monkeypatch):
     assert hasil["per_situs"]["jobstreet"]["tanpa_tgl"] == 1
     assert hasil["per_situs"]["glints"]["tanpa_tgl"] == 0
     assert hasil["per_situs"]["indeed"]["tanpa_tgl"] == 0
+
+
+# ------------------------------- 5. `cek-tanggal`: asal-usul tanggal per kartu ---
+def test_diagnosa_tanggal_menyebut_sumber_dan_nilai(bot):
+    kartu = Kartu(
+        "Inventory Control Staff\nPT Contoh",
+        ElemenTiruan("15 Nov 2026", {"datetime": "2026-11-15T03:00:00.000Z"}),
+    )
+
+    info = bot._diagnosa_tanggal(kartu)
+
+    assert info["hasil"] == "2026-11-15"
+    assert info["sumber"] != "tidak ada"
+    assert info["elemen"], "elemen tanggal yang ditemukan harus dilaporkan"
+
+
+def test_diagnosa_tanggal_label_kartu_dilaporkan(bot):
+    info = bot._diagnosa_tanggal(Kartu("Staff PPIC\nPT Lain\n3 hari yang lalu"))
+
+    assert info["hasil"] == "3 hari yang lalu"
+    assert info["sumber"] == "label kartu"
+    assert info["label"] == "3 hari yang lalu"
+
+
+def test_diagnosa_tanggal_tanpa_tanggal(bot):
+    info = bot._diagnosa_tanggal(Kartu("Staff PPIC\nPT Lain\nBandung"))
+
+    assert info["hasil"] == ""
+    assert info["sumber"] == "tidak ada"
+
+
+def test_cek_tanggal_menampilkan_tabel_dan_hitungan(capsys, monkeypatch, bot):
+    """Perintah baru harus melaporkan kartu bertanggal dan tanpa tanggal."""
+    import scraper
+
+    kartu_bertanggal = Kartu(
+        "Inventory Control Staff\nPT Contoh",
+        ElemenTiruan("15 Nov 2026", {"datetime": "2026-11-15T03:00:00.000Z"}),
+    )
+    kartu_tanpa = Kartu("Staff PPIC\nPT Lain\nBandung")
+
+    class BotTiruan:
+        def __init__(self):
+            pass
+
+        def init_browser(self):
+            pass
+
+        def login(self):
+            return True
+
+        def close(self):
+            pass
+
+        def search_jobs(self, keyword, page=1, location=None, saat_kartu=None):
+            for kartu in (kartu_bertanggal, kartu_tanpa):
+                if saat_kartu:
+                    saat_kartu(kartu, bot._parse_job_card(kartu))
+            return []
+
+        def _diagnosa_tanggal(self, kartu):
+            return bot._diagnosa_tanggal(kartu)
+
+    monkeypatch.setattr(scraper, "JobStreetBot", BotTiruan)
+
+    cli.cek_tanggal(limit=5, max_pages=1, keywords="inventory")
+
+    keluaran = _teks_banner(capsys.readouterr().out)
+    assert "Pembacaan tanggal lowongan" in keluaran
+    assert "DATE_UNKNOWN" in keluaran
+    assert "1 dari 2 kartu" in keluaran
+    assert "tidak ada lamaran dikirim" in keluaran

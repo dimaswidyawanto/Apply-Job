@@ -57,6 +57,17 @@ DATE_SELECTORS = (
     "time",
 )
 
+# Nama pendek untuk laporan `cek-tanggal`. Selector CSS mentah berisi kurung
+# siku yang dianggap markup oleh Rich, jadi jangan dicetak apa adanya.
+NAMA_SUMBER_TANGGAL = {
+    "[data-automation='jobListingDate']": "elemen jobListingDate",
+    "[data-automation*='jobListingDate']": "elemen jobListingDate",
+    "[data-automation*='listingDate']": "elemen listingDate",
+    "[data-testid*='listing-date']": "elemen listing-date",
+    "time[datetime]": "atribut datetime",
+    "time": "elemen time",
+}
+
 # Label umur yang kadang hanya muncul sebagai teks biasa di badan kartu.
 POLA_LABEL_UMUR = re.compile(
     r"(?:baru saja|hari ini|kemarin"
@@ -316,9 +327,18 @@ class JobStreetBot:
     # Pencarian
     # ------------------------------------------------------------------
     def search_jobs(
-        self, keyword: str, page: int = 1, location: str | None = None
+        self,
+        keyword: str,
+        page: int = 1,
+        location: str | None = None,
+        saat_kartu=None,
     ) -> list[dict]:
-        """Membuka hasil pencarian dan membaca lowongan yang dapat dikenali."""
+        """Membuka hasil pencarian dan membaca lowongan yang dapat dikenali.
+
+        `saat_kartu(card, job)` opsional dipanggil untuk setiap kartu yang
+        berhasil dibaca — dipakai `cek-tanggal` untuk memeriksa elemen tanggal
+        aslinya tanpa menyalin ulang logika pembacaan.
+        """
         jobs: list[dict] = []
         seen_urls = set()
         seen_ids = set()
@@ -389,6 +409,10 @@ class JobStreetBot:
                     seen_urls.add(job["url"])
                     seen_ids.add(job["job_id"])
                     jobs.append(job)
+
+                    if saat_kartu is not None:
+                        with contextlib.suppress(Exception):
+                            saat_kartu(card, job)
 
                 except Exception:
                     continue
@@ -530,13 +554,28 @@ class JobStreetBot:
         }
 
     def _baca_tanggal(self, card) -> str:
-        """Tanggal publikasi satu kartu: atribut `datetime`, teks, lalu label.
+        """Tanggal publikasi satu kartu (lihat `_diagnosa_tanggal`)."""
+        return self._diagnosa_tanggal(card)["hasil"]
 
-        Urutannya sengaja: `datetime` (paling tepat) → teks elemen tanggal →
-        label umur di badan kartu ("3 hari lalu", "Baru saja"). Bila semuanya
-        tidak ada, kembalikan "" supaya lowongan tercatat DATE_UNKNOWN —
-        bukan 0 hari (yang akan membuat lowongan lama tampak baru).
+    def _diagnosa_tanggal(self, card) -> dict:
+        """Baca tanggal satu kartu beserta asal-usulnya.
+
+        Urutannya sengaja: atribut `datetime` (paling tepat) → teks elemen
+        tanggal → label umur di badan kartu ("3 hari lalu", "Baru saja").
+        Bila semuanya tidak ada, `hasil` = "" supaya lowongan tercatat
+        DATE_UNKNOWN — bukan 0 hari (yang membuat lowongan lama tampak baru).
+
+        Kunci hasil: `hasil`, `sumber`, `elemen` (daftar (selector, datetime,
+        teks) yang ditemukan), `label` (label umur yang cocok di teks kartu).
         """
+        rincian = {
+            "hasil": "",
+            "sumber": "tidak ada",
+            "selector": "",
+            "elemen": [],
+            "label": "",
+        }
+
         for selector in DATE_SELECTORS:
             try:
                 element = card.find_element(By.CSS_SELECTOR, selector)
@@ -556,14 +595,24 @@ class JobStreetBot:
             except Exception:
                 teks = ""
 
+            rincian["elemen"].append((selector, atribut, teks))
+
             # Yang bisa dibaca parser umur didahulukan, mana pun yang ada.
+            nama = NAMA_SUMBER_TANGGAL.get(selector, "elemen tanggal")
+
             for kandidat in (atribut, atribut[:10], teks):
                 if kandidat and umur.umur_dari_teks(kandidat) is not None:
-                    return kandidat
+                    rincian.update(
+                        hasil=kandidat, sumber=nama, selector=selector
+                    )
+                    return rincian
 
             for kandidat in (teks, atribut):
                 if kandidat:
-                    return kandidat
+                    rincian.update(
+                        hasil=kandidat, sumber=nama, selector=selector
+                    )
+                    return rincian
 
         # Tidak ada elemen tanggal: cari label umur di teks kartu.
         try:
@@ -572,7 +621,12 @@ class JobStreetBot:
             teks_kartu = ""
 
         cocok = POLA_LABEL_UMUR.search(teks_kartu)
-        return cocok.group(0) if cocok else ""
+        if cocok:
+            rincian.update(
+                hasil=cocok.group(0), sumber="label kartu", label=cocok.group(0)
+            )
+
+        return rincian
 
     @staticmethod
     def _card_is_applied(card) -> bool:

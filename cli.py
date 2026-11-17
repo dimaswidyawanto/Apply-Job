@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 import cache_riset
@@ -1154,6 +1155,104 @@ def cek_logo(limit: int = 10, max_pages: int = 1, keywords: str = ""):
         )
 
 
+def cek_tanggal(limit: int = 5, max_pages: int = 1, keywords: str = ""):
+    """Periksa dari mana tanggal lowongan JobStreet terbaca (tanpa melamar).
+
+    Membuka hasil pencarian sungguhan, lalu untuk setiap kartu menampilkan
+    elemen tanggal yang ditemukan, sumber yang dipakai, nilai yang tersimpan,
+    dan umur hasil hitung. Dipakai membuktikan perbaikan pembacaan tanggal
+    tanpa memakai kuota lamaran dan tanpa menyentuh database.
+    """
+    from scraper import JobStreetBot
+
+    daftar_keyword = [k.strip() for k in (keywords or "").split(",") if k.strip()]
+    if not daftar_keyword:
+        daftar_keyword = list(config.keywords)[:1] or ["inventory"]
+
+    console.print(f"[cyan]Versi kode:[/] {versi_kode()}")
+    console.print("[cyan]Situs:[/] JobStreet — pemeriksaan tanggal lowongan")
+    console.print(
+        f"[dim]Kata kunci: {', '.join(daftar_keyword)} | halaman: {max_pages} "
+        f"| batas tampil: {limit} | tidak ada lamaran dikirim[/]"
+    )
+
+    bot = JobStreetBot()
+    terbaca: list[dict] = []
+
+    try:
+        bot.init_browser()
+        if not bot.login():
+            console.print("[bold red]Login belum selesai. Pemeriksaan dibatalkan.[/]")
+            return
+
+        for keyword in daftar_keyword:
+            for page in range(1, max(1, max_pages) + 1):
+                bot.search_jobs(
+                    keyword,
+                    page,
+                    location=config.location,
+                    saat_kartu=lambda card, job: terbaca.append(
+                        {**job, "tanggal": bot._diagnosa_tanggal(card)}
+                    ),
+                )
+                if len(terbaca) >= limit:
+                    break
+            if len(terbaca) >= limit:
+                break
+    finally:
+        with contextlib.suppress(Exception):
+            bot.close()
+
+    if not terbaca:
+        console.print("[yellow]Tidak ada kartu lowongan yang terbaca.[/]")
+        return
+
+    table = Table(title="Pembacaan tanggal lowongan")
+    table.add_column("Judul", style="cyan", max_width=32)
+    table.add_column("Elemen tanggal", style="dim", max_width=26)
+    table.add_column("Sumber", max_width=22)
+    table.add_column("Tersimpan", max_width=20)
+    table.add_column("Umur", justify="center")
+
+    sumber_dipakai: dict = {}
+
+    for job in terbaca[: max(1, limit)]:
+        info = job["tanggal"]
+        elemen = "-"
+        if info["elemen"]:
+            _sel, atribut, teks = info["elemen"][0]
+            elemen = atribut or teks or _sel
+
+        age_days = job.get("age_days")
+        table.add_row(
+            escape((job.get("title") or "-")[:32]),
+            escape(str(elemen)[:26]),
+            escape(info["sumber"]),
+            escape((info["hasil"] or "DATE_UNKNOWN")[:20]),
+            "-" if age_days is None else f"{age_days} hari",
+        )
+        kunci = info["sumber"]
+        sumber_dipakai[kunci] = sumber_dipakai.get(kunci, 0) + 1
+
+    console.print(table)
+
+    diperiksa = len(terbaca[: max(1, limit)])
+    bertanggal = sum(1 for job in terbaca[:diperiksa] if job["tanggal"]["hasil"])
+    console.print(
+        f"[bold]{bertanggal}[/] dari [bold]{diperiksa}[/] kartu tanggalnya "
+        f"terbaca; {diperiksa - bertanggal} tanpa tanggal (DATE_UNKNOWN)."
+    )
+
+    for sumber, jumlah in sorted(sumber_dipakai.items()):
+        console.print(f"[dim]   sumber '{escape(sumber)}': {jumlah} kartu[/]")
+
+    if bertanggal == 0:
+        console.print(
+            "[yellow]Tidak satu pun tanggal terbaca. Kirimkan tabel ini agar "
+            "selector tanggal disesuaikan dengan markup terbaru.[/]"
+        )
+
+
 def jalankan_glints(max_pages: int = 0, keywords: str = "", batas: int = 0):
     """Cari, saring, lalu lamar lowongan di Glints."""
     from glints import jalankan_glints as _jalankan
@@ -1855,6 +1954,20 @@ if __name__ == "__main__":
         "--keywords", default="", help="Kata kunci pencarian (pisah koma)"
     )
 
+    tanggal_parser = subparsers.add_parser(
+        "cek-tanggal",
+        help="Periksa pembacaan tanggal lowongan JobStreet (tanpa melamar)",
+    )
+    tanggal_parser.add_argument(
+        "--limit", type=int, default=5, help="Jumlah kartu yang ditampilkan"
+    )
+    tanggal_parser.add_argument(
+        "--max-pages", type=int, default=1, help="Jumlah halaman (default 1)"
+    )
+    tanggal_parser.add_argument(
+        "--keywords", default="", help="Kata kunci pencarian (pisah koma)"
+    )
+
     env_parser = subparsers.add_parser(
         "set-env",
         help="Ubah nilai di .env, mis. set-env MAX_APPLY_PER_DAY=500",
@@ -2235,6 +2348,8 @@ if __name__ == "__main__":
         uji_lamar(args.url)
     elif args.command == "cek-logo":
         cek_logo(args.limit, args.max_pages, args.keywords)
+    elif args.command == "cek-tanggal":
+        cek_tanggal(args.limit, args.max_pages, args.keywords)
     elif args.command == "glints":
         if args.glints_command == "run":
             jalankan_glints(args.max_pages, args.keywords, args.limit)

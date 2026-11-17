@@ -1219,3 +1219,30 @@ juga dihitung walau keputusannya `APPLY` — sebelumnya terlewat karena `continu
 **Masih NOT VERIFIED (tidak berubah):** pembacaan tanggal pada markup JobStreet
 hari ini (butuh sesi yang menyimpan tanggal), form/ARIA/required-field live, dan
 scoring Glints/Indeed live.
+
+## 31. `cek-tanggal`: bukti live tanpa memakai kuota
+
+Pembacaan tanggal (§29a) hanya bisa dibuktikan lewat sesi yang benar-benar
+membuka halaman JobStreet. Sesi seperti itu selalu memakai kuota lamaran
+(50/hari), sehingga saat kuota penuh tidak ada cara memeriksa apakah
+selectornya masih cocok.
+
+Perbaikan: `scraper.JobStreetBot._baca_tanggal` dipecah menjadi
+`_diagnosa_tanggal(card)` yang mengembalikan `hasil`, `sumber`, `selector`,
+`elemen`, dan `label`; `_baca_tanggal` cukup memakai `["hasil"]`. Jadi
+diagnostik dan pembacaan produksi memakai **satu implementasi** — tidak ada
+salinan yang bisa menyimpang (kelas bug yang sama dengan §30a).
+
+`search_jobs()` menerima `saat_kartu(card, job)` opsional; perintah baru
+`cek-tanggal` memakai kait itu untuk menampilkan, per kartu: elemen tanggal
+yang ditemukan, sumber yang dipakai (`elemen jobListingDate`, `atribut
+datetime`, `label kartu`, atau `tidak ada`), nilai yang tersimpan, dan umurnya.
+Tanpa lamaran, tanpa menyentuh database, aman walau kuota 50/50.
+
+Catatan teknis: selector CSS mentah memuat `[`/`]` yang dimakan Rich sebagai
+markup, sehingga nama sumber dibuat manusiawi (`NAMA_SUMBER_TANGGAL`) dan teks
+dinamis di tabel di-`escape`. Tanpa itu baris ringkasan tercetak kosong.
+
+Tes: `tests/test_live_fixes.py` +4 (sumber selector, sumber label, tanpa
+tanggal, dan perintah `cek-tanggal` ujung-ke-ujung dengan bot tiruan).
+Suite: **1008 passed, 1 skipped**.
