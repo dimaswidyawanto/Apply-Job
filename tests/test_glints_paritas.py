@@ -113,7 +113,9 @@ def _siapkan(monkeypatch, db=None, notifier=None, bot=None):
     monkeypatch.setattr(glints_module, "db", db)
     monkeypatch.setattr(glints_module, "notifier", notifier)
     monkeypatch.setattr(glints_module, "GlintsBot", lambda: bot or BotPalsu())
-    monkeypatch.setattr(glints_module, "tampilkan_konfigurasi_glints", lambda *a, **k: None)
+    monkeypatch.setattr(
+        glints_module, "tampilkan_konfigurasi_glints", lambda *a, **k: None
+    )
     monkeypatch.setattr(
         glints_module, "tampilkan_perbandingan", lambda kandidat: None
     )
