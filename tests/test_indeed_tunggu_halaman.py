@@ -84,6 +84,9 @@ class WaktuPalsu:
 def _siapkan(monkeypatch, di):
     jam = WaktuPalsu()
     monkeypatch.setattr(indeed, "time", jam)
+    # Jeda senyap 1 detik supaya hitungan putaran tetap mudah dibaca; nilai
+    # aslinya 10 detik (lihat test_jeda_senyap_* di bawah).
+    monkeypatch.setattr(indeed, "SENYAP_JEDA", 1)
     return di
 
 
@@ -121,9 +124,10 @@ def test_tantangan_yang_bertahan_tetap_menghentikan_riset(monkeypatch):
 
     assert bot.buka_pencarian("inventory control", "Bandung") is False
     assert bot.blokir_dilaporkan, "blokir sungguhan harus dilaporkan"
-    # Bentuk cadangan dicoba lebih dulu: URL pertama + URL tanpa sort=date.
+    # Bentuk cadangan: URL polos dulu, lalu yang ber-`sort=date`.
     assert len(bot.driver.dibuka) == 2
-    assert "sort=date" not in bot.driver.dibuka[1]
+    assert "sort=date" not in bot.driver.dibuka[0]
+    assert "sort=date" in bot.driver.dibuka[1]
 
 
 def test_hasil_kosong_bukan_blokir(monkeypatch, capsys):
@@ -143,8 +147,8 @@ def test_hasil_kosong_bukan_blokir(monkeypatch, capsys):
     assert "Tidak ada lowongan untuk kombinasi ini" in capsys.readouterr().out
 
 
-def test_url_cadangan_tanpa_sort_date_dipakai_bila_perlu(monkeypatch):
-    """Bentuk pertama diblokir, bentuk tanpa sort=date berhasil."""
+def test_url_cadangan_sort_date_dipakai_bila_perlu(monkeypatch):
+    """Bentuk polos diblokir, bentuk ber-`sort=date` berhasil."""
 
     bot = _siapkan(
         monkeypatch,
@@ -155,11 +159,11 @@ def test_url_cadangan_tanpa_sort_date_dipakai_bila_perlu(monkeypatch):
     )
 
     # 16 putaran pertama (batas waktu 15 detik) diblokir, lalu bentuk cadangan
-    # berhasil tanpa `sort=date`.
+    # dengan `sort=date` berhasil.
     assert bot.buka_pencarian("staf gudang", "Cimahi") is True
     assert len(bot.driver.dibuka) == 2
-    assert "sort=date" in bot.driver.dibuka[0]
-    assert "sort=date" not in bot.driver.dibuka[1]
+    assert "sort=date" not in bot.driver.dibuka[0]
+    assert "sort=date" in bot.driver.dibuka[1]
     assert bot.blokir_dilaporkan == []
 
 
@@ -176,3 +180,97 @@ def test_batas_tunggu_memakai_konstanta_modul(monkeypatch):
 
     # Dua percobaan × 4 detik tunggu (bentuk utama lalu cadangan).
     assert jam.sekarang == 8.0
+
+
+def test_jeda_senyap_tidak_mengirim_perintah_ke_chrome(monkeypatch):
+    """Selama tantangan, bot harus DIAM — bukan memeriksa tiap detik.
+
+    Bukti live 18 Nov 2026: verifikasi Cloudflare hanya selesai setelah proses
+    dihentikan. Selama bot memeriksa halaman tiap 1-2 detik, halaman kembali
+    ke "Tunggu sebentar...".
+    """
+
+    class BotHitung(indeed.IndeedBot):
+        def __init__(self):
+            super().__init__()
+            self.driver = DriverPalsu()
+            self.kartu = 0
+            self.panggilan = 0
+            self.blokir_dilaporkan = []
+
+        def _tautan_kartu(self):
+            self.panggilan += 1
+            return []
+
+        def _judul_halaman(self):
+            self.panggilan += 1
+            return "Tunggu sebentar..."
+
+        def _teks_halaman(self):
+            self.panggilan += 1
+            return "memeriksa peramban anda"
+
+    jam = WaktuPalsu()
+    monkeypatch.setattr(indeed, "time", jam)
+    monkeypatch.setattr(indeed, "SENYAP_JEDA", 10)
+
+    bot = BotHitung()
+    assert bot._tunggu_halaman_siap(60) == "blokir"
+
+    # 60 detik / jeda 10 detik = paling banyak 7 pemeriksaan (bukan 60).
+    assert bot.panggilan <= 14, bot.panggilan
+    assert bot.panggilan >= 4
+
+
+def test_teks_halaman_tidak_dibaca_saat_halaman_tantangan(monkeypatch):
+    """Teks halaman tidak diambil saat judulnya masih halaman Cloudflare."""
+
+    class Bot(indeed.IndeedBot):
+        def __init__(self):
+            super().__init__()
+            self.dibaca = 0
+
+        def _tautan_kartu(self):
+            return []
+
+        def _judul_halaman(self):
+            return "Security Check - Indeed.com"
+
+        def _teks_halaman(self):
+            self.dibaca += 1
+            return ""
+
+    bot = Bot()
+    monkeypatch.setattr(indeed, "time", WaktuPalsu())
+    monkeypatch.setattr(indeed, "SENYAP_JEDA", 1)
+    assert bot._keadaan_sekarang() == "blokir"
+    assert bot.dibaca == 0
+
+
+def test_panaskan_diam_lalu_lolos_sendiri(monkeypatch):
+    """Halaman perantara lolos tanpa satu pun klik pengguna."""
+
+    class Bot(indeed.IndeedBot):
+        def __init__(self):
+            super().__init__()
+            self.driver = DriverPalsu()
+            self.putaran = 0
+            self.blokir_dilaporkan = []
+
+        def _tautan_kartu(self):
+            self.putaran += 1
+            # Dua pemeriksaan pertama masih halaman perantara.
+            return ["https://id.indeed.com/viewjob?jk=abc"] if self.putaran > 2 else []
+
+        def _judul_halaman(self):
+            return "Tunggu sebentar..."
+
+        def _teks_halaman(self):
+            return ""
+
+    monkeypatch.setattr(indeed, "time", WaktuPalsu())
+    monkeypatch.setattr(indeed, "SENYAP_JEDA", 10)
+
+    bot = Bot()
+    assert bot.panaskan("inventory", "Bandung", detik=60) == "siap"
+    assert bot.blokir_dilaporkan == []

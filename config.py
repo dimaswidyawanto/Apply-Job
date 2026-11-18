@@ -258,6 +258,24 @@ class Config:
     )
     # 0 = tanpa batas jumlah lowongan hasil riset (pengaman opsional).
     research_max_jobs: int = max(0, _int_setting("RESEARCH_MAX_JOBS", 0))
+    # Indeed: berapa detik bot menunggu (DENGAN DIAM, tanpa perintah ke
+    # Chrome) saat halaman "Diperlukan Verifikasi Tambahan" tampil. Halaman
+    # perantara Cloudflare bisa butuh 30-60 detik untuk lolos sendiri; dulu
+    # batasnya 90 detik sambil memeriksa tiap 2 detik sehingga pemeriksaannya
+    # justru batal terus.
+    indeed_tunggu_detik: int = max(
+        30, _int_setting("INDEED_TUNGGU_DETIK", 180)
+    )
+    # Bila CHROME_DEBUG_PORT diisi, menempel ke Chrome itu WAJIB: gagal
+    # menempel = sesi dihentikan, bukan diam-diam pindah ke profil bot lain.
+    # Sebabnya, cookie verifikasi Cloudflare (`cf_clearance`) hanya ada di
+    # profil Chrome milik pengguna; profil bot selalu kena verifikasi lagi
+    # (live 18 Nov 2026: satu sesi Indeed hangus karena ini).
+    # Set CHROME_TEMPEL_OPSIONAL=true untuk perilaku lama (lanjut dengan
+    # profil bot walau menempel gagal).
+    chrome_tempel_opsional: bool = _bool_setting(
+        "CHROME_TEMPEL_OPSIONAL", False
+    )
 
     # Cache hasil riset per kombinasi situs + kata kunci + lokasi + halaman
     # (audit E-13). 0 = selalu ambil ulang dari situs.

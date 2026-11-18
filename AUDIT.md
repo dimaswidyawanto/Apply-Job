@@ -1410,3 +1410,71 @@ Suite: **1053 passed, 1 skipped**.
 
 **Status:** unit/fixture VERIFIED; banner LIVE VERIFIED setelah sesi
 berikutnya mencetak `Batas per sesi: N lamaran (--limit)`.
+
+## 36. BUG-9/10/11/12 dari sesi Indeed (18 Nov 2026)
+
+Sesi live Indeed, urutan kejadiannya:
+
+```
+Verifikasi belum selesai dalam batas waktu. Riset tetap dicoba; ...
+RISET INDEED — 20 kata kunci × 9 lokasi ...
+Indeed: 'inventory control' — lokasi Bandung — muat sampai 1 halaman
+Dihentikan oleh pengguna.              <-- Ctrl+C
+# setelah dihentikan: id.indeed.com normal, "Welcome, DIMAS", kartu lowongan tampil
+```
+
+Kesimpulan pengguna yang menjadi dasar perbaikan: **verifikasi hanya berhasil
+bila batch dihentikan (Ctrl+C)**; selama bot berjalan, klik centang Cloudflare
+tidak pernah selesai dan halaman kembali ke "Tunggu sebentar…".
+
+### BUG-11 — bot membatalkan pemeriksaan Cloudflare
+
+| | |
+|---|---|
+| File / fungsi | `indeed.py` → `_tunggu_halaman_siap()`, `panaskan()` |
+| Problem | Selama halaman tantangan tampil, bot memeriksa tiap **1–2 detik** |
+| Root cause | Setiap perintah CDP (`driver.title`, `find_elements`, `execute_script`) ke tab yang sedang menjalankan tantangan **membatalkan** pemeriksaan JavaScript Cloudflare |
+| Fix | `_keadaan_sekarang()` (satu-satunya pembaca layar) + `SENYAP_JEDA=10`: saat tantangan, bot **diam total** 10 detik tanpa satu pun perintah, lalu satu pemeriksaan. Jendela pemanasan `PANAS_MAKS_DETIK` 90 → **180** detik dan bisa diatur `INDEED_TUNGGU_DETIK` |
+| Regresi | `test_jeda_senyap_tidak_mengirim_perintah_ke_chrome` (≤14 panggilan untuk 60 detik, bukan 60), `test_teks_halaman_tidak_dibaca_saat_halaman_tantangan`, `test_panaskan_diam_lalu_lolos_sendiri` |
+
+Tambahan: penanda blokir kini mengenali **judul** `Security Check` dan teks
+`Memeriksa peramban` (sebelumnya hanya dari badan halaman), sehingga deteksi
+tidak perlu membaca teks halaman saat tantangan.
+
+### BUG-12 — menempel gagal, bot diam-diam pindah profil
+
+| | |
+|---|---|
+| File / fungsi | `browser.py` → `buka_chrome()` |
+| Problem | `CHROME_DEBUG_PORT=9222` diisi, `Gagal menempel ke port 9222`, lalu bot memakai profil `chrome-profile` |
+| Root cause | Kegagalan menempel hanya dicetak sebagai peringatan, lalu jatuh ke profil bot. Profil bot tidak punya cookie `cf_clearance`, jadi situs ber-Cloudflare langsung meminta verifikasi lagi — sesi hangus tanpa sebab yang jelas bagi pengguna |
+| Fix | Gagal menempel = **berhenti** (`RuntimeError`) dengan pesan yang menyebut `chrome-debug.bat`, `CHROME_DEBUG_PORT=0`, dan `CHROME_TEMPEL_OPSIONAL=true`. Perilaku lama tetap tersedia lewat `CHROME_TEMPEL_OPSIONAL=true` |
+| Regresi | `test_menempel_gagal_menghentikan_sesi_bukan_pindah_profil`, `test_menempel_gagal_boleh_lanjut_bila_diizinkan` |
+
+### BUG-9 — `ReadTimeout` urllib3 membuang hasil riset
+
+| | |
+|---|---|
+| File / fungsi | `glints.py` → `kumpulkan_lowongan()`, `GALAT_KONEKSI_CHROME` |
+| Problem | Sesi mati di kombinasi 19/180: `HTTPConnectionPool(host='localhost', port=62879): Read timed out. (timeout=120)`; 402 lowongan yang sudah terbaca ikut dibuang |
+| Root cause | Penangkap hanya `(ConnectionError, OSError, WebDriverException)`. Selenium mengirim perintah lewat urllib3, dan `urllib3.exceptions.ReadTimeoutError` adalah turunan `HTTPError` — bukan ketiganya |
+| Fix | `GALAT_KONEKSI_CHROME` = `(ConnectionError, OSError, WebDriverException)` + `urllib3.exceptions.HTTPError` (mencakup `ReadTimeoutError`, `MaxRetryError`) |
+| Regresi | `test_readtimeout_urllib3_dianggap_koneksi_putus`, `test_riset_glints_bertahan_saat_readtimeout` (kartu yang sudah terbaca tetap dikembalikan) |
+
+### BUG-10 — diagnosa radio berulang (belum disentuh)
+
+Sesi Glints mencetak diagnosa kontrol yang **sama** 3–4 kali dalam satu
+halaman (`Dokumentasi`, `Layouting`, `PPIC - Kontrol Inventaris`,
+`Proyeksi Penjualan`). Tidak mengubah keputusan (tetap `no_safe_answer`), hanya
+membuat log panjang dan membuang beberapa detik per lowongan. Dicatat sebagai
+perbaikan kosmetik berikutnya, **bukan** blocker validasi.
+
+### Hasil
+
+* `1062 passed, 1 skipped`
+* URL pencarian Indeed kini polos dulu, `sort=date` hanya cadangan
+  (`test_url_pencarian_polos_tanpa_sort_date`)
+
+**Status:** unit/fixture VERIFIED. LIVE VERIFIED menunggu satu sesi
+`indeed run` di mesin pengguna dengan Chrome debug yang sudah diverifikasi
+**sebelum** bot dijalankan.

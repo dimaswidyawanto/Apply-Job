@@ -194,6 +194,8 @@ cp .env.example .env
 | `HEADLESS_MODE` | `false` | `true` = Chrome tanpa jendela (tidak cocok untuk tinjau manual) |
 | `TELEGRAM_BOT_TOKEN` | kosong | Opsional, untuk notifikasi |
 | `TELEGRAM_CHAT_ID` | kosong | Opsional, untuk notifikasi |
+| `INDEED_TUNGGU_DETIK` | `180` | Lama bot menunggu (tanpa menyentuh halaman) saat Indeed menampilkan verifikasi Cloudflare |
+| `CHROME_TEMPEL_OPSIONAL` | `false` | `false` = bila `CHROME_DEBUG_PORT` diisi tetapi Chrome tidak bisa ditempel, sesi **dihentikan** (tidak diam-diam pindah profil, karena cookie verifikasi tidak ikut). `true` = perilaku lama |
 | `CACHE_RISET_MENIT` | `60` | Cache hasil riset per kombinasi situs + kata kunci + lokasi + halaman selama N menit, supaya sesi kedua di siklus kuota yang sama tidak membaca situs dari nol. `0` = selalu ambil ulang; `--segar` memaksa ambil ulang sekali jalan |
 | `COLLECT_BEFORE_APPLY` | `true` | `true` = **riset dulu**: kumpulkan → dedup → nilai → peringkat → TOP 50 → lamar. `false` = lamar sambil mencari (hanya bila `MAX_APPLY_PER_DAY=0`) |
 | `RANK_BY` | `relevance` | Urutan pemilihan saat `COLLECT_BEFORE_APPLY=true`: `relevance` = kecocokan tertinggi dulu, `newest` = posting terbaru dulu |
@@ -1132,18 +1134,36 @@ dianggap bot. Bot sekarang:
    tertulis "did not match any jobs", itu berarti kombinasi kata kunci & lokasi
    memang kosong — riset lanjut ke kombinasi berikutnya tanpa menghitungnya
    sebagai blokir;
-4. mencoba bentuk URL cadangan **tanpa `sort=date`** sebelum menyatakan blokir
-   (parameter itu tidak pernah dipakai manusia);
+4. memakai URL pencarian **polos** lebih dulu dan baru menambahkan
+   `sort=date` sebagai bentuk cadangan — parameter itu tidak pernah dipakai
+   manusia yang membuka Indeed dari browser biasa, dan pada validasi live
+   18 Nov 2026 URL ber-`sort=date` langsung memunculkan verifikasi;
 5. hanya bila tantangan masih ada setelah semua itu: berhenti, menyimpan bukti
    `debug/blokir-cloudflare-*.html` (+ PNG) sekali per sesi, dan memberi langkah
    lanjutan (selesaikan verifikasi di jendela Chrome, ganti jaringan, atau
    tunggu 30–60 menit).
 
 **Pemanasan sesi.** Sebelum riset, bot membuka **satu** halaman pencarian lebih
-dulu. Bila muncul verifikasi, Anda diberi **90 detik** untuk menyelesaikannya di
-jendela Chrome (20 detik bila Chrome headless, karena tidak ada yang bisa
-membantu). Setelah lolos sekali, cookie `cf_clearance` ikut pada navigasi
+dulu. Bila muncul verifikasi, bot **diam total** dan menunggu
+`INDEED_TUNGGU_DETIK` detik (bawaan **180**; 20 detik bila Chrome headless,
+karena tidak ada yang bisa membantu) agar pemeriksaan Cloudflare selesai
+sendiri. Setelah lolos sekali, cookie `cf_clearance` ikut pada navigasi
 berikutnya sehingga riset tidak berhenti di kombinasi pertama.
+
+**Kenapa harus diam.** Selama halaman tantangan tampil, bot tidak mengirim
+**satu pun** perintah ke Chrome. Setiap perintah — `driver.title`,
+`find_elements`, `execute_script` — membatalkan pemeriksaan JavaScript
+Cloudflare yang sedang berjalan; itulah sebabnya versi lama (memeriksa tiap
+1–2 detik) hanya berhasil bila prosesnya dihentikan manual dengan Ctrl+C:
+
+```
+# dulu: memeriksa tiap 2 detik -> "Tunggu sebentar..." berulang selamanya
+# sekarang: diam 10 detik -> satu pemeriksaan -> lanjut sendiri
+```
+
+Bila setelah jendela verifikasi habis halaman tetap diblokir, Indeed
+**dilewati otomatis**: sesi lanjut ke situs berikutnya tanpa menunggu lagi,
+dan hasil riset yang sudah terbaca tetap dipakai.
 
 **Cache tidak menyimpan hasil blokir.** Bila satu kombinasi gagal dibaca karena
 diblokir, hasilnya **tidak** masuk cache — kombinasi itu dicoba lagi pada sesi
@@ -2043,6 +2063,26 @@ uji yang dicetak ikut menyesuaikan.
 Setelah selesai, kembalikan ke mode biasa dengan
 `set-env CHROME_DEBUG_PORT=0`. Jangan tutup jendela Chrome dari
 `chrome-debug.bat` selama bot berjalan.
+
+**Urutannya wajib: berhenti → verifikasi → jalankan.** Bukti live 18 Nov 2026:
+selama bot berjalan (menempel ke Chrome), halaman verifikasi **tidak pernah**
+selesai walau kotaknya diklik berulang kali; begitu proses dihentikan (Ctrl+C),
+verifikasi lolos dan halaman Indeed normal. Karena itu:
+
+```powershell
+# 1. hentikan bot lebih dulu (Ctrl+C, lalu Y bila ditanya)
+# 2. tutup semua Chrome, buka Chrome debug
+Get-Process chrome -ErrorAction SilentlyContinue | Stop-Process
+.\chrome-debug.bat 9222 indeed
+# 3. verifikasi DI SINI (bot tidak jalan) sampai kartu lowongan tampil
+Test-NetConnection 127.0.0.1 -Port 9222          # harus True
+# 4. baru jalankan bot
+.\jalankan.bat indeed run --limit 5 --max-pages 1
+```
+
+Bila menempel gagal padahal port terbuka, bot sekarang **berhenti** dengan
+pesan jelas — bukan diam-diam memakai profil Chrome lain yang tidak punya
+cookie verifikasi (`CHROME_TEMPEL_OPSIONAL=true` mengembalikan perilaku lama).
 
 **Riwayat menampilkan posisi kosong.**
 Itu data lama dari versi sebelumnya yang menyimpan judul kosong. Jalankan

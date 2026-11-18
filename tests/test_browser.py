@@ -183,6 +183,50 @@ def test_buka_chrome_memakai_profil_cadangan(monkeypatch, tmp_path):
     assert (tmp_path / "chrome-profile-baru").exists()
 
 
+def test_menempel_gagal_menghentikan_sesi_bukan_pindah_profil(monkeypatch):
+    """CHROME_DEBUG_PORT diisi tetapi menempel gagal -> berhenti, bukan diam.
+
+    Live 18 Nov 2026: satu sesi Indeed hangus karena bot diam-diam memakai
+    profil `chrome-profile` (tanpa cookie verifikasi Cloudflare) padahal
+    pengguna sudah memverifikasi Chrome debug.
+    """
+    monkeypatch.setattr(config, "chrome_debug_port", 9222)
+    monkeypatch.setattr(config, "chrome_tempel_opsional", False)
+
+    def gagal(port):
+        raise RuntimeError("session not created: cannot connect to chrome")
+
+    monkeypatch.setattr(browser_module, "tempel_chrome", gagal)
+
+    with pytest.raises(RuntimeError) as info:
+        browser_module.buka_chrome(use_profile=True, headless=False)
+
+    pesan = str(info.value)
+    assert "chrome-debug.bat" in pesan
+    assert "CHROME_DEBUG_PORT=0" in pesan
+    assert "CHROME_TEMPEL_OPSIONAL=true" in pesan
+
+
+def test_menempel_gagal_boleh_lanjut_bila_diizinkan(monkeypatch, tmp_path):
+    """CHROME_TEMPEL_OPSIONAL=true -> perilaku lama (profil bot)."""
+    monkeypatch.setattr(config, "chrome_debug_port", 9222)
+    monkeypatch.setattr(config, "chrome_tempel_opsional", True)
+    def gagal(port):
+        raise RuntimeError("tidak bisa")
+
+    monkeypatch.setattr(browser_module, "tempel_chrome", gagal)
+    monkeypatch.setattr(browser_module, "_buka", lambda options: "driver-bot")
+    monkeypatch.setattr(
+        browser_module, "sembunyikan_otomasi", lambda driver: driver
+    )
+
+    hasil = browser_module.buka_chrome(
+        profile_dir=str(tmp_path / "profil"), use_profile=True, headless=False
+    )
+
+    assert hasil == "driver-bot"
+
+
 def test_tutup_chrome_tidak_menutup_chrome_saat_menempel(monkeypatch, capsys):
     dipanggil = {"quit": 0}
 

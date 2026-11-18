@@ -66,9 +66,15 @@ DOMAIN = "indeed.com"
 BASE = "https://id.indeed.com"
 LOGIN_URL = f"{BASE}/account/login"
 
-# Halaman pencarian: `sort=date` = urut tanggal terbaru (setara "Baru
-# Ditambahkan" di Glints dan "tanggal terbaru" di JobStreet).
-SEARCH_URL = BASE + "/jobs?q={keyword}&l={location}&sort=date"
+# Halaman pencarian. Bentuk POLOS dipakai lebih dulu: `&sort=date` tidak
+# pernah dipakai manusia yang membuka Indeed dari browser biasa, sehingga
+# parameter itu menambah kecurigaan Cloudflare (live 18 Nov 2026: halaman
+# dengan `sort=date` langsung memunculkan "Diperlukan Verifikasi Tambahan").
+# Urutan tanggal tetap berlaku: pemeringkatan dilakukan lokal (`RANK_BY`),
+# dan `sort=date` hanya dipakai sebagai bentuk cadangan bila bentuk polos
+# diblokir.
+SEARCH_URL = BASE + "/jobs?q={keyword}&l={location}"
+SORT_PARAM = "&sort=date"
 
 # Halaman "perantara" Cloudflare ("Tunggu sebentar...", "Security Check")
 # adalah pemeriksaan JavaScript yang biasanya selesai sendiri dalam beberapa
@@ -77,10 +83,21 @@ SEARCH_URL = BASE + "/jobs?q={keyword}&l={location}&sort=date"
 # (log 2026-11-14: "1/180 kombinasi, 0 lowongan, 2 detik berlalu" dua kali).
 BATAS_TUNGGU_HALAMAN = 15  # detik
 
+# Jeda TANPA satu pun perintah ke Chrome (CDP) saat halaman tantangan
+# Cloudflare tampil. Setiap perintah ke tab — `driver.title`, `find_elements`,
+# `execute_script` — membatalkan pemeriksaan JavaScript Cloudflare yang sedang
+# berjalan, sehingga tantangan tidak pernah selesai.
+# Bukti live 18 Nov 2026: verifikasi hanya berhasil setelah proses dihentikan
+# (Ctrl+C); selama bot memeriksa tiap 1-2 detik, halaman kembali ke
+# "Tunggu sebentar...".
+SENYAP_JEDA = 10  # detik
+
 # Pemanasan sesi: buka satu halaman pencarian lebih dulu dan beri kesempatan
 # verifikasi Cloudflare diselesaikan di jendela Chrome. Setelah lolos sekali,
 # cookie `cf_clearance` ikut pada navigasi berikutnya.
-PANAS_MAKS_DETIK = 90      # bila jendela Chrome terlihat pengguna
+PANAS_MAKS_DETIK = 180     # bila jendela Chrome terlihat pengguna
+# Bisa diatur lewat INDEED_TUNGGU_DETIK; halaman perantara Indeed kadang butuh
+# 30-60 detik untuk lolos sendiri bila tidak disentuh.
 PANAS_MAKS_DETIK_HEADLESS = 20  # headless: tidak ada yang bisa membantu
 
 # Penanda halaman hasil yang sah walaupun tidak ada kartu: kombinasi kata
@@ -120,6 +137,8 @@ TEKS_SITUS_LAIN = (
 # dari badan halaman maupun judul tab, karena halaman ini memakai judul
 # jenisnya sendiri ("Tunggu sebentar...", "Just a moment...").
 PENANDA_BLOKIR_CLOUDFLARE = (
+    "security check",      # judul halaman Cloudflare Indeed
+    "memeriksa peramban",  # "Memeriksa peramban Anda sebelum mengakses"
     "verifikasi tambahan",
     "additional verification",
     "melakukan verifikasi",
@@ -598,6 +617,31 @@ class IndeedBot:
 
         return jumlah
 
+    def _keadaan_sekarang(self) -> str:
+        """Satu pembacaan halaman: ``"siap"`` / ``"kosong"`` / ``"blokir"``.
+
+        Satu-satunya tempat yang membaca layar. Sengaja dipisah supaya jeda
+        saat tantangan Cloudflare benar-benar tidak mengirim perintah apa pun
+        ke Chrome.
+        """
+        if self._tautan_kartu():
+            return "siap"
+
+        # Judul selalu terbaca walau halaman tantangan; teks halaman hanya
+        # diambil bila judulnya bukan halaman perantara.
+        judul = self._judul_halaman().lower()
+        menantang = any(tanda in judul for tanda in PENANDA_BLOKIR_CLOUDFLARE)
+
+        if menantang:
+            return "blokir"
+
+        teks = self._teks_halaman()
+        if any(tanda in teks for tanda in PENANDA_KOSONG):
+            return "kosong"
+        if any(tanda in teks for tanda in PENANDA_BLOKIR_CLOUDFLARE):
+            return "blokir"
+        return "kosong"
+
     def _tunggu_halaman_siap(self, detik: int | None = None) -> str:
         """Tunggu halaman perantara Cloudflare selesai memeriksa.
 
@@ -608,6 +652,10 @@ class IndeedBot:
         Bedanya penting: halaman perantara yang lolos tidak boleh dianggap
         blokir (itu menghentikan seluruh riset), dan halaman kosong juga bukan
         blokir (riset cukup lanjut ke kombinasi berikutnya).
+
+        Saat tantangan tampil, tunggu **tanpa perintah CDP** selama
+        `SENYAP_JEDA` detik, baru periksa sekali. Memeriksa tiap detik justru
+        membatalkan pemeriksaan Cloudflare (bukti live 18 Nov 2026).
         """
         batas = time.time() + max(1, int(
             detik if detik is not None else BATAS_TUNGGU_HALAMAN
@@ -615,7 +663,9 @@ class IndeedBot:
         mulai = time.time()
 
         while True:
-            if self._tautan_kartu():
+            keadaan = self._keadaan_sekarang()
+
+            if keadaan == "siap":
                 if time.time() - mulai >= 2:
                     console.print(
                         "[dim]Halaman perantara Indeed lolos setelah "
@@ -623,19 +673,14 @@ class IndeedBot:
                     )
                 return "siap"
 
-            # Judul diperiksa tiap putaran (murah); teks halaman hanya setelah
-            # halaman tidak lagi menampilkan halaman perantara.
-            judul = self._judul_halaman().lower()
-            if not any(tanda in judul for tanda in PENANDA_BLOKIR_CLOUDFLARE):
-                teks = self._teks_halaman()
-                if any(tanda in teks for tanda in PENANDA_KOSONG):
-                    return "kosong"
+            if keadaan == "kosong":
+                return "kosong"
 
-            if time.time() >= batas:
-                break
-            time.sleep(1)
-
-        return "blokir" if self.diblokir_cloudflare() else "kosong"
+            sisa = batas - time.time()
+            if sisa <= 0:
+                return "blokir"
+            # Diam total: tidak ada `driver.*` selama jeda ini.
+            time.sleep(min(float(SENYAP_JEDA), sisa))
 
     def buka_pencarian(self, keyword: str, location: str = "") -> bool:
         """Buka halaman pencarian Indeed untuk satu kata kunci & lokasi."""
@@ -646,12 +691,13 @@ class IndeedBot:
         # JavaScript-nya sebelum menyimpulkan apa pun.
         keadaan = self._tunggu_halaman_siap()
 
-        if keadaan == "blokir" and "sort=date" in url:
-            # Bentuk cadangan: tanpa `sort=date`. Parameter itu tidak pernah
-            # dipakai manusia sehingga menambah kecurigaan.
-            cadangan = url.replace("&sort=date", "")
+        if keadaan == "blokir" and SORT_PARAM not in url:
+            # Bentuk polos diblokir; coba dengan urutan tanggal. (Sebelumnya
+            # terbalik: `sort=date` lebih dulu, padahal parameter itu tidak
+            # pernah dipakai manusia dan justru memicu verifikasi.)
+            cadangan = url + SORT_PARAM
             console.print(
-                "[dim]Bentuk URL pertama diblokir; mencoba tanpa "
+                "[dim]Bentuk URL polos diblokir; mencoba dengan "
                 f"sort=date: {cadangan}[/]"
             )
             self.driver.get(cadangan)
@@ -762,7 +808,13 @@ class IndeedBot:
             terlihat = not getattr(config, "headless", False) or bool(
                 int(getattr(config, "chrome_debug_port", 0) or 0)
             )
-            detik = PANAS_MAKS_DETIK if terlihat else PANAS_MAKS_DETIK_HEADLESS
+            if terlihat:
+                detik = int(
+                    getattr(config, "indeed_tunggu_detik", 0)
+                    or PANAS_MAKS_DETIK
+                )
+            else:
+                detik = PANAS_MAKS_DETIK_HEADLESS
 
         self.driver.get(url_pencarian(keyword, location))
         keadaan = self._tunggu_halaman_siap()
@@ -783,8 +835,11 @@ class IndeedBot:
 
         batas = time.time() + max(1, int(detik))
         while time.time() < batas:
-            time.sleep(2)
-            keadaan = self._tunggu_halaman_siap(2)
+            # Diam dulu: satu-satunya jalan agar Cloudflare menyelesaikan
+            # pemeriksaannya sendiri (pemeriksaan tiap 2 detik membuat
+            # tantangan berulang selamanya).
+            time.sleep(min(float(SENYAP_JEDA), max(1.0, batas - time.time())))
+            keadaan = self._keadaan_sekarang()
             if keadaan != "blokir":
                 console.print(
                     "[bold green]Verifikasi Indeed selesai — riset "
@@ -1286,6 +1341,11 @@ def tampilkan_konfigurasi(batas: int = 0) -> None:
     )
     tabel.add_row("Urutan kandidat", getattr(config, "rank_by", "relevance"))
     tabel.add_row("Jeda antar lamaran", f"{config.delay_between_apply} detik")
+    tabel.add_row(
+        "Tunggu verifikasi",
+        f"{int(getattr(config, 'indeed_tunggu_detik', 0) or 0)} detik "
+        "(diam, tanpa perintah ke Chrome)",
+    )
     tabel.add_row(
         "Chrome",
         f"menempel ke port {port}" if port else "dibuka oleh bot",

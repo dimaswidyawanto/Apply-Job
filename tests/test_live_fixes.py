@@ -760,3 +760,97 @@ def test_segar_dikenal_subperintah_run(perintah):
 
     assert hasil.returncode == 0, hasil.stderr
     assert "--segar" in hasil.stdout
+
+
+# --- BUG-9 / BUG-11 / BUG-12 (LIVE 18 Nov 2026) ---------------------------
+# BUG-9  : satu perintah Chrome yang macet >120 detik menaikkan
+#          urllib3.exceptions.ReadTimeoutError; dulu itu lolos dari penangkap
+#          `(ConnectionError, OSError, WebDriverException)` sehingga sesi mati
+#          dan 402 lowongan yang sudah terbaca ikut dibuang.
+# BUG-11 : bot memeriksa halaman tantangan Cloudflare tiap 1-2 detik; setiap
+#          perintah CDP membatalkan pemeriksaan Cloudflare, sehingga
+#          verifikasi hanya berhasil kalau proses dihentikan (Ctrl+C).
+# BUG-12 : menempel ke Chrome debug gagal -> bot diam-diam pindah profil.
+
+
+def test_readtimeout_urllib3_dianggap_koneksi_putus():
+    from urllib3.exceptions import HTTPError as GalatUrllib3
+    from urllib3.exceptions import ReadTimeoutError
+
+    assert issubclass(ReadTimeoutError, GalatUrllib3)
+    assert issubclass(ReadTimeoutError, glints.GALAT_KONEKSI_CHROME)
+    assert issubclass(NoSuchElementException, glints.GALAT_KONEKSI_CHROME)
+
+
+def test_riset_glints_bertahan_saat_readtimeout(monkeypatch, capsys):
+    """Kartu yang sudah terbaca tidak boleh hilang karena satu timeout."""
+    from urllib3.exceptions import ReadTimeoutError
+
+    import cache_riset
+
+    class Bot:
+        lokasi_didukung = False
+
+        def __init__(self):
+            self.putaran = 0
+
+        def cari(self, keyword, halaman, location):
+            self.putaran += 1
+            if self.putaran == 1:
+                return [
+                    {
+                        "job_id": "glints:aaa",
+                        "title": "Staff PPIC",
+                        "url": "https://glints.com/id/opportunities/jobs/x/aaa",
+                    }
+                ]
+            raise ReadTimeoutError(
+                None, "/session/abc/element", "Read timed out."
+            )
+
+    monkeypatch.setattr(cache_riset, "ambil", lambda *a, **k: None)
+    monkeypatch.setattr(cache_riset, "simpan", lambda *a, **k: None)
+
+    hasil = glints.kumpulkan_lowongan(
+        Bot(), ["inventory", "ppic"], 1, lokasi=["Bandung"]
+    )
+
+    assert [j["job_id"] for j in hasil] == ["glints:aaa"]
+    keluaran = " ".join(capsys.readouterr().out.split())
+    assert "Koneksi ke Chrome terputus" in keluaran
+
+
+def test_jendela_verifikasi_indeed_bisa_diatur(monkeypatch, capsys):
+    import indeed
+
+    bot = indeed.IndeedBot()
+    bot.driver = type("D", (), {"get": lambda self, url: None})()
+    monkeypatch.setattr(config, "indeed_tunggu_detik", 45)
+    monkeypatch.setattr(config, "headless", False)
+    monkeypatch.setattr(config, "chrome_debug_port", 0)
+    monkeypatch.setattr(bot, "_tunggu_halaman_siap", lambda detik=None: "blokir")
+    monkeypatch.setattr(bot, "_keadaan_sekarang", lambda: "blokir")
+
+    class Jam:
+        sekarang = 0.0
+
+        def time(self):
+            return self.sekarang
+
+        def sleep(self, detik):
+            self.sekarang += float(detik)
+
+    monkeypatch.setattr(indeed, "time", Jam())
+
+    bot.panaskan("inventory", "Bandung")
+
+    assert "maksimal 45 detik" in capsys.readouterr().out
+
+
+def test_banner_indeed_menampilkan_lama_tunggu(capsys):
+    import indeed
+
+    indeed.tampilkan_konfigurasi(5)
+    keluaran = _teks_banner(capsys.readouterr().out)
+
+    assert "Tunggu verifikasi" in keluaran

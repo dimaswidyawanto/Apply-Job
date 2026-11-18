@@ -141,8 +141,10 @@ def test_panaskan_menunggu_verifikasi_selesai(monkeypatch):
     bot.driver = DriverPalsu()
 
     urutan = iter(["blokir", "blokir", "siap"])
+    # Pemeriksaan tunggal per putaran (bukan `_tunggu_halaman_siap`): jendela
+    # verifikasi kini diam total antar pemeriksaan.
     monkeypatch.setattr(
-        bot, "_tunggu_halaman_siap", lambda detik=None: next(urutan, "siap")
+        bot, "_keadaan_sekarang", lambda: next(urutan, "siap")
     )
     monkeypatch.setattr(indeed.time, "sleep", lambda d: None)
 
@@ -168,9 +170,7 @@ def test_panaskan_menyerah_setelah_batas_waktu(monkeypatch):
     bot.driver = DriverPalsu()
 
     monkeypatch.setattr(indeed, "time", JamPalsu())
-    monkeypatch.setattr(
-        bot, "_tunggu_halaman_siap", lambda detik=None: "blokir"
-    )
+    monkeypatch.setattr(bot, "_keadaan_sekarang", lambda: "blokir")
 
     assert bot.panaskan("inventory", "Bandung", detik=4) == "blokir"
     assert bot.keadaan_terakhir == "blokir"
@@ -205,9 +205,7 @@ def test_headless_menunggu_lebih_singkat(monkeypatch, capsys):
     monkeypatch.setattr(config, "headless", True)
     monkeypatch.setattr(config, "chrome_debug_port", 0)
     monkeypatch.setattr(indeed, "time", JamPalsu())
-    monkeypatch.setattr(
-        bot, "_tunggu_halaman_siap", lambda detik=None: "blokir"
-    )
+    monkeypatch.setattr(bot, "_keadaan_sekarang", lambda: "blokir")
 
     bot.panaskan("inventory", "Bandung")
 

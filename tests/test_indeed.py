@@ -65,11 +65,17 @@ KARTU_MENTAH = {
 
 
 # ----------------------------------------------------------- pencarian ----
-def test_url_pencarian_urut_terbaru_dan_memuat_lokasi():
+def test_url_pencarian_polos_tanpa_sort_date():
+    """Bentuk polos dulu: `&sort=date` tidak pernah dipakai manusia.
+
+    Live 18 Nov 2026: URL dengan `sort=date` langsung memunculkan
+    "Diperlukan Verifikasi Tambahan". Urutan tanggal tetap dijaga
+    pemeringkatan lokal (`RANK_BY`); `sort=date` hanya bentuk cadangan.
+    """
     url = url_pencarian("inventory staff", "Bandung")
 
     assert url.startswith("https://id.indeed.com/jobs?q=")
-    assert "sort=date" in url
+    assert "sort=date" not in url
     assert "inventory+staff" in url
     assert "Bandung" in url
 
@@ -77,7 +83,7 @@ def test_url_pencarian_urut_terbaru_dan_memuat_lokasi():
 def test_url_pencarian_tanpa_lokasi():
     url = url_pencarian("ppic", "")
     assert "ppic" in url
-    assert "l=&" in url or url.endswith("l=&sort=date")
+    assert url.endswith("l=")
 
 
 def test_rapikan_kartu_membentuk_id_dan_url():

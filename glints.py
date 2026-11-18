@@ -58,6 +58,24 @@ console = Console()
 # (terlihat live: ConnectionResetError WinError 10054 pada kombinasi ke-27).
 JEDA_PENCARIAN = 1.0
 
+# Galat koneksi Chrome yang harus dianggap "sesi putus", bukan kegagalan
+# program. Selenium mengirim perintah lewat urllib3, sehingga satu perintah
+# yang macet > 120 detik menaikkan `urllib3.exceptions.ReadTimeoutError`
+# (turunan HTTPError) — BUKAN WebDriverException dan BUKAN ConnectionError.
+# Bukti live 18 Nov 2026: sesi mati di kombinasi 19/180 dengan
+# "HTTPConnectionPool(host='localhost', port=62879): Read timed out" dan 402
+# lowongan yang sudah terbaca ikut dibuang.
+try:  # pragma: no cover - urllib3 selalu ada lewat selenium
+    from urllib3.exceptions import HTTPError as _GalatUrllib3
+except Exception:  # noqa: BLE001 - urllib3 milik selenium; tidak fatal
+    _GalatUrllib3 = None
+
+GALAT_KONEKSI_CHROME = (
+    ConnectionError,
+    OSError,
+    WebDriverException,
+) + ((_GalatUrllib3,) if _GalatUrllib3 else ())
+
 PESAN_CHROME_PUTUS = (
     "Koneksi ke Chrome terputus saat membaca Glints. Riset dihentikan, "
     "lowongan yang sudah terbaca tetap dipakai. Jalankan lagi setelah Chrome "
@@ -1733,7 +1751,7 @@ def kumpulkan_lowongan(bot, kata_kunci, halaman: int,
                     kartu = list(
                         bot.cari(keyword, max(0, halaman - 1), location)
                     )
-                except (ConnectionError, OSError, WebDriverException) as exc:
+                except GALAT_KONEKSI_CHROME as exc:
                     # Chrome bisa memutus sesi DevTools di tengah riset
                     # (WinError 10054). Dulu ini menghasilkan traceback mentah
                     # dan seluruh sesi dianggap gagal; sekarang berhenti rapi

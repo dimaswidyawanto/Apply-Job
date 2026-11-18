@@ -378,6 +378,24 @@ def buka_chrome(
                 "sudah terbuka), atau set CHROME_DEBUG_PORT=0 untuk memakai "
                 "Chrome biasa.[/]"
             )
+            # Jangan diam-diam pindah profil: cookie verifikasi Cloudflare
+            # (`cf_clearance`) hanya ada di profil Chrome milik pengguna,
+            # sehingga sesi dari profil bot hampir pasti kena verifikasi lagi
+            # dan waktu/kuota terbuang (live 18 Nov 2026).
+            if not getattr(config, "chrome_tempel_opsional", False):
+                raise RuntimeError(
+                    f"Chrome debug port {port} tidak bisa ditempel. Sesi "
+                    "dihentikan supaya tidak memakai profil Chrome lain "
+                    "(cookie verifikasi Cloudflare tidak ikut ke sana). "
+                    "Buka chrome-debug.bat lebih dulu, atau set "
+                    "CHROME_DEBUG_PORT=0. Untuk perilaku lama, set "
+                    "CHROME_TEMPEL_OPSIONAL=true."
+                ) from exc
+            console.print(
+                "[yellow]CHROME_TEMPEL_OPSIONAL=true: memakai profil Chrome "
+                "bot; bila situs memakai Cloudflare, verifikasi akan muncul "
+                "lagi.[/]"
+            )
 
     for nomor, (nama, path_profil, headless_ke, bersihkan) in enumerate(
         percobaan, start=1
