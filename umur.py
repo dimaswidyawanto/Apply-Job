@@ -62,6 +62,12 @@ BULAN = {
 _NAMA_BULAN = "|".join(sorted(BULAN, key=len, reverse=True))
 
 # Urutan penting: pola paling spesifik lebih dulu.
+# Penanda masa lalu yang WAJIB menyertai pola berangka. Tanpa ini, syarat
+# lowongan seperti "3 tahun pengalaman" atau "minimal 2 tahun" terbaca sebagai
+# umur 1095/730 hari (bug live Glints 18 Nov 2026: 824 lowongan dianggap
+# "terlalu lama 1095 hari", karena 3 tahun = 3 x 365).
+_LALU = r"(?:\s+yang)?\s+(?:lalu|ago)\b"
+
 _POLA_RELATIF = (
     (
         (
@@ -71,22 +77,27 @@ _POLA_RELATIF = (
         0,
     ),
     (r"kemarin|yesterday", 1),
-    # Bentuk SINGKAT versi Inggris: JobStreet mengirim "9m ago", "3h ago",
-    # "2d ago" (bukti cek-tanggal 17 Nov 2026), bukan "9 minutes ago".
-    # Ditempatkan sebelum pola panjang, dan "mo" (month) sebelum "m" (minute)
-    # supaya "1mo ago" tidak terbaca 1 menit.
-    (r"(\d+)\s*\+?\s*mo(?:nth)?s?\s+ago", 30),
-    (r"(\d+)\s*\+?\s*y(?:ear)?s?\s+ago", 365),
-    (r"(\d+)\s*\+?\s*w(?:eek)?s?\s+ago", 7),
-    (r"(\d+)\s*\+?\s*d(?:ay)?s?\s+ago", 1),
-    (r"(\d+)\s*\+?\s*h(?:r|our)?s?\s+ago", 0),
-    (r"(\d+)\s*\+?\s*m(?:in)?s?\s+ago", 0),
-    (r"(\d+)\s*menit|(\d+)\s*minute", 0),
-    (r"(\d+)\s*jam\b|(\d+)\s*hour", 0),
-    (r"(\d+)\s*\+?\s*hari|(\d+)\s*\+?\s*day", 1),
-    (r"(\d+)\s*minggu|(\d+)\s*week", 7),
-    (r"(\d+)\s*bulan|(\d+)\s*month", 30),
-    (r"(\d+)\s*tahun|(\d+)\s*year", 365),
+    # Bentuk singkat Inggris ("9m ago", "3h ago", "2d ago") — "mo" (month)
+    # diperiksa sebelum "m" (minute) supaya "1mo ago" bukan 1 menit.
+    (rf"(\d+)\s*\+?\s*mo(?:nth)?s?{_LALU}", 30),
+    (rf"(\d+)\s*\+?\s*y(?:ear)?s?{_LALU}", 365),
+    (rf"(\d+)\s*\+?\s*w(?:eek)?s?{_LALU}", 7),
+    (rf"(\d+)\s*\+?\s*d(?:ay)?s?{_LALU}", 1),
+    (rf"(\d+)\s*\+?\s*h(?:r|our)?s?{_LALU}", 0),
+    (rf"(\d+)\s*\+?\s*m(?:in)?s?{_LALU}", 0),
+    # Bentuk panjang Indonesia / Inggris.
+    (rf"(\d+)\s*\+?\s*menit{_LALU}", 0),
+    (rf"(\d+)\s*\+?\s*minute?s?{_LALU}", 0),
+    (rf"(\d+)\s*\+?\s*jam{_LALU}", 0),
+    (rf"(\d+)\s*\+?\s*hours?{_LALU}", 0),
+    (rf"(\d+)\s*\+?\s*hari{_LALU}", 1),
+    (rf"(\d+)\s*\+?\s*days?{_LALU}", 1),
+    (rf"(\d+)\s*\+?\s*minggu{_LALU}", 7),
+    (rf"(\d+)\s*\+?\s*weeks?{_LALU}", 7),
+    (rf"(\d+)\s*\+?\s*bulan{_LALU}", 30),
+    (rf"(\d+)\s*\+?\s*months?{_LALU}", 30),
+    (rf"(\d+)\s*\+?\s*tahun{_LALU}", 365),
+    (rf"(\d+)\s*\+?\s*years?{_LALU}", 365),
 )
 
 _POLA_ISO = re.compile(r"\b(\d{4})-(\d{1,2})-(\d{1,2})\b")

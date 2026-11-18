@@ -595,3 +595,84 @@ def test_glints_dan_indeed_menyimpan_tanggal_iso():
         assert indeed.tanggal_simpan(umur_hari) == harap
 
     assert glints.tanggal_simpan(None) == ""
+
+
+# --- BUG-7 (LIVE Glints 18 Nov 2026) -------------------------------------
+# Glints kadang tidak menampilkan tanggal posting, dan teks kartunya memuat
+# syarat lowongan ("Minimal 3 tahun pengalaman"). Pola relatif lama menerima
+# angka tanpa penanda masa lalu, sehingga 3 tahun terbaca 1095 hari dan
+# 719 lowongan ditolak "Lowongan terlalu lama". Aturan baru: pola berangka
+# WAJIB diikuti "lalu" / "ago".
+
+
+@pytest.mark.parametrize(
+    "teks",
+    [
+        "Minimal 3 tahun pengalaman",
+        "3 tahun",
+        "5 tahun",
+        "10 tahun",
+        "2 tahun pengalaman di gudang",
+        "minimal 3 tahun",
+    ],
+)
+def test_syarat_pengalaman_tidak_terbaca_sebagai_umur(teks):
+    assert umur.umur_dari_teks(teks) is None
+
+
+@pytest.mark.parametrize(
+    "teks,harap",
+    [
+        ("3 tahun lalu", 1095),
+        ("2 hari lalu", 2),
+        ("2 hari yang lalu", 2),
+        ("2 hari pengalaman, 3 hari lalu", 3),
+        ("30+ hari lalu", 30),
+        ("5 hari", None),
+    ],
+)
+def test_umur_hanya_dari_penanda_masa_lalu(teks, harap):
+    assert umur.umur_dari_teks(teks) == harap
+
+
+def test_kartu_glints_dengan_syarat_tahun_tidak_dianggap_tua():
+    job = glints.rapikan_kartu(
+        {
+            "url": "https://glints.com/id/opportunities/jobs/b5f8d754-afd9-4f0c-a618-360afe12248c",
+            "title": "Staff PPIC",
+            "company": "PT Contoh",
+            "location": "Bekasi",
+            "text": "PT Contoh · Bekasi · Minimal 3 tahun pengalaman",
+        }
+    )
+
+    assert job["age_days"] is None
+    assert job["date_posted"] == ""
+    assert umur.batas_umur(job["age_days"], 7) == ""
+
+
+def test_kartu_glints_dengan_tahun_dan_tanggal_posting():
+    job = glints.rapikan_kartu(
+        {
+            "url": "https://glints.com/id/opportunities/jobs/b5f8d754-afd9-4f0c-a618-360afe12248c",
+            "title": "Staff PPIC",
+            "company": "PT Contoh",
+            "text": "PT Contoh · 5 tahun pengalaman · 2 hari lalu",
+        }
+    )
+
+    assert job["age_days"] == 2
+    assert job["date_posted"] == umur.tanggal_iso_dari_umur(2)
+
+
+def test_kartu_glints_umur_tak_diketahui_tidak_dibuang_aturan_umur():
+    job = glints.rapikan_kartu(
+        {
+            "url": "https://glints.com/id/opportunities/jobs/b5f8d754-afd9-4f0c-a618-360afe12248c",
+            "title": "Staff PPIC",
+            "company": "PT Contoh",
+            "text": "PT Contoh · 10 tahun pengalaman",
+        }
+    )
+
+    assert "terlalu lama" not in glints.alasan_tidak_layak(job).lower()

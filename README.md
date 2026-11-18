@@ -682,6 +682,7 @@ JobStreet, Glints, dan Indeed:
 | "30+ hari yang lalu" | 30 hari |
 | "2026-11-15", "15 Nov 2026", "Nov 15, 2026", "15/11/2026" | dihitung dari hari ini |
 | tidak ada tanggal | `DATE_UNKNOWN` (bukan 0) |
+| "Minimal 3 tahun pengalaman", "3 tahun" | **bukan** tanggal → `DATE_UNKNOWN` |
 
 Aturan yang berlaku:
 
@@ -709,6 +710,15 @@ Indonesia. Keduanya dikenali oleh parser yang sama (`umur.py`).
 
 Bila ketiganya tidak ada, lowongan dicatat **`DATE_UNKNOWN`** (bukan 0 hari),
 supaya lowongan lama tidak tampak baru.
+
+Pola berangka hanya dianggap tanggal bila diikuti penanda masa lalu
+(`lalu` / `ago`). Tanpa syarat itu, **syarat lowongan** ikut terbaca sebagai
+umur: `Minimal 3 tahun pengalaman` = 3 x 365 = **1095 hari**, lalu lowongan
+baru ditolak `MAX_AGE_DAYS`. Inilah yang membuat 719 lowongan Glints dilewati
+pada validasi live 18 Nov 2026 (`1095`, `1825`, `3650` hari = 3, 5, 10 tahun).
+Lowongan yang tanggalnya benar-benar tak ada kini `DATE_UNKNOWN` dan **tetap
+dicoba** (kecuali `TOLAK_UMUR_TAK_DIKETAHUI=true`) — tidak lagi dibuang karena
+angka syarat pengalaman.
 
 Yang **disimpan** ke database selalu tanggal absolut (`2026-11-15`), bukan label
 relatif. Alasannya: `"9m ago"` yang tersimpan hari ini akan tetap terbaca 0 hari

@@ -1323,3 +1323,48 @@ Suite: **1030 passed, 1 skipped**; ruff & compileall bersih.
 
 **Status:** perbaikan belum LIVE VERIFIED sampai `cek-tanggal` di mesin
 pengguna menampilkan kolom `Umur` berisi angka.
+
+## 34. BUG-7: `Minimal 3 tahun pengalaman` terbaca "umur 1095 hari"
+
+Bukti live sesi `run` (18 Nov 2026, Glints):
+
+```
+Glints: 10734 terbaca -> 824 unik -> 719 dilewati
+Dilewati: Lowongan terlalu lama (1095 hari > MAX_AGE_DAYS=7)
+          Lowongan terlalu lama (1825 hari > MAX_AGE_DAYS=7)
+          Lowongan terlalu lama (3650 hari > MAX_AGE_DAYS=7)
+Kandidat tersisa: 10 (skor 13-31, banyak di luar lokasi target)
+```
+
+Akar masalah: `glints.rapikan_kartu` mengisi `umur = umur_dari_teks(teks)`
+dengan **seluruh teks kartu**, dan `_POLA_RELATIF` menerima angka tanpa penanda
+masa lalu. Kartu Glints memuat syarat lowongan ("Minimal 3 tahun pengalaman",
+"5 tahun", "10 tahun"), sehingga:
+
+| teks kartu | umur terbaca | seharusnya |
+|---|---|---|
+| `Minimal 3 tahun pengalaman` | 1095 hari | tidak diketahui |
+| `5 tahun` | 1825 hari | tidak diketahui |
+| `10 tahun` | 3650 hari | tidak diketahui |
+| `2 hari lalu` | 2 hari | 2 hari |
+
+1095 = 3 x 365, 1825 = 5 x 365, 3650 = 10 x 365 — persis ketiga angka di log.
+
+Perbaikan (satu tempat, berlaku untuk JobStreet/Glints/Indeed):
+
+| File | Perubahan |
+|---|---|
+| `umur.py` | `_LALU = r"(?:\s+yang)?\s+(?:lalu\|ago)\b"`; **semua** pola berangka (`menit/jam/hari/minggu/bulan/tahun`, `m/h/d/w/mo/y`, `minute/hour/day/week/month/year`) wajib diikuti `_LALU`. Kata kunci tetap: `baru saja`, `hari ini`, `just now`, `today`, `kemarin`, `yesterday` |
+| `tests/test_live_fixes.py` | +15 tes: 6 bentuk syarat pengalaman -> `None`; 6 label ber-penanda masa lalu; kartu Glints bersyarat tahun -> `age_days=None`, `date_posted=""`, tidak kena aturan umur; kartu dengan tanggal + syarat tahun -> umur diambil dari tanggal |
+
+Konsekuensi yang disengaja: lowongan tanpa tanggal (termasuk kartu Glints yang
+memang tidak menampilkan tanggal) menjadi `DATE_UNKNOWN` dan **tetap dicoba**
+(desain `umur.py`); kalau ingin menolaknya, set
+`TOLAK_UMUR_TAK_DIKETAHUI=true`. Yang penting: syarat pengalaman tidak lagi
+berpura-pura menjadi tanggal.
+
+Suite: **1045 passed, 1 skipped**.
+
+**Status:** unit/fixture VERIFIED; menunggu sesi `run` Glints di mesin pengguna
+untuk LIVE VERIFIED (jumlah "Lowongan terlalu lama (1095/1825/3650 hari)"
+harus hilang dari log).
