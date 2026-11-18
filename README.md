@@ -1849,11 +1849,22 @@ python cli.py glints uji                     # uji lamar: lowongan dipilih sendi
 python cli.py glints run                     # semua kata kunci di .env
 python cli.py glints run --keywords "warehouse,PPIC" --max-pages 1
 python cli.py glints run --limit 10         # batasi 10 lamaran sesi ini
+python cli.py glints run --limit 10 --segar  # abaikan cache riset (ambil ulang dari situs)
 python cli.py glints uji --url "https://glints.com/id/opportunities/jobs/staff-gudang/11111111-2222-3333-4444-555555555555"
 ```
 
 Lewat skrip bantu: `jalankan.bat glints run` (Windows) atau
 `./jalankan.sh glints run`.
+
+`--limit` dan `AUTO_APPLY_MAX_PER_SESSION` sama-sama batas per sesi; yang
+**paling ketat** dipakai dan banner menampilkan sumbernya
+(`Batas per sesi: 10 lamaran (--limit)`). Sebelumnya banner selalu menulis
+"tanpa batas" walau `--limit` diberikan.
+
+`--segar` juga berlaku di `glints run` dan `indeed run`. Ini penting setelah
+perbaikan aturan tanggal/umur: cache riset menyimpan lowongan yang sudah
+dinormalisasi, termasuk `age_days` hasil kode lama, sehingga sesi berikutnya
+bisa memakai umur yang salah sampai TTL habis.
 
 Yang dipakai bersama dengan versi JobStreet: `LOCATIONS`, `KEYWORDS`,
 `TITLE_KEYWORDS`, `EXCLUDE_KEYWORDS`, blacklist, `MIN_SALARY`, `COVER_LETTER`,

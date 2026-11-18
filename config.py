@@ -62,6 +62,31 @@ _MAX_PAGES = max(1, _int_setting("MAX_PAGES", 3))
 MAKS_HALAMAN_RISET = 3
 
 
+def batas_sesi_efektif(batas_cli: int = 0, cfg=None) -> int:
+    """Batas lamaran satu sesi: yang paling ketat dari `--limit` dan env."""
+    angka = max(0, int(batas_cli or 0))
+    batas_env = max(
+        0, int(getattr(cfg or config, "auto_apply_max_per_session", 0) or 0)
+    )
+    kandidat = [n for n in (angka, batas_env) if n > 0]
+    return min(kandidat) if kandidat else 0
+
+
+def teks_batas_sesi(batas_cli: int = 0, cfg=None) -> str:
+    """Teks baris "Batas per sesi" untuk banner Glints/Indeed.
+
+    Dulu `--limit 20` tidak muncul sama sekali ("tanpa batas") walaupun batas
+    itu benar-benar dipakai saat melamar, sehingga pengguna wajar mengira
+    opsinya diabaikan.
+    """
+    angka = batas_sesi_efektif(batas_cli, cfg)
+    if not angka:
+        return "tanpa batas"
+    if batas_cli and angka == int(batas_cli):
+        return f"{angka} lamaran (--limit)"
+    return f"{angka} lamaran (AUTO_APPLY_MAX_PER_SESSION)"
+
+
 def batas_halaman_riset(nilai) -> int:
     """Halaman riset per kombinasi kata kunci × lokasi: 1 sampai 3."""
     try:

@@ -35,7 +35,12 @@ import kuota
 import log_aktivitas
 from auto_apply import ApplyResult, AutoApplier
 from browser import buka_chrome, tutup_chrome
-from config import MAKS_HALAMAN_RISET, batas_halaman_riset, config
+from config import (
+    MAKS_HALAMAN_RISET,
+    batas_halaman_riset,
+    config,
+    teks_batas_sesi,
+)
 from database import db
 from glints import (
     folder_debug,
@@ -1253,11 +1258,10 @@ def kumpulkan_lowongan(bot: IndeedBot, kata_kunci: list[str],
     return lowongan
 
 
-def tampilkan_konfigurasi() -> None:
+def tampilkan_konfigurasi(batas: int = 0) -> None:
     """Ringkasan pengaturan sesi, isinya sama dengan JobStreet/Glints."""
     mode = "otomatis" if config.auto_apply else "manual (tinjau sendiri)"
     batas_harian = kuota.batas()
-    batas_sesi = int(getattr(config, "auto_apply_max_per_session", 0) or 0)
     port = int(getattr(config, "chrome_debug_port", 0) or 0)
 
     tabel = Table(title="Pengaturan sesi Indeed", show_header=False)
@@ -1270,9 +1274,7 @@ def tampilkan_konfigurasi() -> None:
         if batas_harian
         else "tanpa batas",
     )
-    tabel.add_row(
-        "Batas per sesi", f"{batas_sesi} lamaran" if batas_sesi else "tanpa batas"
-    )
+    tabel.add_row("Batas per sesi", teks_batas_sesi(batas))
     tabel.add_row(
         "Lokasi disaring",
         f"{len(config.locations)} — {', '.join(config.locations[:3])}"
@@ -1305,7 +1307,7 @@ def jalankan_indeed(max_pages: int = 0, keywords: list[str] | None = None,
         "khusus_aplikasi": 0, "perlu_manusia": 0,
     }
 
-    tampilkan_konfigurasi()
+    tampilkan_konfigurasi(batas)
 
     if not config.auto_apply:
         console.print(

@@ -20,6 +20,7 @@ import pytest
 from selenium.common.exceptions import NoSuchElementException
 
 import cli
+import config as modul_config
 import glints
 import job_filter as jf_modul
 import umur
@@ -676,3 +677,86 @@ def test_kartu_glints_umur_tak_diketahui_tidak_dibuang_aturan_umur():
     )
 
     assert "terlalu lama" not in glints.alasan_tidak_layak(job).lower()
+
+
+# --- BUG-8 (LIVE 18 Nov 2026) --------------------------------------------
+# `glints run --limit 20` mencetak "Batas per sesi: tanpa batas": banner hanya
+# membaca AUTO_APPLY_MAX_PER_SESSION dan mengabaikan `--limit`, padahal batas
+# itu benar-benar dipakai saat melamar. Ditambah: cache riset menyimpan
+# `age_days` hasil kode lama, jadi sesi berikutnya bisa memakai umur salah
+# sampai TTL habis — `--segar` kini tersedia di `glints run` / `indeed run`.
+
+
+def test_teks_batas_sesi_menampilkan_limit_cli():
+    assert modul_config.teks_batas_sesi(20) == "20 lamaran (--limit)"
+    assert modul_config.teks_batas_sesi(0) == "tanpa batas"
+
+
+def test_teks_batas_sesi_memakai_yang_paling_ketat(monkeypatch):
+    monkeypatch.setattr(config, "auto_apply_max_per_session", 5)
+
+    assert (
+        modul_config.teks_batas_sesi(20)
+        == "5 lamaran (AUTO_APPLY_MAX_PER_SESSION)"
+    )
+    assert (
+        modul_config.teks_batas_sesi(0)
+        == "5 lamaran (AUTO_APPLY_MAX_PER_SESSION)"
+    )
+    assert modul_config.teks_batas_sesi(3) == "3 lamaran (--limit)"
+
+
+def test_banner_glints_menampilkan_limit_sesi(capsys):
+    glints.tampilkan_konfigurasi_glints(20)
+    keluaran = _teks_banner(capsys.readouterr().out)
+
+    assert "Batas per sesi 20 lamaran (--limit)" in keluaran
+
+
+def test_banner_indeed_menampilkan_limit_sesi(capsys):
+    import indeed
+
+    indeed.tampilkan_konfigurasi(7)
+    keluaran = _teks_banner(capsys.readouterr().out)
+
+    assert "Batas per sesi 7 lamaran (--limit)" in keluaran
+
+
+def test_segar_mematikan_cache_riset():
+    import cache_riset
+
+    cache_riset.reset_statistik()
+    args = type("Args", (), {"segar": True})()
+
+    cli._segar_bila_diminta(args)
+
+    assert cache_riset.ttl_detik() == 0
+
+
+def test_tanpa_segar_cache_tetap_aktif(monkeypatch):
+    import cache_riset
+
+    args = type("Args", (), {"segar": False})()
+    dipanggil = []
+    monkeypatch.setattr(cache_riset, "paksa_segar", lambda *a: dipanggil.append(1))
+
+    cli._segar_bila_diminta(args)
+
+    assert dipanggil == []
+
+
+@pytest.mark.parametrize("perintah", [["glints", "run"], ["indeed", "run"]])
+def test_segar_dikenal_subperintah_run(perintah):
+    import subprocess
+    import sys
+
+    hasil = subprocess.run(
+        [sys.executable, "cli.py", *perintah, "-h"],
+        capture_output=True,
+        check=False,
+        text=True,
+        timeout=120,
+    )
+
+    assert hasil.returncode == 0, hasil.stderr
+    assert "--segar" in hasil.stdout

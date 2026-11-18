@@ -243,7 +243,7 @@ def _siapkan_sesi(monkeypatch, hari_ini=0, batas_harian=50):
     monkeypatch.setattr(indeed_module, "db", db)
     monkeypatch.setattr(indeed_module, "notifier", notifier)
     monkeypatch.setattr(indeed_module, "IndeedBot", lambda: bot)
-    monkeypatch.setattr(indeed_module, "tampilkan_konfigurasi", lambda: None)
+    monkeypatch.setattr(indeed_module, "tampilkan_konfigurasi", lambda *a, **k: None)
     monkeypatch.setattr(
         indeed_module, "tampilkan_perbandingan",
         lambda kandidat, maksimal=10, situs="Indeed": None,

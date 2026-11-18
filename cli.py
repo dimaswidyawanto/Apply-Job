@@ -620,6 +620,21 @@ def _penilaian_tersimpan(situs: str = ""):
     return penilaian
 
 
+def _segar_bila_diminta(args) -> None:
+    """`--segar`: matikan cache riset untuk sesi ini (ambil ulang dari situs).
+
+    Penting setelah perbaikan parser tanggal/umur: cache menyimpan lowongan
+    yang sudah dinormalisasi — termasuk `age_days` hasil kode LAMA — sehingga
+    sesi berikutnya bisa memakai umur yang salah sampai TTL habis.
+    """
+    if getattr(args, "segar", False):
+        cache_riset.paksa_segar()
+        console.print(
+            "[cyan]Cache riset dimatikan untuk sesi ini (--segar):[/] "
+            "lowongan diambil ulang dari situs."
+        )
+
+
 def dry_run(situs: str = "", batas: int = 5):
     """Jejak keputusan lowongan tersimpan TANPA mengirim lamaran.
 
@@ -2202,6 +2217,11 @@ if __name__ == "__main__":
     glints_run.add_argument(
         "--limit", type=int, default=0, help="Batas lamaran sesi ini (0=tanpa batas)"
     )
+    glints_run.add_argument(
+        "--segar",
+        action="store_true",
+        help="Abaikan cache riset dan ambil ulang lowongan dari situs",
+    )
 
     glints_uji = glints_sub.add_parser(
         "uji",
@@ -2426,6 +2446,11 @@ if __name__ == "__main__":
     indeed_run.add_argument(
         "--limit", type=int, default=0, help="Batas lamaran sesi ini (0=tanpa batas)"
     )
+    indeed_run.add_argument(
+        "--segar",
+        action="store_true",
+        help="Abaikan cache riset dan ambil ulang lowongan dari situs",
+    )
 
     indeed_cari = indeed_sub.add_parser(
         "cari", help="Tampilkan lowongan Indeed yang layak + URL-nya"
@@ -2528,12 +2553,7 @@ if __name__ == "__main__":
         if args.no_login_wait:
             config.login_wait = False
 
-        if getattr(args, "segar", False):
-            cache_riset.paksa_segar()
-            console.print(
-                "[cyan]Cache riset dimatikan untuk sesi ini (--segar):[/] "
-                "lowongan diambil ulang dari situs."
-            )
+        _segar_bila_diminta(args)
 
         # Pemisahan situs: `run` tanpa --situs tetap JobStreet saja, persis
         # seperti sebelumnya. Situs lain dijalankan lewat jalur yang sama
@@ -2569,6 +2589,7 @@ if __name__ == "__main__":
         cek_tanggal(args.limit, args.max_pages, args.keywords)
     elif args.command == "glints":
         if args.glints_command == "run":
+            _segar_bila_diminta(args)
             jalankan_glints(args.max_pages, args.keywords, args.limit)
         elif args.glints_command == "uji":
             if args.url.strip():
@@ -2611,6 +2632,7 @@ if __name__ == "__main__":
         )
     elif args.command == "indeed":
         if args.indeed_command == "run":
+            _segar_bila_diminta(args)
             jalankan_indeed(args.max_pages, args.keywords, args.limit)
         elif args.indeed_command == "cari":
             cari_indeed(

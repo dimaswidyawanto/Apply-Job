@@ -1368,3 +1368,45 @@ Suite: **1045 passed, 1 skipped**.
 **Status:** unit/fixture VERIFIED; menunggu sesi `run` Glints di mesin pengguna
 untuk LIVE VERIFIED (jumlah "Lowongan terlalu lama (1095/1825/3650 hari)"
 harus hilang dari log).
+
+## 35. BUG-8: `--limit 20` diabaikan banner + cache riset menyimpan umur kode lama
+
+Bukti live (18 Nov 2026, `jalankan.bat glints run --limit 20 --max-pages 1`):
+
+```
+Versi kode: 5579b7f            <-- kode LAMA, belum memuat perbaikan BUG-7
+│ Batas per sesi │ tanpa batas │   <-- padahal --limit 20 diberikan
+```
+
+Dua hal terpisah:
+
+1. **Banner bohong (tampilan).** `tampilkan_konfigurasi_glints()` dan
+   `indeed.tampilkan_konfigurasi()` hanya membaca
+   `AUTO_APPLY_MAX_PER_SESSION`; `--limit` (argumen `batas`) tidak pernah
+   dibaca. Padahal batas itu benar-benar dipakai saat melamar
+   (`batas_sesi` di `jalankan_glints`/`jalankan_indeed`). Pengguna wajar
+   mengira opsinya diabaikan.
+2. **Cache riset menyimpan hasil normalisasi.** `cache_riset.simpan()` diberi
+   `kartu` yang sudah berisi `date_posted`/`age_days`. Setelah parser umur
+   diperbaiki (BUG-7), sesi berikutnya masih memakai entri cache ber-umur
+   `1095 hari` sampai `CACHE_RISET_MENIT` (60 menit) habis — sehingga
+   perbaikan tampak "tidak bekerja" bila sesi diulang cepat.
+
+Perbaikan:
+
+| File | Perubahan |
+|---|---|
+| `config.py` | `batas_sesi_efektif()` (paling ketat dari `--limit` dan env) + `teks_batas_sesi()` — satu sumber teks untuk kedua banner |
+| `glints.py` / `indeed.py` | `tampilkan_konfigurasi_glints(batas)` / `tampilkan_konfigurasi(batas)` memakai `teks_batas_sesi(batas)` |
+| `cli.py` | `_segar_bila_diminta(args)` dipakai `run`, `glints run`, `indeed run`; `--segar` ditambahkan ke `glints run` & `indeed run` |
+
+Tes: `tests/test_live_fixes.py` +8 (teks batas sesi untuk 3 kombinasi,
+banner Glints/Indeed menampilkan `--limit`, `_segar_bila_diminta` mematikan
+cache, `--segar` ada di `-h` kedua subperintah). Dua monkeypatch lama di
+`tests/test_indeed.py` dan `tests/test_glints_paritas.py` disesuaikan karena
+fungsi banner kini menerima argumen.
+
+Suite: **1053 passed, 1 skipped**.
+
+**Status:** unit/fixture VERIFIED; banner LIVE VERIFIED setelah sesi
+berikutnya mencetak `Batas per sesi: N lamaran (--limit)`.

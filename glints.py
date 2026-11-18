@@ -34,7 +34,12 @@ import skor_cv
 import umur
 from auto_apply import ApplyResult, AutoApplier
 from browser import buka_chrome, tutup_chrome
-from config import MAKS_HALAMAN_RISET, batas_halaman_riset, config
+from config import (
+    MAKS_HALAMAN_RISET,
+    batas_halaman_riset,
+    config,
+    teks_batas_sesi,
+)
 from database import db
 from job_filter import (
     JobFilter,
@@ -1317,7 +1322,7 @@ def _batas_harian_tercapai() -> bool:
     return True
 
 
-def tampilkan_konfigurasi_glints() -> None:
+def tampilkan_konfigurasi_glints(batas: int = 0) -> None:
     """Ringkasan pengaturan aktif, isinya sama dengan banner JobStreet."""
     mode = "otomatis" if config.auto_apply else "manual (tinjau sendiri)"
     batas_harian = kuota.batas()
@@ -1326,7 +1331,6 @@ def tampilkan_konfigurasi_glints() -> None:
         if batas_harian
         else "tanpa batas"
     )
-    batas_sesi = int(getattr(config, "auto_apply_max_per_session", 0) or 0)
     port = int(getattr(config, "chrome_debug_port", 0) or 0)
 
     tabel = Table(title="Pengaturan sesi Glints", show_header=False)
@@ -1336,9 +1340,7 @@ def tampilkan_konfigurasi_glints() -> None:
     kata_kunci = list(config.keywords_riset or [])
     tabel.add_row("Mode lamar", mode)
     tabel.add_row("Kuota lamaran", teks_kuota)
-    tabel.add_row(
-        "Batas per sesi", f"{batas_sesi} lamaran" if batas_sesi else "tanpa batas"
-    )
+    tabel.add_row("Batas per sesi", teks_batas_sesi(batas))
     tabel.add_row(
         "Kata kunci riset",
         f"{len(kata_kunci)} — {', '.join(kata_kunci[:3])}"
@@ -1387,7 +1389,7 @@ def jalankan_glints(max_pages: int = 0, keywords: list[str] | None = None,
         "khusus_aplikasi": 0,
     }
 
-    tampilkan_konfigurasi_glints()
+    tampilkan_konfigurasi_glints(batas)
 
     if not config.auto_apply:
         console.print(
